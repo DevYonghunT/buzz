@@ -152,7 +152,9 @@
 
   body {
     @apply bg-background text-foreground antialiased;
-    font-family: "Inter Variable", Inter, "Avenir Next", "Segoe UI", sans-serif;
+    font-family:
+      "Inter Variable", Inter, Pretendard, "Apple SD Gothic Neo",
+      "Noto Sans KR", "Malgun Gothic", "Avenir Next", "Segoe UI", sans-serif;
   }
 
   /*

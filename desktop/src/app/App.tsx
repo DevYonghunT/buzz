@@ -10,6 +10,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useTranslation } from "react-i18next";
 
 import { router } from "@/app/router";
 import { ThemeGrainientBackground } from "@/app/ThemeGrainientBackground";
@@ -56,8 +57,6 @@ import { BuzzMark } from "@/shared/ui/buzz-logo/BuzzMark";
 import { FlappingBee } from "@/shared/ui/buzz-logo/FlappingBee";
 import { FuzzyLogo } from "@/shared/ui/buzz-logo/FuzzyLogo";
 import { StartupWindowDragRegion } from "@/shared/ui/StartupWindowDragRegion";
-
-const LOADING_TEXT = "Setting up your community...";
 
 // Minimum time the cold-boot splash stays on screen. A real boot resolves the
 // community in well under 100ms, and the native window setup plus first paint
@@ -151,6 +150,8 @@ function BeeLoader({
 // its wings flapping (ported from the Buzz website's wing-flap). Replaces the
 // old "Setting up your community" text, which stays as an sr-only caption.
 function AppLoadingGate() {
+  const { t } = useTranslation();
+
   return (
     <div
       className="buzz-setup-loading-shell flex min-h-dvh flex-col items-center justify-center overflow-hidden px-6 py-10"
@@ -159,7 +160,7 @@ function AppLoadingGate() {
     >
       <StartupWindowDragRegion />
       <ThemeGrainientBackground />
-      <span className="sr-only">{LOADING_TEXT}</span>
+      <span className="sr-only">{t("app.loading.settingUpCommunity")}</span>
       <FlappingBee className="relative z-10 h-auto w-28" />
     </div>
   );
@@ -168,7 +169,9 @@ function AppLoadingGate() {
 // Quiet gate for switching between already-set-up communities: visually empty
 // unless the switch takes long, so fast switches don't flash the boot splash.
 function CommunitySwitchGate() {
+  const { t } = useTranslation();
   const [showSpinner, setShowSpinner] = useState(false);
+  const switchingCommunityText = t("app.loading.switchingCommunity");
 
   useEffect(() => {
     const timer = window.setTimeout(() => setShowSpinner(true), 300);
@@ -182,10 +185,10 @@ function CommunitySwitchGate() {
       role="status"
     >
       <StartupWindowDragRegion />
-      <span className="sr-only">Switching community…</span>
+      <span className="sr-only">{switchingCommunityText}</span>
       {showSpinner ? (
         <BeeLoader
-          ariaLabel="Switching community…"
+          ariaLabel={switchingCommunityText}
           className="h-auto w-20"
           tintClassName="text-muted-foreground"
         />

@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
   Archive,
@@ -68,6 +69,8 @@ import {
   useThemePreviewVars,
   withAccentPreviewVars,
 } from "@/shared/theme/useThemePreviewVars";
+import { APP_LOCALES, type AppLocale } from "@/shared/i18n/locale";
+import { useAppLocale } from "@/shared/i18n/useAppLocale";
 import { ChannelTemplatesSettingsCard } from "./ChannelTemplatesSettingsCard";
 import { DoctorSettingsPanel } from "./DoctorSettingsPanel";
 import { ExperimentalFeaturesCard } from "./ExperimentalFeaturesCard";
@@ -155,80 +158,80 @@ export type SettingsPanelProps = {
 export const settingsSections: SettingsSectionDescriptor[] = [
   {
     value: "appearance",
-    label: "Appearance",
+    label: "settings.sections.appearance",
     icon: MonitorCog,
   },
   {
     value: "profile",
-    label: "Profile",
+    label: "settings.sections.profile",
     icon: UserRound,
   },
   {
     value: "notifications",
-    label: "Notifications",
+    label: "settings.sections.notifications",
     icon: BellRing,
   },
   {
     value: "experimental",
-    label: "Experiments",
+    label: "settings.sections.experimental",
     icon: FlaskConical,
   },
   {
     value: "agents",
-    label: "Agents",
+    label: "settings.sections.agents",
     icon: Bot,
     featureGate: "managed-agents",
   },
   {
     value: "channel-templates",
-    label: "Templates",
+    label: "settings.sections.channelTemplates",
     icon: LayoutTemplate,
     featureGate: "channel-templates",
   },
   {
     value: "compute",
-    label: "Compute",
+    label: "settings.sections.compute",
     icon: Cpu,
   },
   {
     value: "shortcuts",
-    label: "Shortcuts",
+    label: "settings.sections.shortcuts",
     icon: Keyboard,
   },
   {
     value: "hosted-communities",
-    label: "Hosted communities",
+    label: "settings.sections.hostedCommunities",
     icon: MessagesSquare,
   },
   {
     value: "community-members",
-    label: "Community access",
+    label: "settings.sections.communityMembers",
     icon: LockKeyhole,
   },
   {
     value: "moderation",
-    label: "Moderation",
+    label: "settings.sections.moderation",
     icon: ShieldAlert,
   },
   {
     value: "custom-emoji",
-    label: "Custom emoji",
+    label: "settings.sections.customEmoji",
     icon: Smile,
     featureGate: "custom-emoji",
   },
   {
     value: "local-archive",
-    label: "Local archive",
+    label: "settings.sections.localArchive",
     icon: Archive,
   },
   {
     value: "mobile",
-    label: "Mobile",
+    label: "settings.sections.mobile",
     icon: Smartphone,
   },
   {
     value: "updates",
-    label: "Updates",
+    label: "settings.sections.updates",
     icon: Download,
   },
 ];
@@ -410,6 +413,7 @@ const ACCENT_PICKER_TRANSITION = {
 };
 
 function ThemeSettingsCard() {
+  const { t } = useTranslation();
   const {
     setTheme,
     selectedThemeName,
@@ -517,17 +521,29 @@ function ThemeSettingsCard() {
       data-testid="settings-theme"
     >
       <SettingsSectionHeader
-        title="Appearance"
-        description="Choose a theme for Buzz."
+        title={t("appearance.title")}
+        description={t("appearance.description")}
       />
 
       {/* Mode selector: System / Light / Dark */}
       <div className="mb-4 flex gap-2">
         {(
           [
-            { mode: "system" as const, label: "System", Icon: SunMoon },
-            { mode: "light" as const, label: "Light", Icon: Sun },
-            { mode: "dark" as const, label: "Dark", Icon: Moon },
+            {
+              mode: "system" as const,
+              label: t("appearance.mode.system"),
+              Icon: SunMoon,
+            },
+            {
+              mode: "light" as const,
+              label: t("appearance.mode.light"),
+              Icon: Sun,
+            },
+            {
+              mode: "dark" as const,
+              label: t("appearance.mode.dark"),
+              Icon: Moon,
+            },
           ] as const
         ).map(({ mode, label, Icon }) => (
           <button
@@ -648,24 +664,25 @@ function ThemeSettingsCard() {
       )}
 
       <ThreadLayoutSetting />
+      <LanguageSetting />
     </section>
   );
 }
 
 const THREAD_VIEW_MODE_OPTIONS: {
   value: ThreadViewMode;
-  label: string;
-  description: string;
+  labelKey: string;
+  descriptionKey: string;
 }[] = [
   {
     value: "focus",
-    label: "Focus",
-    description: "Threads open over the channel, full width",
+    labelKey: "appearance.threadLayout.focus.label",
+    descriptionKey: "appearance.threadLayout.focus.description",
   },
   {
     value: "split",
-    label: "Split",
-    description: "Threads open in a side panel next to the channel",
+    labelKey: "appearance.threadLayout.split.label",
+    descriptionKey: "appearance.threadLayout.split.description",
   },
 ];
 
@@ -675,6 +692,7 @@ const THREAD_VIEW_MODE_OPTIONS: {
  * carry its own description.
  */
 function ThreadLayoutSetting() {
+  const { t } = useTranslation();
   const threadViewMode = useThreadViewMode();
   const activeOption =
     THREAD_VIEW_MODE_OPTIONS.find(
@@ -685,9 +703,11 @@ function ThreadLayoutSetting() {
     <SettingsOptionGroup className="mt-8">
       <SettingsOptionRow>
         <div className="min-w-0">
-          <p className="text-sm font-medium">Thread layout</p>
+          <p className="text-sm font-medium">
+            {t("appearance.threadLayout.title")}
+          </p>
           <p className="text-sm font-normal text-muted-foreground">
-            {activeOption.description}
+            {t(activeOption.descriptionKey)}
           </p>
         </div>
         <DropdownMenu modal={false}>
@@ -699,7 +719,7 @@ function ThreadLayoutSetting() {
               type="button"
               variant="ghost"
             >
-              <span className="truncate">{activeOption.label}</span>
+              <span className="truncate">{t(activeOption.labelKey)}</span>
               <ChevronDown className="h-4 w-4 text-muted-foreground" />
             </Button>
           </DropdownMenuTrigger>
@@ -717,11 +737,65 @@ function ThreadLayoutSetting() {
                   value={option.value}
                 >
                   <span className="flex min-w-0 flex-col">
-                    <span className="font-medium">{option.label}</span>
+                    <span className="font-medium">{t(option.labelKey)}</span>
                     <span className="text-2xs text-muted-foreground">
-                      {option.description}
+                      {t(option.descriptionKey)}
                     </span>
                   </span>
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </SettingsOptionRow>
+    </SettingsOptionGroup>
+  );
+}
+
+function LanguageSetting() {
+  const { t } = useTranslation();
+  const { locale, setLocale } = useAppLocale();
+
+  return (
+    <SettingsOptionGroup className="mt-4">
+      <SettingsOptionRow>
+        <div className="min-w-0">
+          <p className="text-sm font-medium">
+            {t("appearance.language.title")}
+          </p>
+          <p className="text-sm font-normal text-muted-foreground">
+            {t("appearance.language.description")}
+          </p>
+        </div>
+        <DropdownMenu modal={false}>
+          <DropdownMenuTrigger asChild>
+            <Button
+              className="h-7 min-w-28 justify-between gap-1.5 rounded-full border border-border/50 bg-muted/45 px-2.5 text-xs font-medium text-foreground shadow-none hover:bg-muted/70"
+              data-testid="interface-language-trigger"
+              size="sm"
+              type="button"
+              variant="ghost"
+            >
+              <span className="truncate">
+                {t(`appearance.language.${locale}`)}
+              </span>
+              <ChevronDown className="h-4 w-4 text-muted-foreground" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="min-w-44">
+            <DropdownMenuRadioGroup
+              onValueChange={(nextLocale) =>
+                void setLocale(nextLocale as AppLocale)
+              }
+              value={locale}
+            >
+              {APP_LOCALES.map((option) => (
+                <DropdownMenuRadioItem
+                  data-testid={`interface-language-${option}`}
+                  key={option}
+                  value={option}
+                >
+                  {t(`appearance.language.${option}`)}
                 </DropdownMenuRadioItem>
               ))}
             </DropdownMenuRadioGroup>
@@ -742,9 +816,13 @@ function AccentPickerContent({
   isDark: boolean;
   setAccentColor: (value: string) => void;
 }) {
+  const { t } = useTranslation();
+
   return (
     <div className="shrink-0 px-1 pb-2 pt-1">
-      <h3 className="mb-2 text-sm font-medium">Accent color</h3>
+      <h3 className="mb-2 text-sm font-medium">
+        {t("appearance.accentColor")}
+      </h3>
       <div className="flex flex-wrap gap-2 p-1">
         {ACCENT_COLORS.map((color) => {
           const isNeutral = color.value === NEUTRAL_ACCENT;

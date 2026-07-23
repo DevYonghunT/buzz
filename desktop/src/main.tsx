@@ -1,5 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
+import { I18nextProvider } from "react-i18next";
 import { App } from "@/app/App";
 import { NostrBindConsentDialog } from "@/features/profile/ui/NostrBindConsentDialog";
 import "@fontsource-variable/inter/wght.css";
@@ -8,6 +9,7 @@ import { UpdaterProvider } from "@/features/settings/hooks/UpdaterProvider";
 import { migrateLegacyCommunityStorageBeforeRender } from "@/features/communities/legacyCommunityStorage";
 import { CommunitiesProvider } from "@/features/communities/useCommunities";
 import { CommunityOnboardingProvider } from "@/features/onboarding/communityOnboarding";
+import { i18n } from "@/shared/i18n";
 import { ThemeProvider } from "@/shared/theme/ThemeProvider";
 import { EmojiBurstProvider } from "@/shared/ui/EmojiBurstProvider";
 import { PoofBurstProvider } from "@/shared/ui/PoofBurstProvider";
@@ -72,23 +74,25 @@ function configureDevE2eBridgeFromUrl() {
 function renderApp() {
   ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
     <React.StrictMode>
-      <CommunitiesProvider>
-        <CommunityOnboardingProvider>
-          <ThemeProvider defaultTheme="buzz">
-            <TooltipProvider delayDuration={300}>
-              <EmojiBurstProvider>
-                <PoofBurstProvider>
-                  <UpdaterProvider>
-                    <App />
-                    <NostrBindConsentDialog />
-                  </UpdaterProvider>
-                  <Toaster />
-                </PoofBurstProvider>
-              </EmojiBurstProvider>
-            </TooltipProvider>
-          </ThemeProvider>
-        </CommunityOnboardingProvider>
-      </CommunitiesProvider>
+      <I18nextProvider i18n={i18n}>
+        <CommunitiesProvider>
+          <CommunityOnboardingProvider>
+            <ThemeProvider defaultTheme="buzz">
+              <TooltipProvider delayDuration={300}>
+                <EmojiBurstProvider>
+                  <PoofBurstProvider>
+                    <UpdaterProvider>
+                      <App />
+                      <NostrBindConsentDialog />
+                    </UpdaterProvider>
+                    <Toaster />
+                  </PoofBurstProvider>
+                </EmojiBurstProvider>
+              </TooltipProvider>
+            </ThemeProvider>
+          </CommunityOnboardingProvider>
+        </CommunitiesProvider>
+      </I18nextProvider>
     </React.StrictMode>,
   );
 }
