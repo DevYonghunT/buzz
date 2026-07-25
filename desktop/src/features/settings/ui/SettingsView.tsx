@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { useMyRelayMembershipLookupQuery } from "@/features/community-members/hooks";
 import { shouldWarnMissingMembershipSnapshot } from "@/shared/api/relayMembers";
 import { getFeature } from "@/shared/features/manifest";
+import type { TranslationKey } from "@/shared/i18n";
 import {
   resolveEnabled,
   useFeatureSnapshot,
@@ -47,7 +48,7 @@ type SettingsViewProps = SettingsPanelProps & {
 };
 
 const settingsNavGroups: Array<{
-  labelKey: string;
+  labelKey: TranslationKey;
   sections: SettingsSection[];
 }> = [
   {

@@ -5,6 +5,7 @@ import { i18n } from "@/shared/i18n";
 import {
   type AppLocale,
   FALLBACK_APP_LOCALE,
+  getLocaleStorageFromHost,
   normalizeAppLocale,
   persistAppLocale,
 } from "@/shared/i18n/locale";
@@ -12,7 +13,7 @@ import {
 export async function setAppLocale(locale: AppLocale): Promise<void> {
   persistAppLocale(
     locale,
-    typeof window === "undefined" ? null : window.localStorage,
+    getLocaleStorageFromHost(typeof window === "undefined" ? null : window),
   );
   await i18n.changeLanguage(locale);
 }

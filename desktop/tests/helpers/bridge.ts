@@ -1,4 +1,5 @@
 import type { Page } from "@playwright/test";
+import { LOCALE_STORAGE_KEY } from "../../src/shared/i18n/locale";
 import { FEATURE_OVERRIDES_STORAGE_KEY, PREVIEW_FEATURE_IDS } from "./features";
 
 export const TEST_IDENTITIES = {
@@ -35,6 +36,7 @@ export const TEST_IDENTITIES = {
 } as const;
 
 type BridgeMode = "mock" | "relay";
+export type E2eAppLocale = "en" | "ko";
 
 type MockCommandAvailability = {
   available?: boolean;
@@ -434,6 +436,7 @@ type MockBridgeOptions = {
 };
 
 type BridgeOptions = {
+  appLocale?: E2eAppLocale | null;
   mode: BridgeMode;
   mock?: MockBridgeOptions;
   relayHttpUrl?: string;
@@ -460,6 +463,7 @@ const DEFAULT_MOCK_PUBKEY = "deadbeef".repeat(8);
 const DEFAULT_RELAY_HTTP_URL =
   process.env.BUZZ_E2E_RELAY_URL ?? "http://localhost:3000";
 const DEFAULT_RELAY_WS_URL = DEFAULT_RELAY_HTTP_URL.replace(/^http/, "ws");
+const DEFAULT_E2E_APP_LOCALE: E2eAppLocale = "en";
 
 function cloneEngramEntry(entry: MockEngramEntry): MockEngramEntry {
   return {
@@ -663,12 +667,38 @@ async function seedPreviewFeaturesEnabled(page: Page) {
   );
 }
 
+async function seedAppLocale(
+  page: Page,
+  locale: E2eAppLocale | null,
+): Promise<void> {
+  if (locale === null) {
+    return;
+  }
+
+  await page.addInitScript(
+    ({ key, value }) => {
+      if (window.localStorage.getItem(key) === null) {
+        window.localStorage.setItem(key, value);
+      }
+    },
+    { key: LOCALE_STORAGE_KEY, value: locale },
+  );
+}
+
 export async function installBridge(page: Page, options: BridgeOptions) {
   const identity =
     options.mode === "relay"
       ? TEST_IDENTITIES[options.user ?? "tyler"]
       : undefined;
+  const appLocale =
+    options.appLocale === undefined
+      ? DEFAULT_E2E_APP_LOCALE
+      : options.appLocale;
 
+  // Establish the test's language before any bridge or application bootstrap
+  // script runs. `null` intentionally leaves storage empty so a focused spec
+  // can exercise the product's fresh-install default.
+  await seedAppLocale(page, appLocale);
   // Most specs seed a community so useCommunityInit doesn't show WelcomeSetup.
   // skipOnboardingSeed only controls the onboarding-completion flag.
   // The community is stamped with the active identity's pubkey so the strict
@@ -776,6 +806,7 @@ export async function installMockBridge(
   page: Page,
   mock?: MockBridgeOptions,
   options?: {
+    appLocale?: E2eAppLocale | null;
     relayWsUrl?: string;
     skipOnboardingSeed?: boolean;
     skipCommunitySeed?: boolean;
@@ -783,6 +814,7 @@ export async function installMockBridge(
   },
 ) {
   await installBridge(page, {
+    appLocale: options?.appLocale,
     mode: "mock",
     mock,
     relayWsUrl: options?.relayWsUrl,
@@ -795,9 +827,13 @@ export async function installMockBridge(
 export async function installRelayBridge(
   page: Page,
   user: keyof typeof TEST_IDENTITIES = "tyler",
-  options?: { seedPreviewFeatures?: boolean },
+  options?: {
+    appLocale?: E2eAppLocale | null;
+    seedPreviewFeatures?: boolean;
+  },
 ) {
   await installBridge(page, {
+    appLocale: options?.appLocale,
     mode: "relay",
     user,
     // Thread BUZZ_E2E_RELAY_URL into BOTH transports. The app defaults these to

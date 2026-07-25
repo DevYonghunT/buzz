@@ -15,6 +15,7 @@ test("normalizeAnimatedCount clamps to displayable whole counts", () => {
 
 test("formatAnimatedCount uses stable grouped ASCII digits", () => {
   assert.equal(formatAnimatedCount(1234), "1,234");
+  assert.equal(formatAnimatedCount(1234, "ko"), "1,234");
 });
 
 test("getAnimatedCountSlots right-aligns digits for rollover", () => {

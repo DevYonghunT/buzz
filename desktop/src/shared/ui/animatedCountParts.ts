@@ -1,3 +1,6 @@
+import { formatNumber } from "@/shared/i18n/formatters";
+import type { AppLocale } from "@/shared/i18n/locale";
+
 export type AnimatedCountSlot = {
   current: string;
   isDigit: boolean;
@@ -5,17 +8,18 @@ export type AnimatedCountSlot = {
   previous: string;
 };
 
-const COUNT_FORMATTER = new Intl.NumberFormat("en-US", {
-  maximumFractionDigits: 0,
-});
-
 export function normalizeAnimatedCount(value: number): number {
   if (!Number.isFinite(value)) return 0;
   return Math.max(0, Math.trunc(value));
 }
 
-export function formatAnimatedCount(value: number): string {
-  return COUNT_FORMATTER.format(normalizeAnimatedCount(value));
+export function formatAnimatedCount(
+  value: number,
+  locale: AppLocale = "en",
+): string {
+  return formatNumber(normalizeAnimatedCount(value), locale, {
+    maximumFractionDigits: 0,
+  });
 }
 
 export function isAsciiDigit(value: string): boolean {

@@ -1,3 +1,6 @@
+import type { en } from "@/shared/i18n/locales/en";
+import type { TranslationShape } from "@/shared/i18n/types";
+
 export const ko = {
   app: {
     loading: {
@@ -65,4 +68,4 @@ export const ko = {
       en: "영어",
     },
   },
-} as const;
+} as const satisfies TranslationShape<typeof en>;

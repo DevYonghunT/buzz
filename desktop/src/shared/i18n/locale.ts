@@ -6,15 +6,93 @@ export const DEFAULT_APP_LOCALE: AppLocale = "ko";
 export const FALLBACK_APP_LOCALE: AppLocale = "en";
 export const LOCALE_STORAGE_KEY = "buzz-ui-locale.v1";
 
-type LocaleStorage = Pick<Storage, "getItem" | "setItem">;
+export const APP_LOCALE_FORMAT_TAGS: Record<AppLocale, string> = {
+  en: "en-US",
+  ko: "ko-KR",
+};
+
+const APP_LOCALE_DOCUMENT_TAGS: Record<AppLocale, string> = {
+  en: "en",
+  ko: "ko-KR",
+};
+
+export type LocaleStorage = Pick<Storage, "getItem" | "setItem">;
+
+type LocaleStorageHost = {
+  readonly localStorage: LocaleStorage;
+};
+
+type LocaleNavigator = {
+  readonly language?: string;
+  readonly languages?: readonly string[];
+};
 
 export function normalizeAppLocale(value: unknown): AppLocale | null {
   if (typeof value !== "string") {
     return null;
   }
 
-  const language = value.trim().toLowerCase().split(/[-_]/, 1)[0];
-  return APP_LOCALES.find((locale) => locale === language) ?? null;
+  const candidate = value.trim().replaceAll("_", "-");
+  if (!candidate) {
+    return null;
+  }
+
+  const exactLocale = candidate.toLowerCase();
+  if (exactLocale === "ko" || exactLocale === "en") {
+    return exactLocale;
+  }
+
+  try {
+    const [canonicalLocale] = Intl.getCanonicalLocales(candidate);
+    if (!canonicalLocale) {
+      return null;
+    }
+
+    const language = new Intl.Locale(canonicalLocale).language.toLowerCase();
+    return language === "ko" || language === "en" ? language : null;
+  } catch {
+    return null;
+  }
+}
+
+export function getLocaleStorageFromHost(
+  host: LocaleStorageHost | null | undefined,
+): LocaleStorage | null {
+  if (!host) {
+    return null;
+  }
+
+  try {
+    return host.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+export function readPreferredSystemLocales(
+  localeNavigator: LocaleNavigator | null | undefined,
+): string[] {
+  if (!localeNavigator) {
+    return [];
+  }
+
+  const preferredLocales: string[] = [];
+  try {
+    preferredLocales.push(...(localeNavigator.languages ?? []));
+  } catch {
+    // Some embedded or privacy-restricted webviews block navigator metadata.
+  }
+
+  try {
+    const primaryLocale = localeNavigator.language;
+    if (primaryLocale && !preferredLocales.includes(primaryLocale)) {
+      preferredLocales.push(primaryLocale);
+    }
+  } catch {
+    // Fall through to the product default when no system locale is readable.
+  }
+
+  return preferredLocales;
 }
 
 export function readStoredAppLocale(
@@ -47,8 +125,23 @@ export function persistAppLocale(
   }
 }
 
-export function resolveInitialAppLocale(storedLocale: unknown): AppLocale {
-  return normalizeAppLocale(storedLocale) ?? DEFAULT_APP_LOCALE;
+export function resolveInitialAppLocale(
+  storedLocale: unknown,
+  preferredSystemLocales: readonly unknown[] = [],
+): AppLocale {
+  const normalizedStoredLocale = normalizeAppLocale(storedLocale);
+  if (normalizedStoredLocale) {
+    return normalizedStoredLocale;
+  }
+
+  for (const preferredLocale of preferredSystemLocales) {
+    const normalizedSystemLocale = normalizeAppLocale(preferredLocale);
+    if (normalizedSystemLocale) {
+      return normalizedSystemLocale;
+    }
+  }
+
+  return DEFAULT_APP_LOCALE;
 }
 
 export function getInitialAppLocale(): AppLocale {
@@ -56,11 +149,16 @@ export function getInitialAppLocale(): AppLocale {
     return DEFAULT_APP_LOCALE;
   }
 
-  try {
-    return resolveInitialAppLocale(readStoredAppLocale(window.localStorage));
-  } catch {
-    return DEFAULT_APP_LOCALE;
-  }
+  const storage = getLocaleStorageFromHost(window);
+  const preferredSystemLocales =
+    typeof navigator === "undefined"
+      ? []
+      : readPreferredSystemLocales(navigator);
+
+  return resolveInitialAppLocale(
+    readStoredAppLocale(storage),
+    preferredSystemLocales,
+  );
 }
 
 export function syncDocumentLocale(locale: AppLocale): void {
@@ -68,6 +166,6 @@ export function syncDocumentLocale(locale: AppLocale): void {
     return;
   }
 
-  document.documentElement.lang = locale === "ko" ? "ko-KR" : "en";
+  document.documentElement.lang = APP_LOCALE_DOCUMENT_TAGS[locale];
   document.documentElement.dir = "ltr";
 }

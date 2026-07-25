@@ -7,20 +7,19 @@ import {
   normalizeAppLocale,
   syncDocumentLocale,
 } from "@/shared/i18n/locale";
-import { en } from "@/shared/i18n/locales/en";
-import { ko } from "@/shared/i18n/locales/ko";
+import { APP_I18N_NAMESPACES, appI18nResources } from "@/shared/i18n/resources";
 
 void i18n.use(initReactI18next).init({
+  defaultNS: APP_I18N_NAMESPACES,
   fallbackLng: FALLBACK_APP_LOCALE,
   initAsync: false,
   interpolation: {
     escapeValue: false,
   },
   lng: getInitialAppLocale(),
-  resources: {
-    en: { translation: en },
-    ko: { translation: ko },
-  },
+  ns: APP_I18N_NAMESPACES,
+  nsSeparator: ".",
+  resources: appI18nResources,
   returnNull: false,
   supportedLngs: ["ko", "en"],
 });
@@ -34,3 +33,7 @@ updateDocumentLocale(i18n.resolvedLanguage ?? i18n.language);
 i18n.on("languageChanged", updateDocumentLocale);
 
 export { i18n };
+export type {
+  AppI18nNamespace,
+  TranslationKey,
+} from "@/shared/i18n/resources";

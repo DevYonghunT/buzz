@@ -17,6 +17,9 @@ import {
   type UserProfileLookup,
 } from "@/features/profile/lib/identity";
 import type { Channel, SearchHit, UserSearchResult } from "@/shared/api/types";
+import { formatDateTime } from "@/shared/i18n/formatters";
+import type { AppLocale } from "@/shared/i18n/locale";
+import { useAppLocale } from "@/shared/i18n/useAppLocale";
 import { Badge } from "@/shared/ui/badge";
 import { UserAvatar } from "@/shared/ui/UserAvatar";
 
@@ -189,7 +192,7 @@ function truncateContent(content: string) {
   return `${trimmed.slice(0, 177)}...`;
 }
 
-function formatRelativeTime(unixSeconds: number) {
+function formatRelativeTime(unixSeconds: number, locale: AppLocale) {
   const diff = Math.floor(Date.now() / 1_000) - unixSeconds;
 
   if (diff < 60) {
@@ -204,12 +207,12 @@ function formatRelativeTime(unixSeconds: number) {
     return `${Math.floor(diff / (60 * 60))}h ago`;
   }
 
-  return new Intl.DateTimeFormat("en-US", {
-    month: "short",
+  return formatDateTime(new Date(unixSeconds * 1_000), locale, {
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
-  }).format(new Date(unixSeconds * 1_000));
+    month: "short",
+  });
 }
 
 export function MessageResultBody({
@@ -221,6 +224,7 @@ export function MessageResultBody({
   hit: SearchHit;
   resultProfiles?: UserProfileLookup;
 }) {
+  const { locale } = useAppLocale();
   const authorLabel = resolveUserLabel({
     pubkey: hit.pubkey,
     currentPubkey,
@@ -250,7 +254,7 @@ export function MessageResultBody({
           {authorLabel}
         </span>
         <p className="ml-auto whitespace-nowrap text-xs text-muted-foreground">
-          {formatRelativeTime(hit.createdAt)}
+          {formatRelativeTime(hit.createdAt, locale)}
         </p>
       </div>
       {authorSecondaryLabel ? (

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
@@ -69,6 +69,7 @@ import {
   useThemePreviewVars,
   withAccentPreviewVars,
 } from "@/shared/theme/useThemePreviewVars";
+import type { TranslationKey } from "@/shared/i18n";
 import { APP_LOCALES, type AppLocale } from "@/shared/i18n/locale";
 import { useAppLocale } from "@/shared/i18n/useAppLocale";
 import { ChannelTemplatesSettingsCard } from "./ChannelTemplatesSettingsCard";
@@ -134,7 +135,7 @@ export function isSettingsSection(value: unknown): value is SettingsSection {
 
 export type SettingsSectionDescriptor = {
   value: SettingsSection;
-  label: string;
+  label: TranslationKey;
   icon: LucideIcon;
   /** If set, this section is only visible when the feature is enabled */
   featureGate?: string;
@@ -671,8 +672,8 @@ function ThemeSettingsCard() {
 
 const THREAD_VIEW_MODE_OPTIONS: {
   value: ThreadViewMode;
-  labelKey: string;
-  descriptionKey: string;
+  labelKey: TranslationKey;
+  descriptionKey: TranslationKey;
 }[] = [
   {
     value: "focus",
@@ -752,34 +753,58 @@ function ThreadLayoutSetting() {
   );
 }
 
+const APP_LOCALE_AUTONYMS: Record<
+  AppLocale,
+  { label: string; languageTag: string }
+> = {
+  en: { label: "English", languageTag: "en" },
+  ko: { label: "한국어", languageTag: "ko-KR" },
+};
+
 function LanguageSetting() {
   const { t } = useTranslation();
   const { locale, setLocale } = useAppLocale();
+  const labelId = useId();
+  const descriptionId = useId();
+  const currentValueId = useId();
+  const currentLocale = APP_LOCALE_AUTONYMS[locale];
 
   return (
     <SettingsOptionGroup className="mt-4">
       <SettingsOptionRow>
         <div className="min-w-0">
-          <p className="text-sm font-medium">
+          <p className="text-sm font-medium" id={labelId}>
             {t("appearance.language.title")}
           </p>
-          <p className="text-sm font-normal text-muted-foreground">
+          <p
+            className="text-sm font-normal text-muted-foreground"
+            id={descriptionId}
+          >
             {t("appearance.language.description")}
           </p>
         </div>
         <DropdownMenu modal={false}>
           <DropdownMenuTrigger asChild>
             <Button
+              aria-describedby={descriptionId}
+              aria-labelledby={`${labelId} ${currentValueId}`}
               className="h-7 min-w-28 justify-between gap-1.5 rounded-full border border-border/50 bg-muted/45 px-2.5 text-xs font-medium text-foreground shadow-none hover:bg-muted/70"
               data-testid="interface-language-trigger"
               size="sm"
               type="button"
               variant="ghost"
             >
-              <span className="truncate">
-                {t(`appearance.language.${locale}`)}
+              <span
+                className="truncate"
+                id={currentValueId}
+                lang={currentLocale.languageTag}
+              >
+                {currentLocale.label}
               </span>
-              <ChevronDown className="h-4 w-4 text-muted-foreground" />
+              <ChevronDown
+                aria-hidden="true"
+                className="h-4 w-4 text-muted-foreground"
+              />
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="min-w-44">
@@ -789,15 +814,20 @@ function LanguageSetting() {
               }
               value={locale}
             >
-              {APP_LOCALES.map((option) => (
-                <DropdownMenuRadioItem
-                  data-testid={`interface-language-${option}`}
-                  key={option}
-                  value={option}
-                >
-                  {t(`appearance.language.${option}`)}
-                </DropdownMenuRadioItem>
-              ))}
+              {APP_LOCALES.map((option) => {
+                const optionLocale = APP_LOCALE_AUTONYMS[option];
+                return (
+                  <DropdownMenuRadioItem
+                    data-testid={`interface-language-${option}`}
+                    key={option}
+                    value={option}
+                  >
+                    <span lang={optionLocale.languageTag}>
+                      {optionLocale.label}
+                    </span>
+                  </DropdownMenuRadioItem>
+                );
+              })}
             </DropdownMenuRadioGroup>
           </DropdownMenuContent>
         </DropdownMenu>
