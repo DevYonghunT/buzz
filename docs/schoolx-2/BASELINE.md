@@ -135,10 +135,37 @@ cancelling`도 취소·steering 경합을 다루는 타이밍 의존 테스트�
 
 ### 아직 미검증
 
-| 항목 | 상태 |
+### i18n Playwright smoke
+
+`ab3af828` 병합 이후 상태에서 실제 앱 부팅 순서로 실행했다.
+
+```bash
+pnpm --dir desktop build:e2e                                        # exit 0
+pnpm --dir desktop exec playwright test tests/e2e/i18n.spec.ts --project=smoke
+# 4 passed (16.0s), exit 0
+```
+
+fresh-install `en-US`→영어, 미지원 `ja-JP`→한국어, 한·영 양방향 전환,
+새로고침 후 저장값 유지를 덮는다. missing-key 영어 fallback E2E는 아직
+없으며 Phase 2 잔여 작업이다.
+
+### 라이선스 보존
+
+| 항목 | 결과 |
 |---|---|
-| i18n Playwright smoke | 미검증 — `build:e2e` + smoke project를 이번 수집에서 실행하지 않음 |
-| Apache-2.0 / NOTICE / third-party license 보존 | 미검증 |
+| `LICENSE` | Apache License 2.0. `acfbb1bb` 대비 **변경 없음**(diff 없음) |
+| `NOTICE` | upstream `block/buzz`에 존재하지 않는다. 보존할 대상이 없으므로 Apache-2.0 §4(d)는 해당 없음 |
+| 서드파티 | `cargo-deny check` exit 0 — `advisories ok, bans ok, licenses ok, sources ok` |
+
+`cargo-deny`는 hermit에 포함돼 있어 별도 설치 없이 `. ./bin/activate-hermit`
+후 실행된다. yanked crate 경고(`spin 0.9.8`, mesh-llm 경유)가 있으나 upstream
+에서 넘어온 것이고 deny 정책상 실패가 아니다.
+
+**아직 충족되지 않은 배포 의무가 하나 있다.** Apache-2.0 §4(b)는 수정한
+파일에 변경 사실을 명시하도록 요구한다. SchoolX는 Buzz를 수정해 배포할
+계획이므로, 배포본에 "이 소프트웨어는 block/buzz를 수정한 것"이라는 고지가
+필요하다. 이는 Phase 0의 보존 확인과는 별개이며 Phase 6(패키징)의
+"오픈소스 고지 화면 검증"에서 처리한다.
 
 ## upstream 동기화
 
@@ -287,7 +314,13 @@ export SHERPA_ONNX_ARCHIVE_DIR=<main-checkout>/desktop/src-tauri/target/sherpa-o
 - [x] 모든 결과에 commit, 도구 버전, 시각, exit code가 있다.
 - [x] 기존 실패와 SchoolX 회귀가 분리돼 있다.
 - [x] upstream fetch·merge 또는 rebase 정책과 마지막 확인 SHA가 기록됐다.
-- [ ] i18n Playwright 테스트가 실제 앱 부팅 순서로 실행됐다.
-- [ ] Apache-2.0, NOTICE, third-party license 보존 여부가 확인됐다.
+- [x] i18n Playwright 테스트가 실제 앱 부팅 순서로 실행됐다.
+- [x] Apache-2.0, NOTICE, third-party license 보존 여부가 확인됐다.
 
-6개 중 4개가 충족됐다. 남은 2개가 닫히기 전에는 **Phase 0 미완료**다.
+6개가 모두 충족됐다. **Phase 0 완료.**
+
+Phase 0이 닫혔다는 것은 "원본과 현재를 같은 기준으로 비교할 수 있다"는
+뜻이지 "모든 테스트가 통과한다"는 뜻이 아니다. 위에 기록한 `buzz-agent`
+플래키 3종은 여전히 실패하며, 그것이 기존 실패임을 증명한 것이 이 단계의
+결과물이다. 다음 세션은 `IMPLEMENTATION_HANDOFF.md`의 세션 A(보안·호환성
+계약)로 진행한다.
