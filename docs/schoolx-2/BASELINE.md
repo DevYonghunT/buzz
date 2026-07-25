@@ -138,8 +138,21 @@ cancelling`도 취소·steering 경합을 다루는 타이밍 의존 테스트�
 | 항목 | 상태 |
 |---|---|
 | i18n Playwright smoke | 미검증 — `build:e2e` + smoke project를 이번 수집에서 실행하지 않음 |
-| upstream fetch·merge 정책 | 미결정 — 주기와 rebase/merge 선택이 필요 |
 | Apache-2.0 / NOTICE / third-party license 보존 | 미검증 |
+
+## upstream 동기화
+
+정책은 `DEVELOPMENT_PLAN.md` §10에 있다. 요약하면 **merge**로 받고
+(rebase는 push 전 로컬 브랜치에만), **주 1회 + 각 세션 시작 전**에 한다.
+
+| 항목 | 값 |
+|---|---|
+| 마지막 확인 SHA | `ab3af828714ab699dfc87644d234014987a4fe6b` |
+| 확인 일시 | 2026-07-25 |
+| 받은 커밋 수 | 57 (`acfbb1bb`부터) |
+| 병합 전 SchoolX tip | `14790a94` (`schoolx-pre-upstream-sync-20260725` 브랜치로 보존) |
+
+다음 동기화 때 이 표의 SHA를 갱신한다.
 
 전체 stdout 로그는 세션 로컬 경로에 있었고 repo에 보존하지 않았다. 위
 표의 명령을 그대로 재실행하면 같은 값을 얻는다.
@@ -273,8 +286,8 @@ export SHERPA_ONNX_ARCHIVE_DIR=<main-checkout>/desktop/src-tauri/target/sherpa-o
 - [x] parent와 foundation snapshot에서 필수 비교 명령을 모두 실행했다.
 - [x] 모든 결과에 commit, 도구 버전, 시각, exit code가 있다.
 - [x] 기존 실패와 SchoolX 회귀가 분리돼 있다.
+- [x] upstream fetch·merge 또는 rebase 정책과 마지막 확인 SHA가 기록됐다.
 - [ ] i18n Playwright 테스트가 실제 앱 부팅 순서로 실행됐다.
-- [ ] upstream fetch·merge 또는 rebase 정책과 마지막 확인 SHA가 기록됐다.
 - [ ] Apache-2.0, NOTICE, third-party license 보존 여부가 확인됐다.
 
-6개 중 3개가 충족됐다. 남은 3개가 닫히기 전에는 **Phase 0 미완료**다.
+6개 중 4개가 충족됐다. 남은 2개가 닫히기 전에는 **Phase 0 미완료**다.

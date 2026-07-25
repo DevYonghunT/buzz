@@ -686,6 +686,46 @@ P2 항목은 파일럿 데이터가 Buzz 네이티브 기능의 한계를 보여
 - upstream에도 일반적으로 유용한 개선은 제품 이름 없이 별도 PR로 제안할 수 있다.
 - SchoolX 고유 브랜딩과 기본 업무방은 `DevYonghunT/buzz`에만 유지한다.
 
+### 반영 방식: merge (rebase 아님)
+
+`upstream/main`을 SchoolX 브랜치로 가져올 때는 **merge**를 사용한다.
+
+```bash
+git fetch upstream && git merge upstream/main
+```
+
+rebase는 SchoolX 커밋을 새로 써서 SHA를 바꾸므로, 이미 push된 브랜치에서는
+force push가 필요하다. 공개 fork에서 force push는 원격 역사를 덮어쓰고 이
+문서와 `BASELINE.md`가 참조하는 SHA를 무효화한다. merge는 커밋을 보존하고
+"언제 어디까지 받았는지"를 merge commit에 남기므로 기준선 추적과 맞는다.
+
+rebase는 **아직 push하지 않은 로컬 작업 브랜치**를 정리할 때만 쓴다.
+
+### 주기: 주 1회 + 각 세션 시작 전
+
+upstream은 2026-07-22~24 이틀 동안 57커밋이 들어올 만큼 활발하다. 미룰수록
+겹치는 파일이 누적되고 충돌 원인 추적이 어려워지므로 간격을 짧게 유지한다.
+`IMPLEMENTATION_HANDOFF.md`의 각 세션은 시작 전에 fetch·merge를 먼저 한다.
+
+### 동기화 기록
+
+merge 할 때마다 아래를 남긴다. 마지막 확인 SHA는 `BASELINE.md`에도 적는다.
+
+| 날짜 | upstream SHA | 받은 커밋 수 | 충돌 파일 | 비고 |
+|---|---|---:|---|---|
+| 2026-07-25 | `ab3af828` | 57 | `SettingsPanels.tsx`, `SettingsView.tsx`, `tests/helpers/bridge.ts` | 첫 동기화. upstream #2738이 "커뮤니티 접근" 문구를 "초대"로 바꿔 i18n 카탈로그와 충돌 |
+
+### 충돌 해소 원칙
+
+번역 카탈로그가 걸린 충돌은 한쪽을 고르는 문제가 아니다. upstream이 문구의
+**의미**를 바꾼 경우 i18n 키 사용은 유지하되 카탈로그의 한·영 문구를 새
+의미에 맞춘다. 키를 지우거나 `t()` 호출을 하드코딩 문자열로 되돌리지 않는다.
+
+자동 병합된 파일도 검토 대상이다. 텍스트 충돌이 없다는 것은 git이 같은 줄을
+건드리지 않았다는 뜻일 뿐이며, SchoolX 보안 불변식(관리형 에이전트의
+membership 강제)이 걸린 relay 경로는 upstream이 새 조회 경로를 추가했는지
+매번 확인한다.
+
 권장 브랜치 흐름:
 
 ```text
