@@ -260,6 +260,42 @@ async fn handle_active_audio_connection(
             .await;
         return;
     }
+    let agent_owner = match crate::api::relay_members::resolve_agent_owner(
+        &state,
+        &tenant,
+        &pubkey,
+        auth_tag_json.as_deref(),
+    )
+    .await
+    {
+        Ok(owner) => owner,
+        Err(error) => {
+            warn!(channel_id = %channel_id, pubkey = %pubkey_hex, %error, "audio: agent identity lookup failed");
+            let _ = ws_send
+                .send(WsMessage::Text(
+                    serde_json::json!({"type": "error", "message": "agent identity check failed"})
+                        .to_string()
+                        .into(),
+                ))
+                .await;
+            return;
+        }
+    };
+    if agent_owner.is_some() {
+        warn!(channel_id = %channel_id, pubkey = %pubkey_hex, "audio: managed-agent sessions are not supported");
+        let _ = ws_send
+            .send(WsMessage::Text(
+                serde_json::json!({
+                    "type": "error",
+                    "code": "managed_agent_audio_unsupported",
+                    "message": "managed agents cannot join audio huddles"
+                })
+                .to_string()
+                .into(),
+            ))
+            .await;
+        return;
+    }
 
     // ── Step 3: membership check / auto-add ───────────────────────────────────
     let parent_id_for_event = match ensure_membership(

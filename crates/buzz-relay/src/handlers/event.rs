@@ -24,7 +24,7 @@ use crate::connection::{AuthState, ConnectionState};
 use crate::protocol::RelayMessage;
 use crate::state::AppState;
 
-use super::ingest::{reject_with_transport, IngestAuth, IngestError};
+use super::ingest::{reject_with_transport, IngestAuth, IngestError, PrincipalClass};
 
 /// Increment the rejection counter with a bounded reason label.
 fn reject(reason: &'static str) {
@@ -168,19 +168,26 @@ pub async fn filter_fanout_by_access(
                 .await
         }
     };
-    match visibility {
-        Ok(v) if v != "private" => return matches,
-        Ok(_) => {}
+    let private_channel = match visibility {
+        Ok(v) => v == "private",
         Err(e) => {
             // Fail closed: if we cannot determine visibility, do not leak a
             // possibly-private channel's events.
             warn!(%channel_id, "fan-out access filter: visibility lookup failed: {e}");
             return Vec::new();
         }
-    }
+    };
 
     let mut allowed = Vec::with_capacity(matches.len());
     for (conn_id, sub_id) in matches {
+        // Humans retain Buzz's open-channel semantics. Managed agents always
+        // require active membership, including on open channels, so a broad
+        // subscription cannot turn public discoverability into an implicit
+        // agent authorization grant.
+        if !private_channel && state.conn_manager.is_human_conn(conn_id) {
+            allowed.push((conn_id, sub_id));
+            continue;
+        }
         let Some(pubkey) = state.conn_manager.pubkey_for_conn(conn_id) else {
             continue;
         };
@@ -608,7 +615,7 @@ pub async fn handle_event(event: Event, conn: Arc<ConnectionState>, state: Arc<A
     )
     .increment(1);
 
-    let (conn_id, pubkey_bytes, auth_pubkey, scopes, channel_ids) = {
+    let (conn_id, pubkey_bytes, auth_pubkey, scopes, channel_ids, principal_class) = {
         let auth = conn.auth_state.read().await;
         match &*auth {
             AuthState::Authenticated(ctx) => (
@@ -617,6 +624,7 @@ pub async fn handle_event(event: Event, conn: Arc<ConnectionState>, state: Arc<A
                 ctx.pubkey,
                 ctx.scopes.clone(),
                 ctx.channel_ids.clone(),
+                PrincipalClass::from_agent_owner(ctx.agent_owner_pubkey),
             ),
             _ => {
                 reject("auth");
@@ -688,6 +696,7 @@ pub async fn handle_event(event: Event, conn: Arc<ConnectionState>, state: Arc<A
             &event_id_hex,
             pubkey_bytes,
             auth_pubkey,
+            principal_class.is_managed_agent(),
             conn,
             state,
         )
@@ -699,6 +708,7 @@ pub async fn handle_event(event: Event, conn: Arc<ConnectionState>, state: Arc<A
         pubkey: auth_pubkey,
         scopes,
         channel_ids,
+        principal_class,
         conn_id,
     };
 
@@ -736,12 +746,14 @@ pub async fn handle_event(event: Event, conn: Arc<ConnectionState>, state: Arc<A
 }
 
 /// Handle ephemeral events (kind 20000–29999) — WS-only, never stored.
+#[allow(clippy::too_many_arguments)]
 async fn handle_ephemeral_event(
     event: Event,
     conn_id: uuid::Uuid,
     event_id_hex: &str,
     pubkey_bytes: Vec<u8>,
     auth_pubkey: nostr::PublicKey,
+    is_managed_agent: bool,
     conn: Arc<ConnectionState>,
     state: Arc<AppState>,
 ) {
@@ -772,6 +784,14 @@ async fn handle_ephemeral_event(
     if event_kind_u32(&event) == KIND_PRESENCE_UPDATE {
         // Accept both bare strings ("online") and legacy JSON ({"status":"online"}).
         let raw = event.content.to_string();
+        if is_managed_agent && !matches!(raw.as_str(), "online" | "away" | "offline") {
+            conn.send(RelayMessage::ok(
+                event_id_hex,
+                false,
+                "restricted: managed-agent presence must be online, away, or offline",
+            ));
+            return;
+        }
         let status = if raw.starts_with('{') {
             serde_json::from_str::<serde_json::Value>(&raw)
                 .ok()
@@ -811,6 +831,7 @@ async fn handle_ephemeral_event(
             &state,
             ch_id,
             &pubkey_bytes,
+            is_managed_agent,
             None,
         )
         .await
@@ -841,6 +862,14 @@ async fn handle_ephemeral_event(
         let stored_event = StoredEvent::new(event.clone(), Some(ch_id));
         fan_out_event_to_local_subscribers(&state, conn.tenant.community(), &stored_event).await;
     } else {
+        if is_managed_agent {
+            conn.send(RelayMessage::ok(
+                event_id_hex,
+                false,
+                "restricted: managed agents cannot publish global ephemeral events",
+            ));
+            return;
+        }
         // Channel-less ephemeral events (e.g., NIP-AB pairing kind:24134).
         //
         // Sentinel pattern: we use `Uuid::nil()` (all-zeros UUID) as a
@@ -2111,26 +2140,66 @@ mod tests {
         }
 
         #[tokio::test]
-        async fn open_channel_event_passes_through_unfiltered() {
+        async fn open_channel_event_requires_an_authenticated_principal() {
             let state = test_state().await;
             let channel_id = Uuid::new_v4();
             let community_id = buzz_core::tenant::CommunityId::from_uuid(Uuid::nil());
             state
                 .channel_visibility_cache
                 .insert((community_id, channel_id), "open".to_string());
-            // A connection with no authenticated pubkey would be dropped on a
-            // private channel; on open it must pass untouched.
-            let conn = register_conn(&state, None);
-            let matches = vec![(conn, "s".to_string())];
+            let human = register_conn(&state, Some(vec![1u8; 32]));
+            let unknown = register_conn(&state, None);
             let out = filter_fanout_by_access(
                 &state,
                 community_id,
                 &channel_event(Some(channel_id)),
-                matches.clone(),
+                vec![
+                    (human, "human".to_string()),
+                    (unknown, "unknown".to_string()),
+                ],
                 None,
             )
             .await;
-            assert_eq!(out, matches);
+            assert_eq!(out, vec![(human, "human".to_string())]);
+        }
+
+        #[tokio::test]
+        async fn open_channel_requires_membership_for_agent_connections() {
+            let state = test_state().await;
+            let channel_id = Uuid::new_v4();
+            let community_id = buzz_core::tenant::CommunityId::from_uuid(Uuid::nil());
+            state
+                .channel_visibility_cache
+                .insert((community_id, channel_id), "open".to_string());
+
+            let member_pk = vec![3u8; 32];
+            let non_member_pk = vec![4u8; 32];
+            state
+                .membership_cache
+                .insert((community_id, channel_id, member_pk.clone()), true);
+            state
+                .membership_cache
+                .insert((community_id, channel_id, non_member_pk.clone()), false);
+
+            let member = register_conn(&state, None);
+            state
+                .conn_manager
+                .set_authenticated_principal(member, member_pk, true);
+            let non_member = register_conn(&state, None);
+            state
+                .conn_manager
+                .set_authenticated_principal(non_member, non_member_pk, true);
+
+            let out = filter_fanout_by_access(
+                &state,
+                community_id,
+                &channel_event(Some(channel_id)),
+                vec![(member, "member".into()), (non_member, "non-member".into())],
+                None,
+            )
+            .await;
+
+            assert_eq!(out, vec![(member, "member".into())]);
         }
 
         #[tokio::test]

@@ -1594,6 +1594,17 @@ impl Db {
         channel::get_accessible_channel_ids(&self.pool, community_id, pubkey).await
     }
 
+    /// Get channel IDs where a pubkey has an active membership.
+    ///
+    /// Open channels are not included unless the pubkey is also a member.
+    pub async fn get_member_channel_ids(
+        &self,
+        community_id: CommunityId,
+        pubkey: &[u8],
+    ) -> Result<Vec<Uuid>> {
+        channel::get_member_channel_ids(&self.pool, community_id, pubkey).await
+    }
+
     /// Lists channels, optionally filtered by visibility.
     pub async fn list_channels(
         &self,
@@ -1852,6 +1863,15 @@ impl Db {
         owner_pubkey: &[u8],
     ) -> Result<bool> {
         user::set_agent_owner(&self.pool, community_id, agent_pubkey, owner_pubkey).await
+    }
+
+    /// Tighten a persisted agent's channel-add policy without weakening `nobody`.
+    pub async fn restrict_agent_channel_add_policy(
+        &self,
+        community_id: CommunityId,
+        agent_pubkey: &[u8],
+    ) -> Result<()> {
+        user::restrict_agent_channel_add_policy(&self.pool, community_id, agent_pubkey).await
     }
 
     /// Get the channel_add_policy and agent_owner_pubkey for a user.

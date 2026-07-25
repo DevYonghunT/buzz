@@ -166,6 +166,42 @@ pub mod relay_members {
         }
     }
 
+    /// Resolve whether a principal is a persisted NIP-OA agent.
+    ///
+    /// A caller cannot evade agent restrictions by omitting `x-auth-tag` on a
+    /// later request: after the first verified attestation is materialized, the
+    /// community-scoped user mapping remains authoritative. A newly presented
+    /// valid attestation is materialized before the mapping is returned.
+    ///
+    /// Database and malformed persisted-owner failures are returned to the
+    /// caller so authorization paths can fail closed instead of treating an
+    /// indeterminate principal as a human.
+    pub async fn resolve_agent_owner(
+        state: &AppState,
+        tenant: &TenantContext,
+        agent: &nostr::PublicKey,
+        auth_tag_header: Option<&str>,
+    ) -> Result<Option<nostr::PublicKey>, String> {
+        if let Some(owner) = extract_nip_oa_owner(agent.as_bytes(), auth_tag_header) {
+            if !materialize_nip_oa_owner(state, tenant, agent, &owner).await {
+                return Err("failed to persist verified NIP-OA owner".into());
+            }
+            return Ok(Some(owner));
+        }
+
+        let persisted = state
+            .db
+            .get_agent_channel_policy(tenant.community(), agent.as_bytes())
+            .await
+            .map_err(|error| format!("agent identity lookup failed: {error}"))?;
+        let Some((_, Some(owner_bytes))) = persisted else {
+            return Ok(None);
+        };
+        let owner = nostr::PublicKey::from_slice(&owner_bytes)
+            .map_err(|error| format!("stored agent owner is invalid: {error}"))?;
+        Ok(Some(owner))
+    }
+
     /// Persist a cryptographically verified NIP-OA agent→owner relationship.
     ///
     /// Both principals are ensured first because `agent_owner_pubkey` has a
@@ -198,20 +234,21 @@ pub mod relay_members {
             }
         }
 
-        let materialized = match state
+        let (materialized, newly_materialized) = match state
             .db
             .set_agent_owner(tenant.community(), agent.as_bytes(), owner.as_bytes())
             .await
         {
-            Ok(true) => true,
+            Ok(true) => (true, true),
             Ok(false) => state
                 .db
                 .is_agent_owner(tenant.community(), agent.as_bytes(), owner.as_bytes())
                 .await
-                .unwrap_or(false),
+                .map(|matches| (matches, false))
+                .unwrap_or((false, false)),
             Err(e) => {
                 tracing::warn!(error = %e, "failed to backfill agent_owner_pubkey");
-                false
+                (false, false)
             }
         };
 
@@ -227,6 +264,32 @@ pub mod relay_members {
                 ),
                 true,
             );
+
+            if newly_materialized {
+                // A different transport may have authenticated this key as a
+                // human immediately before its first NIP-OA proof arrived.
+                // Close those stale sessions on every pod; the current auth
+                // attempt is not registered under the pubkey until it succeeds
+                // and will therefore continue normally.
+                state.disconnect_pubkey_clusterwide(
+                    tenant,
+                    agent.as_bytes(),
+                    "0000000000000000000000000000000000000000000000000000000000000000",
+                    "auth-required: managed-agent identity established; reconnect",
+                );
+            }
+
+            if let Err(error) = state
+                .db
+                .restrict_agent_channel_add_policy(tenant.community(), agent.as_bytes())
+                .await
+            {
+                tracing::warn!(
+                    %error,
+                    "failed to restrict persisted agent channel-add policy"
+                );
+                return false;
+            }
         }
         materialized
     }

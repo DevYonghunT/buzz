@@ -54,8 +54,15 @@ struct ConnEntry {
     backpressure_count: Arc<AtomicU8>,
     subscriptions: ConnectionSubscriptions,
     authenticated_pubkey: Arc<std::sync::RwLock<Option<Vec<u8>>>>,
+    /// Server-resolved principal class. `0` is deliberately unknown until
+    /// authentication succeeds; fan-out must never treat that state as human.
+    authenticated_principal: AtomicU8,
     grace_limit: u8,
 }
+
+const PRINCIPAL_UNKNOWN: u8 = 0;
+const PRINCIPAL_HUMAN: u8 = 1;
+const PRINCIPAL_MANAGED_AGENT: u8 = 2;
 
 /// Community-scoped lifecycle registry shared by every long-lived socket type.
 ///
@@ -218,6 +225,7 @@ impl ConnectionManager {
                 backpressure_count,
                 subscriptions,
                 authenticated_pubkey: Arc::new(std::sync::RwLock::new(None)),
+                authenticated_principal: AtomicU8::new(PRINCIPAL_UNKNOWN),
                 grace_limit,
             },
         );
@@ -230,10 +238,32 @@ impl ConnectionManager {
 
     /// Record the authenticated pubkey for a connection after NIP-42 succeeds.
     pub fn set_authenticated_pubkey(&self, conn_id: Uuid, pubkey_bytes: Vec<u8>) {
+        self.set_authenticated_principal(conn_id, pubkey_bytes, false);
+    }
+
+    /// Record the authenticated identity and whether it is a managed agent.
+    ///
+    /// Fan-out uses the agent bit to enforce active membership even for open
+    /// channels. It is set only after NIP-OA verification or a persisted
+    /// agent-owner mapping has been resolved.
+    pub fn set_authenticated_principal(
+        &self,
+        conn_id: Uuid,
+        pubkey_bytes: Vec<u8>,
+        is_agent: bool,
+    ) {
         if let Some(entry) = self.connections.get(&conn_id) {
             if let Ok(mut slot) = entry.authenticated_pubkey.write() {
                 *slot = Some(pubkey_bytes);
             }
+            entry.authenticated_principal.store(
+                if is_agent {
+                    PRINCIPAL_MANAGED_AGENT
+                } else {
+                    PRINCIPAL_HUMAN
+                },
+                Ordering::Release,
+            );
         }
     }
 
@@ -272,6 +302,23 @@ impl ConnectionManager {
         self.connections
             .get(&conn_id)
             .and_then(|entry| entry.authenticated_pubkey.read().ok()?.clone())
+    }
+
+    /// Return whether a connection authenticated as a managed agent.
+    pub fn is_agent_conn(&self, conn_id: Uuid) -> bool {
+        self.connections.get(&conn_id).is_some_and(|entry| {
+            entry.authenticated_principal.load(Ordering::Acquire) == PRINCIPAL_MANAGED_AGENT
+        })
+    }
+
+    /// Return whether a connection completed authentication as a human.
+    ///
+    /// Unknown connections intentionally return false. This keeps an
+    /// unauthenticated socket from inheriting open-channel human semantics.
+    pub fn is_human_conn(&self, conn_id: Uuid) -> bool {
+        self.connections.get(&conn_id).is_some_and(|entry| {
+            entry.authenticated_principal.load(Ordering::Acquire) == PRINCIPAL_HUMAN
+        })
     }
 
     /// Disconnect every live connection authenticated as `pubkey` **in
@@ -493,6 +540,13 @@ pub struct AppState {
     /// Short TTL (10s) — invalidated on membership or channel visibility changes.
     #[allow(clippy::type_complexity)]
     pub accessible_channels_cache: Arc<moka::sync::Cache<(CommunityId, Vec<u8>), Vec<Uuid>>>,
+    /// Active-membership channel IDs cache for restricted principals.
+    ///
+    /// This intentionally excludes merely-open channels. Managed agents use
+    /// this view so explicit membership remains their server-enforced channel
+    /// boundary even when humans may browse an open channel.
+    #[allow(clippy::type_complexity)]
+    pub member_channels_cache: Arc<moka::sync::Cache<(CommunityId, Vec<u8>), Vec<Uuid>>>,
     /// Per-community channel visibility string, used to gate the private-channel fan-out
     /// access check so open channels stay zero-cost. Invalidated on a flip.
     pub channel_visibility_cache: Arc<moka::sync::Cache<(CommunityId, Uuid), String>>,
@@ -697,6 +751,13 @@ impl AppState {
                     .support_invalidation_closures()
                     .build(),
             ),
+            member_channels_cache: Arc::new(
+                moka::sync::Cache::builder()
+                    .max_capacity(10_000)
+                    .time_to_live(std::time::Duration::from_secs(10))
+                    .support_invalidation_closures()
+                    .build(),
+            ),
             channel_visibility_cache: Arc::new(
                 moka::sync::Cache::builder()
                     .max_capacity(10_000)
@@ -816,6 +877,8 @@ impl AppState {
             .invalidate(&(community_id, channel_id, pubkey.to_vec()));
         self.accessible_channels_cache
             .invalidate(&(community_id, pubkey.to_vec()));
+        self.member_channels_cache
+            .invalidate(&(community_id, pubkey.to_vec()));
     }
 
     /// Invalidate all users' accessible-channels cache (e.g. new open channel created).
@@ -838,6 +901,16 @@ impl AppState {
                 "community-scoped accessible-channel invalidation unavailable; falling back to full invalidation"
             );
             self.accessible_channels_cache.invalidate_all();
+        }
+        if let Err(error) = self
+            .member_channels_cache
+            .invalidate_entries_if(move |(entry_community, _), _| *entry_community == community_id)
+        {
+            tracing::error!(
+                ?error,
+                "community-scoped member-channel invalidation unavailable; falling back to full invalidation"
+            );
+            self.member_channels_cache.invalidate_all();
         }
     }
 
@@ -892,6 +965,16 @@ impl AppState {
                 "community-scoped accessible-channel invalidation unavailable; falling back to full invalidation"
             );
             self.accessible_channels_cache.invalidate_all();
+        }
+        if let Err(error) = self
+            .member_channels_cache
+            .invalidate_entries_if(move |(entry_community, _), _| *entry_community == community_id)
+        {
+            tracing::error!(
+                ?error,
+                "community-scoped member-channel invalidation unavailable; falling back to full invalidation"
+            );
+            self.member_channels_cache.invalidate_all();
         }
         if let Err(error) = self
             .channel_visibility_cache
@@ -1048,6 +1131,26 @@ impl AppState {
             .get_accessible_channel_ids(community_id, pubkey)
             .await?;
         self.accessible_channels_cache.insert(key, result.clone());
+        Ok(result)
+    }
+
+    /// Get active-membership channel IDs with a 10-second cache.
+    ///
+    /// Unlike [`Self::get_accessible_channel_ids_cached`], this never grants an
+    /// open channel solely because of its visibility.
+    pub async fn get_member_channel_ids_cached(
+        &self,
+        community_id: CommunityId,
+        pubkey: &[u8],
+    ) -> Result<Vec<Uuid>, buzz_db::DbError> {
+        let key = (community_id, pubkey.to_vec());
+        if let Some(cached) = self.member_channels_cache.get(&key) {
+            metrics::counter!("buzz_member_channels_cache_hits_total").increment(1);
+            return Ok(cached);
+        }
+        metrics::counter!("buzz_member_channels_cache_misses_total").increment(1);
+        let result = self.db.get_member_channel_ids(community_id, pubkey).await?;
+        self.member_channels_cache.insert(key, result.clone());
         Ok(result)
     }
 
@@ -1420,6 +1523,34 @@ mod tests {
         mgr.set_authenticated_pubkey(conn_id, pubkey.clone());
         assert_eq!(mgr.pubkey_for_conn(conn_id), Some(pubkey));
         assert_eq!(mgr.pubkey_for_conn(Uuid::new_v4()), None);
+    }
+
+    #[tokio::test]
+    async fn authenticated_principal_records_agent_classification() {
+        let mgr = ConnectionManager::new();
+        let conn_id = Uuid::new_v4();
+        let (tx, _rx) = mpsc::channel(1);
+        let (ctrl_tx, _ctrl_rx) = mpsc::channel(1);
+        mgr.register(
+            conn_id,
+            tx,
+            ctrl_tx,
+            CancellationToken::new(),
+            buzz_core::tenant::CommunityId::from_uuid(Uuid::nil()),
+            Arc::new(AtomicU8::new(0)),
+            Arc::new(Mutex::new(HashMap::new())),
+            3,
+        );
+
+        assert!(!mgr.is_agent_conn(conn_id));
+        assert!(!mgr.is_human_conn(conn_id));
+        mgr.set_authenticated_principal(conn_id, vec![8u8; 32], true);
+        assert!(mgr.is_agent_conn(conn_id));
+        assert!(!mgr.is_human_conn(conn_id));
+
+        mgr.set_authenticated_pubkey(conn_id, vec![9u8; 32]);
+        assert!(!mgr.is_agent_conn(conn_id));
+        assert!(mgr.is_human_conn(conn_id));
     }
 
     #[tokio::test]

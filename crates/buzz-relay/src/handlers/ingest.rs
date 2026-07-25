@@ -24,12 +24,12 @@ use buzz_core::kind::{
     KIND_IA_UNARCHIVE_REQUEST, KIND_LONG_FORM, KIND_MANAGED_AGENT, KIND_MEMBER_ADDED_NOTIFICATION,
     KIND_MEMBER_REMOVED_NOTIFICATION, KIND_MODERATION_BAN, KIND_MODERATION_RESOLVE_REPORT,
     KIND_MODERATION_TIMEOUT, KIND_MODERATION_UNBAN, KIND_MODERATION_UNTIMEOUT, KIND_MUTE_LIST,
-    KIND_NIP29_CREATE_GROUP, KIND_NIP29_DELETE_EVENT, KIND_NIP29_DELETE_GROUP,
-    KIND_NIP29_EDIT_METADATA, KIND_NIP29_JOIN_REQUEST, KIND_NIP29_LEAVE_REQUEST,
-    KIND_NIP29_PUT_USER, KIND_NIP29_REMOVE_USER, KIND_NIP43_LEAVE_REQUEST,
-    KIND_NIP65_RELAY_LIST_METADATA, KIND_PERSONA, KIND_PIN_LIST, KIND_PRESENCE_UPDATE,
-    KIND_PRODUCT_FEEDBACK, KIND_PROFILE, KIND_REACTION, KIND_READ_STATE, KIND_REPORT,
-    KIND_STREAM_MESSAGE, KIND_STREAM_MESSAGE_BOOKMARKED, KIND_STREAM_MESSAGE_DIFF,
+    KIND_NIP29_CREATE_GROUP, KIND_NIP29_CREATE_INVITE, KIND_NIP29_DELETE_EVENT,
+    KIND_NIP29_DELETE_GROUP, KIND_NIP29_EDIT_METADATA, KIND_NIP29_JOIN_REQUEST,
+    KIND_NIP29_LEAVE_REQUEST, KIND_NIP29_PUT_USER, KIND_NIP29_REMOVE_USER,
+    KIND_NIP43_LEAVE_REQUEST, KIND_NIP65_RELAY_LIST_METADATA, KIND_PERSONA, KIND_PIN_LIST,
+    KIND_PRESENCE_UPDATE, KIND_PRODUCT_FEEDBACK, KIND_PROFILE, KIND_REACTION, KIND_READ_STATE,
+    KIND_REPORT, KIND_STREAM_MESSAGE, KIND_STREAM_MESSAGE_BOOKMARKED, KIND_STREAM_MESSAGE_DIFF,
     KIND_STREAM_MESSAGE_EDIT, KIND_STREAM_MESSAGE_PINNED, KIND_STREAM_MESSAGE_SCHEDULED,
     KIND_STREAM_MESSAGE_V2, KIND_STREAM_REMINDER, KIND_TEAM, KIND_TEXT_NOTE, KIND_USER_STATUS,
     KIND_WORKFLOW_DEF, KIND_WORKFLOW_TRIGGER, RELAY_ADMIN_ADD_MEMBER, RELAY_ADMIN_CHANGE_ROLE,
@@ -58,6 +58,38 @@ pub enum HttpAuthMethod {
     DevPubkey,
 }
 
+/// Server-resolved class of the authenticated principal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PrincipalClass {
+    /// Ordinary user identity with Buzz's normal open-channel semantics.
+    Human,
+    /// Persisted or freshly verified NIP-OA managed agent.
+    ManagedAgent {
+        /// Owner proven by the NIP-OA relationship.
+        owner_pubkey: nostr::PublicKey,
+    },
+}
+
+impl PrincipalClass {
+    /// Build a principal class from a verified or persisted agent owner.
+    pub fn from_agent_owner(owner: Option<nostr::PublicKey>) -> Self {
+        match owner {
+            Some(owner_pubkey) => Self::ManagedAgent { owner_pubkey },
+            None => Self::Human,
+        }
+    }
+
+    /// Whether this principal is a managed agent.
+    pub const fn is_managed_agent(&self) -> bool {
+        matches!(self, Self::ManagedAgent { .. })
+    }
+
+    /// Whether open visibility is insufficient without active membership.
+    pub const fn requires_explicit_channel_membership(&self) -> bool {
+        self.is_managed_agent()
+    }
+}
+
 /// Authentication context for event ingestion — transport-neutral.
 #[derive(Debug, Clone)]
 pub enum IngestAuth {
@@ -69,6 +101,8 @@ pub enum IngestAuth {
         scopes: Vec<Scope>,
         /// Token-level channel restriction, if the WebSocket auth used an API token.
         channel_ids: Option<Vec<Uuid>>,
+        /// Server-resolved principal class.
+        principal_class: PrincipalClass,
         /// WebSocket connection identifier.
         conn_id: Uuid,
     },
@@ -78,6 +112,8 @@ pub enum IngestAuth {
         pubkey: nostr::PublicKey,
         /// Permission scopes granted to this request.
         scopes: Vec<Scope>,
+        /// Server-resolved principal class.
+        principal_class: PrincipalClass,
         /// How the HTTP request was authenticated.
         auth_method: HttpAuthMethod,
     },
@@ -121,6 +157,18 @@ impl IngestAuth {
                 ..
             } => Some(ids),
             _ => None,
+        }
+    }
+
+    /// Server-resolved principal class.
+    pub fn principal_class(&self) -> &PrincipalClass {
+        match self {
+            Self::Nip42 {
+                principal_class, ..
+            }
+            | Self::Http {
+                principal_class, ..
+            } => principal_class,
         }
     }
 
@@ -495,6 +543,7 @@ pub(crate) async fn check_channel_membership(
     state: &AppState,
     ch_id: Uuid,
     pubkey_bytes: &[u8],
+    membership_only: bool,
     channel: Option<&buzz_db::channel::ChannelRecord>,
 ) -> Result<(), String> {
     match state
@@ -505,7 +554,11 @@ pub(crate) async fn check_channel_membership(
         Ok(false) => {}
         Err(e) => return Err(format!("error: database error: {e}")),
     }
-    // Not a member — check if channel is open.
+    if membership_only {
+        return Err("restricted: explicit channel membership required".to_string());
+    }
+
+    // Human principal is not a member — check if channel is open.
     let is_open = match channel {
         Some(ch) => ch.visibility == "open",
         None => state
@@ -520,6 +573,84 @@ pub(crate) async fn check_channel_membership(
     } else {
         Err("restricted: not a channel member".to_string())
     }
+}
+
+/// Whether a kind's own authorization replaces the generic membership check.
+///
+/// The owner-of-agent exceptions for edit/admin kinds are human delegation
+/// rules. A restricted NIP-OA principal must first be an active member, so it
+/// cannot use those special validators (or open visibility) to widen its own
+/// channel access.
+fn skips_generic_membership(kind: u32, membership_only: bool) -> bool {
+    if kind == KIND_NIP29_CREATE_GROUP {
+        return true;
+    }
+    if membership_only {
+        return false;
+    }
+    matches!(
+        kind,
+        KIND_NIP29_JOIN_REQUEST
+            | KIND_STREAM_MESSAGE_EDIT
+            | KIND_NIP29_EDIT_METADATA
+            | KIND_NIP29_DELETE_EVENT
+            | KIND_NIP29_DELETE_GROUP
+    )
+}
+
+/// NIP-29 mutations that a membership-restricted agent cannot perform.
+///
+/// These operations either widen channel access or mutate channel-level
+/// administration. Restricted agents may use kind 9022 to reduce their own
+/// access, but any future administrative capability must be explicit rather
+/// than inferred from membership.
+fn restricted_agent_channel_admin_kind(kind: u32) -> bool {
+    matches!(
+        kind,
+        KIND_NIP29_PUT_USER
+            | KIND_NIP29_REMOVE_USER
+            | KIND_NIP29_EDIT_METADATA
+            | KIND_NIP29_DELETE_EVENT
+            | KIND_NIP29_CREATE_GROUP
+            | KIND_NIP29_DELETE_GROUP
+            | KIND_NIP29_CREATE_INVITE
+            | KIND_NIP29_JOIN_REQUEST
+    )
+}
+
+fn agent_profile_requests_open_channel_add_policy(event: &Event) -> bool {
+    serde_json::from_str::<serde_json::Value>(&event.content)
+        .ok()
+        .and_then(|content| {
+            content
+                .get("channel_add_policy")
+                .and_then(|value| value.as_str())
+                .map(str::to_owned)
+        })
+        .is_some_and(|policy| policy == "anyone")
+}
+
+/// Global writes that a managed agent needs for its own bounded operation.
+///
+/// General-purpose public content is deliberately absent: otherwise an agent
+/// with access to a private channel could copy that content into kind 1,
+/// long-form notes, gift wraps, or another channel-less envelope. Kinds in
+/// this list are either identity/configuration records, encrypted owner/self
+/// state, private moderation reports, or access-reducing leave/archive
+/// requests.
+fn managed_agent_global_write_allowed(kind: u32) -> bool {
+    matches!(
+        kind,
+        KIND_PROFILE
+            | KIND_AGENT_PROFILE
+            | KIND_AGENT_ENGRAM
+            | KIND_AGENT_TURN_METRIC
+            | KIND_EVENT_REMINDER
+            | KIND_REPORT
+            | KIND_NIP29_LEAVE_REQUEST
+            | KIND_NIP43_LEAVE_REQUEST
+            | KIND_IA_ARCHIVE_REQUEST
+    )
 }
 
 fn check_token_channel_access(auth: &IngestAuth, channel_id: Uuid) -> Result<(), String> {
@@ -1528,6 +1659,19 @@ async fn ingest_event_inner(
             required
         )));
     }
+    if auth.principal_class().is_managed_agent() && restricted_agent_channel_admin_kind(kind_u32) {
+        return Err(IngestError::AuthFailed(
+            "restricted: managed agents cannot administer channel membership or metadata".into(),
+        ));
+    }
+    if auth.principal_class().is_managed_agent()
+        && kind_u32 == KIND_AGENT_PROFILE
+        && agent_profile_requests_open_channel_add_policy(&event)
+    {
+        return Err(IngestError::AuthFailed(
+            "restricted: managed agents cannot allow arbitrary channel additions".into(),
+        ));
+    }
 
     // Command kinds are routed AFTER signature verification, timestamp check,
     // pubkey/auth match, and scope validation — never before.
@@ -1710,6 +1854,15 @@ async fn ingest_event_inner(
         channel_id = None;
     }
 
+    if channel_id.is_none()
+        && auth.principal_class().is_managed_agent()
+        && !managed_agent_global_write_allowed(kind_u32)
+    {
+        return Err(IngestError::AuthFailed(
+            "restricted: managed-agent content must use an explicitly authorized channel".into(),
+        ));
+    }
+
     if requires_h_channel_scope(kind_u32) && channel_id.is_none() {
         return Err(IngestError::Rejected(
             "invalid: channel-scoped events must include an h tag".into(),
@@ -1767,12 +1920,11 @@ async fn ingest_event_inner(
         // member/open gate here lets the owning human act on private agent channels
         // without being a member (OQ1 decision; see validate_edit_ownership /
         // validate_admin_event for per-kind enforcement).
-        let skip_membership = kind_u32 == KIND_NIP29_JOIN_REQUEST
-            || kind_u32 == KIND_NIP29_CREATE_GROUP
-            || kind_u32 == KIND_STREAM_MESSAGE_EDIT
-            || kind_u32 == KIND_NIP29_EDIT_METADATA
-            || kind_u32 == KIND_NIP29_DELETE_EVENT
-            || kind_u32 == KIND_NIP29_DELETE_GROUP;
+        let skip_membership = skips_generic_membership(
+            kind_u32,
+            auth.principal_class()
+                .requires_explicit_channel_membership(),
+        );
         if !skip_membership {
             // Spec AuthCheck (line 794): emit the verdict at the actual
             // call site. claimed_community comes from the event's h tag
@@ -1782,9 +1934,16 @@ async fn ingest_event_inner(
             // at `check_channel_membership`'s `is_member_cached(tenant
             // .community(), …)` call (see crates/buzz-relay/src/handlers
             // /ingest.rs:424).
-            let auth_result =
-                check_channel_membership(tenant, state, ch_id, &pubkey_bytes, channel_row.as_ref())
-                    .await;
+            let auth_result = check_channel_membership(
+                tenant,
+                state,
+                ch_id,
+                &pubkey_bytes,
+                auth.principal_class()
+                    .requires_explicit_channel_membership(),
+                channel_row.as_ref(),
+            )
+            .await;
             let claimed = claimed_community_from_event(&event);
             let verdict = if auth_result.is_ok() {
                 Verdict::Allow
@@ -2127,6 +2286,11 @@ async fn ingest_event_inner(
     }
 
     if kind_u32 == KIND_NIP29_JOIN_REQUEST {
+        if auth.principal_class().is_managed_agent() {
+            return Err(IngestError::Rejected(
+                "restricted: managed agents require an explicit channel invite".into(),
+            ));
+        }
         // A join without an h-tag is meaningless — reject early.
         if channel_id.is_none() {
             return Err(IngestError::Rejected(
@@ -2536,6 +2700,7 @@ mod tests {
         let auth = IngestAuth::Http {
             pubkey: keys.public_key(),
             scopes: vec![Scope::MessagesWrite],
+            principal_class: PrincipalClass::Human,
             auth_method: HttpAuthMethod::Nip98,
         };
         let tracer = Arc::new(VecTracer::default());
@@ -2939,6 +3104,7 @@ mod tests {
             pubkey: principal.public_key(),
             scopes: vec![],
             channel_ids: None,
+            principal_class: PrincipalClass::Human,
             conn_id: Uuid::new_v4(),
         };
 
@@ -2956,6 +3122,7 @@ mod tests {
         let http_auth = IngestAuth::Http {
             pubkey: keys.public_key(),
             scopes: vec![],
+            principal_class: PrincipalClass::Human,
             auth_method: HttpAuthMethod::Nip98,
         };
         assert!(
@@ -2972,12 +3139,110 @@ mod tests {
             pubkey: keys.public_key(),
             scopes: vec![],
             channel_ids: None,
+            principal_class: PrincipalClass::Human,
             conn_id: uuid::Uuid::new_v4(),
         };
         assert!(
             !ws_auth.is_http(),
             "Nip42 variant should return false for is_http()"
         );
+    }
+
+    #[test]
+    fn restricted_agents_cannot_skip_membership_for_join_edit_or_admin_kinds() {
+        for kind in [
+            KIND_NIP29_JOIN_REQUEST,
+            KIND_STREAM_MESSAGE_EDIT,
+            KIND_NIP29_EDIT_METADATA,
+            KIND_NIP29_DELETE_EVENT,
+            KIND_NIP29_DELETE_GROUP,
+        ] {
+            assert!(
+                !skips_generic_membership(kind, true),
+                "restricted agent kind {kind} must pass the membership gate"
+            );
+            assert!(
+                skips_generic_membership(kind, false),
+                "human kind {kind} must retain its per-kind authorization path"
+            );
+        }
+    }
+
+    #[test]
+    fn create_group_remains_a_pre_channel_membership_case() {
+        assert!(skips_generic_membership(KIND_NIP29_CREATE_GROUP, false));
+        assert!(skips_generic_membership(KIND_NIP29_CREATE_GROUP, true));
+    }
+
+    #[test]
+    fn restricted_agent_admin_kinds_fail_closed_but_leave_is_allowed() {
+        for kind in [
+            KIND_NIP29_PUT_USER,
+            KIND_NIP29_REMOVE_USER,
+            KIND_NIP29_EDIT_METADATA,
+            KIND_NIP29_DELETE_EVENT,
+            KIND_NIP29_CREATE_GROUP,
+            KIND_NIP29_DELETE_GROUP,
+            KIND_NIP29_CREATE_INVITE,
+            KIND_NIP29_JOIN_REQUEST,
+        ] {
+            assert!(
+                restricted_agent_channel_admin_kind(kind),
+                "kind {kind} must require a future explicit agent capability"
+            );
+        }
+        assert!(!restricted_agent_channel_admin_kind(
+            KIND_NIP29_LEAVE_REQUEST
+        ));
+        assert!(!restricted_agent_channel_admin_kind(
+            KIND_STREAM_MESSAGE_EDIT
+        ));
+    }
+
+    #[test]
+    fn restricted_agent_profile_cannot_restore_anyone_channel_add_policy() {
+        let anyone = make_event_with_tags(
+            KIND_AGENT_PROFILE,
+            r#"{"channel_add_policy":"anyone"}"#,
+            &[],
+        );
+        let owner_only = make_event_with_tags(
+            KIND_AGENT_PROFILE,
+            r#"{"channel_add_policy":"owner_only"}"#,
+            &[],
+        );
+        assert!(agent_profile_requests_open_channel_add_policy(&anyone));
+        assert!(!agent_profile_requests_open_channel_add_policy(&owner_only));
+    }
+
+    #[test]
+    fn managed_agent_global_write_allowlist_excludes_general_content() {
+        for kind in [
+            KIND_PROFILE,
+            KIND_AGENT_PROFILE,
+            KIND_AGENT_ENGRAM,
+            KIND_AGENT_TURN_METRIC,
+            KIND_EVENT_REMINDER,
+            KIND_REPORT,
+            KIND_NIP43_LEAVE_REQUEST,
+            KIND_IA_ARCHIVE_REQUEST,
+        ] {
+            assert!(
+                managed_agent_global_write_allowed(kind),
+                "operational kind {kind} should remain available"
+            );
+        }
+        for kind in [
+            KIND_TEXT_NOTE,
+            KIND_LONG_FORM,
+            KIND_GIFT_WRAP,
+            KIND_PRODUCT_FEEDBACK,
+        ] {
+            assert!(
+                !managed_agent_global_write_allowed(kind),
+                "general content kind {kind} could bypass channel audience"
+            );
+        }
     }
 
     #[test]

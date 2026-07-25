@@ -33,12 +33,14 @@ pub async fn handle_count(
     state: Arc<AppState>,
 ) {
     // Require auth
-    let (pubkey_bytes, token_channel_ids) = {
+    let (pubkey_bytes, token_channel_ids, membership_only) = {
         let auth = conn.auth_state.read().await;
         match &*auth {
-            AuthState::Authenticated(ctx) => {
-                (ctx.pubkey.to_bytes().to_vec(), ctx.channel_ids.clone())
-            }
+            AuthState::Authenticated(ctx) => (
+                ctx.pubkey.to_bytes().to_vec(),
+                ctx.channel_ids.clone(),
+                ctx.agent_owner_pubkey.is_some(),
+            ),
             _ => {
                 conn.send(RelayMessage::closed(
                     &sub_id,
@@ -75,10 +77,16 @@ pub async fn handle_count(
     }
 
     // Get channels this user can access — same enforcement as WS REQ handler.
-    let mut accessible_channels = match state
-        .get_accessible_channel_ids_cached(conn.tenant.community(), &pubkey_bytes)
-        .await
-    {
+    let channel_lookup = if membership_only {
+        state
+            .get_member_channel_ids_cached(conn.tenant.community(), &pubkey_bytes)
+            .await
+    } else {
+        state
+            .get_accessible_channel_ids_cached(conn.tenant.community(), &pubkey_bytes)
+            .await
+    };
+    let mut accessible_channels = match channel_lookup {
         Ok(ids) => ids,
         Err(e) => {
             warn!(sub_id = %sub_id, "Failed to get accessible channels: {e}");

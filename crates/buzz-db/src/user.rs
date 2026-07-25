@@ -297,7 +297,18 @@ pub async fn set_agent_owner(
     // Conditional UPDATE: only set owner if currently NULL. This makes
     // "first mint wins" atomic — no TOCTOU race between concurrent mints.
     let result = sqlx::query(
-        r#"UPDATE users SET agent_owner_pubkey = $1 WHERE community_id = $2 AND pubkey = $3 AND agent_owner_pubkey IS NULL"#,
+        r#"
+        UPDATE users
+        SET agent_owner_pubkey = $1,
+            channel_add_policy = CASE
+                WHEN channel_add_policy = 'anyone'::channel_add_policy
+                    THEN 'owner_only'::channel_add_policy
+                ELSE channel_add_policy
+            END
+        WHERE community_id = $2
+          AND pubkey = $3
+          AND agent_owner_pubkey IS NULL
+        "#,
     )
     .bind(owner_pubkey)
     .bind(community_id.as_uuid())
@@ -322,6 +333,33 @@ pub async fn set_agent_owner(
         return Ok(false);
     }
     Ok(true)
+}
+
+/// Tighten a persisted agent's channel-add policy from `anyone` to `owner_only`.
+///
+/// Existing `nobody` and `owner_only` choices are preserved. The update applies
+/// only after `agent_owner_pubkey` is present so an ordinary human user cannot
+/// be reclassified by this helper.
+pub async fn restrict_agent_channel_add_policy(
+    pool: &PgPool,
+    community_id: CommunityId,
+    agent_pubkey: &[u8],
+) -> Result<()> {
+    sqlx::query(
+        r#"
+        UPDATE users
+        SET channel_add_policy = 'owner_only'::channel_add_policy
+        WHERE community_id = $1
+          AND pubkey = $2
+          AND agent_owner_pubkey IS NOT NULL
+          AND channel_add_policy = 'anyone'::channel_add_policy
+        "#,
+    )
+    .bind(community_id.as_uuid())
+    .bind(agent_pubkey)
+    .execute(pool)
+    .await?;
+    Ok(())
 }
 
 /// Get the channel_add_policy and agent_owner_pubkey for a user.
@@ -429,8 +467,7 @@ mod tests {
         CommunityId::from_uuid(id)
     }
 
-    /// Setting an agent owner then reading back the policy should return
-    /// the default "anyone" policy and the owner pubkey.
+    /// Setting an agent owner atomically tightens the default add policy.
     #[tokio::test]
     #[ignore = "requires Postgres"]
     async fn test_set_agent_owner_and_get_policy() {
@@ -456,7 +493,10 @@ mod tests {
             .expect("get_agent_channel_policy");
 
         let (policy, owner) = result.expect("should return Some for known pubkey");
-        assert_eq!(policy, "anyone", "default policy should be 'anyone'");
+        assert_eq!(
+            policy, "owner_only",
+            "managed-agent policy should be tightened atomically"
+        );
         assert_eq!(
             owner,
             Some(owner_pk),

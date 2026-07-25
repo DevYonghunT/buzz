@@ -47,7 +47,7 @@ pub async fn handle_req(
     conn: Arc<ConnectionState>,
     state: Arc<AppState>,
 ) {
-    let (conn_id, pubkey_bytes, token_channel_ids) = {
+    let (conn_id, pubkey_bytes, token_channel_ids, membership_only) = {
         let auth = conn.auth_state.read().await;
         match &*auth {
             AuthState::Authenticated(ctx) => {
@@ -71,7 +71,12 @@ pub async fn handle_req(
                     return;
                 }
 
-                (conn.conn_id, pk_bytes, ctx.channel_ids.clone())
+                (
+                    conn.conn_id,
+                    pk_bytes,
+                    ctx.channel_ids.clone(),
+                    ctx.agent_owner_pubkey.is_some(),
+                )
             }
             _ => {
                 conn.send(RelayMessage::notice(
@@ -91,10 +96,16 @@ pub async fn handle_req(
             .increment(1);
         Vec::new()
     } else {
-        match state
-            .get_accessible_channel_ids_cached(conn.tenant.community(), &pubkey_bytes)
-            .await
-        {
+        let lookup = if membership_only {
+            state
+                .get_member_channel_ids_cached(conn.tenant.community(), &pubkey_bytes)
+                .await
+        } else {
+            state
+                .get_accessible_channel_ids_cached(conn.tenant.community(), &pubkey_bytes)
+                .await
+        };
+        match lookup {
             Ok(ids) => ids,
             Err(e) => {
                 warn!(conn_id = %conn_id, "Failed to get accessible channels: {e}");

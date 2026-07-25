@@ -91,6 +91,40 @@ pub async fn handle_auth(event: nostr::Event, conn: Arc<ConnectionState>, state:
         Ok(mut auth_ctx) => {
             let pubkey = auth_ctx.pubkey;
 
+            // Resolve persisted NIP-OA identity before any owner-cascading
+            // policy. This also covers an agent that omits the auth tag after
+            // its first verified session.
+            auth_ctx.agent_owner_pubkey = match crate::api::relay_members::resolve_agent_owner(
+                &state,
+                &conn.tenant,
+                &pubkey,
+                auth_tag_json.as_deref(),
+            )
+            .await
+            {
+                Ok(owner) => owner,
+                Err(error) => {
+                    metrics::counter!(
+                        "buzz_auth_failures_total",
+                        "reason" => "agent_identity_error"
+                    )
+                    .increment(1);
+                    *conn.auth_state.write().await = AuthState::Failed;
+                    warn!(
+                        conn_id = %conn_id,
+                        principal = %pubkey.to_hex(),
+                        error = %error,
+                        "agent identity could not be resolved; denying"
+                    );
+                    conn.send(RelayMessage::ok(
+                        &event_id_hex,
+                        false,
+                        "error: agent identity check failed",
+                    ));
+                    return;
+                }
+            };
+
             // Community ban gate (NIP-42 seam). Runs immediately after auth
             // verification succeeds and before the allowlist and relay-membership
             // gates, per COMMUNITY_MODERATION_PLAN.md §0 decision 4 and the
@@ -100,9 +134,8 @@ pub async fn handle_auth(event: nostr::Event, conn: Arc<ConnectionState>, state:
             // dropped with zero further processing.
             //
             // NIP-OA cascade: a ban on the authenticated pubkey blocks it directly;
-            // a ban on its cryptographically-proven owner cascades to the agent
-            // (owner ban ⇒ agents banned; agent ban is agent-only). The owner is
-            // extracted from the self-proving auth tag with no DB round-trip.
+            // a ban on its verified or persisted owner cascades to the agent
+            // (owner ban ⇒ agents banned; agent ban is agent-only).
             {
                 // Fail closed on a DB error, but distinguish it from a real ban:
                 // a transient blip must deny (never let a banned principal
@@ -130,14 +163,11 @@ pub async fn handle_auth(event: nostr::Event, conn: Arc<ConnectionState>, state:
                     }
                 };
 
-                // Cascade: check the proven NIP-OA owner only if the agent itself
+                // Cascade: check the resolved NIP-OA owner only if the agent itself
                 // is clear (a DB error already denies; a direct ban already blocks
                 // — both skip the needless second DB read).
                 if matches!(outcome, BanOutcome::Clear) {
-                    if let Some(owner) = crate::api::relay_members::extract_nip_oa_owner(
-                        pubkey.as_bytes(),
-                        auth_tag_json.as_deref(),
-                    ) {
+                    if let Some(owner) = auth_ctx.agent_owner_pubkey.as_ref() {
                         outcome = match state
                             .db
                             .moderation_restriction_state(conn.tenant.community(), owner.as_bytes())
@@ -214,7 +244,7 @@ pub async fn handle_auth(event: nostr::Event, conn: Arc<ConnectionState>, state:
             }
 
             // Relay membership gate — uses the shared helper with NIP-OA fallback.
-            let nip_oa_owner = match crate::api::relay_members::enforce_relay_membership(
+            match crate::api::relay_members::enforce_relay_membership(
                 &state,
                 conn.tenant.community(),
                 pubkey.as_bytes(),
@@ -222,7 +252,7 @@ pub async fn handle_auth(event: nostr::Event, conn: Arc<ConnectionState>, state:
             )
             .await
             {
-                Ok(owner) => owner,
+                Ok(_) => {}
                 Err(e) => {
                     warn!(conn_id = %conn_id, pubkey = %pubkey.to_hex(), error = ?e, "not a relay member");
                     metrics::counter!("buzz_auth_failures_total", "reason" => "not_relay_member")
@@ -235,50 +265,16 @@ pub async fn handle_auth(event: nostr::Event, conn: Arc<ConnectionState>, state:
                     ));
                     return;
                 }
-            };
-
-            // Open relay NIP-OA backfill: extract owner for agent→owner DB mapping
-            // (needed for observer frame auth). Only runs on open relays — on closed
-            // relays, enforce_relay_membership already handles NIP-OA delegation.
-            // No feature flag needed: NIP-OA is cryptographically self-proving.
-            let nip_oa_owner = nip_oa_owner.or_else(|| {
-                if !state.config.require_relay_membership && auth_tag_json.is_some() {
-                    crate::api::relay_members::extract_nip_oa_owner(
-                        pubkey.as_bytes(),
-                        auth_tag_json.as_deref(),
-                    )
-                } else {
-                    None
-                }
-            });
-
-            // Stash NIP-OA owner on the auth context only after the shared
-            // backfill confirms the first-write-wins relationship.
-            if let Some(owner) = nip_oa_owner {
-                if crate::api::relay_members::materialize_nip_oa_owner(
-                    &state,
-                    &conn.tenant,
-                    &pubkey,
-                    &owner,
-                )
-                .await
-                {
-                    auth_ctx.agent_owner_pubkey = Some(owner);
-                } else {
-                    warn!(
-                        conn_id = %conn_id,
-                        agent = %pubkey.to_hex(),
-                        nip_oa_owner = %owner.to_hex(),
-                        "NIP-OA owner could not be materialized"
-                    );
-                }
             }
 
             info!(conn_id = %conn_id, pubkey = %pubkey.to_hex(), "NIP-42 auth successful");
+            let is_agent = auth_ctx.agent_owner_pubkey.is_some();
             *conn.auth_state.write().await = AuthState::Authenticated(auth_ctx);
-            state
-                .conn_manager
-                .set_authenticated_pubkey(conn_id, pubkey.to_bytes().to_vec());
+            state.conn_manager.set_authenticated_principal(
+                conn_id,
+                pubkey.to_bytes().to_vec(),
+                is_agent,
+            );
             conn.send(RelayMessage::ok(&event_id_hex, true, ""));
         }
         Err(e) => {

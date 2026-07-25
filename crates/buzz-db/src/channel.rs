@@ -655,6 +655,40 @@ pub async fn get_accessible_channel_ids(
         .collect()
 }
 
+/// Get all channel IDs where `pubkey` has an active membership.
+///
+/// Unlike [`get_accessible_channel_ids`], this deliberately excludes open
+/// channels where the principal is not a member. Managed agents use this
+/// stricter view so an open channel is discoverable to humans without becoming
+/// an implicit authorization grant to every agent in the community.
+pub async fn get_member_channel_ids(
+    pool: &PgPool,
+    community_id: CommunityId,
+    pubkey: &[u8],
+) -> Result<Vec<Uuid>> {
+    let rows = sqlx::query(
+        r#"
+        SELECT cm.channel_id
+        FROM channel_members cm
+        JOIN channels c
+          ON cm.community_id = c.community_id
+         AND cm.channel_id = c.id
+         AND c.deleted_at IS NULL
+        WHERE cm.community_id = $1
+          AND cm.pubkey = $2
+          AND cm.removed_at IS NULL
+        "#,
+    )
+    .bind(community_id.as_uuid())
+    .bind(pubkey)
+    .fetch_all(pool)
+    .await?;
+
+    rows.into_iter()
+        .map(|row| Ok(row.try_get("channel_id")?))
+        .collect()
+}
+
 /// Lists channels in a community, optionally filtered by visibility string.
 pub async fn list_channels(
     pool: &PgPool,

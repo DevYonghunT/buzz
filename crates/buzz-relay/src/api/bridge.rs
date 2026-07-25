@@ -16,7 +16,7 @@ use serde_json::Value;
 use buzz_auth::{LimitType, Nip98ReplayGuard, DEFAULT_REPLAY_TTL_SECS};
 use buzz_core::TenantContext;
 
-use crate::handlers::ingest::{IngestAuth, IngestError};
+use crate::handlers::ingest::{IngestAuth, IngestError, PrincipalClass};
 use crate::state::AppState;
 
 use super::{api_error, internal_error, not_found};
@@ -797,7 +797,7 @@ async fn submit_event_authed(
 
     // Enforce relay membership (with NIP-OA fallback via x-auth-tag header).
     let auth_tag = headers.get("x-auth-tag").and_then(|v| v.to_str().ok());
-    let nip_oa_owner = match super::relay_members::enforce_relay_membership(
+    if let Err(response) = super::relay_members::enforce_relay_membership(
         state,
         tenant.community(),
         &pubkey_bytes,
@@ -805,28 +805,28 @@ async fn submit_event_authed(
     )
     .await
     {
-        Ok(owner) => owner.or_else(|| {
-            if !state.config.require_relay_membership {
-                super::relay_members::extract_nip_oa_owner(&pubkey_bytes, auth_tag)
-            } else {
-                None
-            }
-        }),
-        Err(e) => {
-            return SubmitOutcome::Err {
-                status: e.0,
-                response: e,
-            };
-        }
-    };
-    if let Some(owner) = nip_oa_owner {
-        super::relay_members::materialize_nip_oa_owner(state, tenant, &pubkey, &owner).await;
+        return SubmitOutcome::Err {
+            status: response.0,
+            response,
+        };
     }
+    let principal_class =
+        match super::relay_members::resolve_agent_owner(state, tenant, &pubkey, auth_tag).await {
+            Ok(owner) => PrincipalClass::from_agent_owner(owner),
+            Err(error) => {
+                tracing::warn!(%error, "HTTP bridge agent identity lookup failed");
+                return SubmitOutcome::Err {
+                    status: StatusCode::INTERNAL_SERVER_ERROR,
+                    response: internal_error("agent identity lookup failed"),
+                };
+            }
+        };
 
     let kind_u32 = buzz_core::kind::event_kind_u32(&event);
     let auth = IngestAuth::Http {
         pubkey,
         scopes: buzz_auth::Scope::all_known(), // Pure Nostr: full scopes, channel access via membership
+        principal_class,
         auth_method: crate::handlers::ingest::HttpAuthMethod::Nip98,
     };
 
@@ -964,6 +964,11 @@ async fn query_events_authed(
         auth_tag,
     )
     .await?;
+    let membership_only =
+        super::relay_members::resolve_agent_owner(state, tenant, &pubkey, auth_tag)
+            .await
+            .map_err(|error| internal_error(&error))?
+            .is_some();
 
     // Two-pass parse: preserve raw JSON for custom extension fields (before_id,
     // depth_limit, feed_types) that nostr::Filter silently drops.
@@ -998,10 +1003,16 @@ async fn query_events_authed(
     }
 
     // Get channels this user can access — same enforcement as WS REQ handler.
-    let accessible_channels = state
-        .get_accessible_channel_ids_cached(tenant.community(), &pubkey_bytes)
-        .await
-        .map_err(|e| internal_error(&format!("channel access lookup: {e}")))?;
+    let accessible_channels = if membership_only {
+        state
+            .get_member_channel_ids_cached(tenant.community(), &pubkey_bytes)
+            .await
+    } else {
+        state
+            .get_accessible_channel_ids_cached(tenant.community(), &pubkey_bytes)
+            .await
+    }
+    .map_err(|e| internal_error(&format!("channel access lookup: {e}")))?;
 
     if filters.iter().any(|f| f.search.is_some()) {
         if has_mixed_search_filters(&filters) {
@@ -1395,6 +1406,11 @@ async fn count_events_authed(
         auth_tag,
     )
     .await?;
+    let membership_only =
+        super::relay_members::resolve_agent_owner(state, tenant, &pubkey, auth_tag)
+            .await
+            .map_err(|error| internal_error(&error))?
+            .is_some();
 
     let filters: Vec<nostr::Filter> = serde_json::from_slice(body)
         .map_err(|e| api_error(StatusCode::BAD_REQUEST, &format!("invalid filters: {e}")))?;
@@ -1421,10 +1437,16 @@ async fn count_events_authed(
     }
 
     // Get channels this user can access.
-    let accessible_channels = state
-        .get_accessible_channel_ids_cached(tenant.community(), &pubkey_bytes)
-        .await
-        .map_err(|e| internal_error(&format!("channel access lookup: {e}")))?;
+    let accessible_channels = if membership_only {
+        state
+            .get_member_channel_ids_cached(tenant.community(), &pubkey_bytes)
+            .await
+    } else {
+        state
+            .get_accessible_channel_ids_cached(tenant.community(), &pubkey_bytes)
+            .await
+    }
+    .map_err(|e| internal_error(&format!("channel access lookup: {e}")))?;
 
     let mut total: u64 = 0;
     for filter in &filters {
