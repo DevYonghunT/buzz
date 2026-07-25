@@ -1,7 +1,9 @@
 import {
   commandsMatch,
+  findAttachedPersonaAgent,
   findReusableGenericAgent,
   findReusablePersonaAgent,
+  findReusablePersonaDeploymentAgent,
   pickPreferredManagedAgent,
 } from "@/features/agents/agentReuse";
 export { findReusableAgent } from "@/features/agents/agentReuse";
@@ -76,8 +78,16 @@ export type CreateChannelManagedAgentInput = {
   respondTo?: RespondToMode;
   /** Hex pubkeys for allowlist mode. */
   respondToAllowlist?: string[];
+  /** Persona-defined concurrency to preserve during template deployment. */
+  parallelism?: number;
   /** Skip reuse logic and always create a fresh agent instance. */
   forceNewInstance?: boolean;
+  /**
+   * Treat an exact, current deployment of this persona already attached to the
+   * channel as success. Durable cross-process idempotency still belongs to the
+   * workspace-catalog manifest rather than this local batch guard.
+   */
+  ensurePersonaMembership?: boolean;
 };
 
 export type CreateChannelManagedAgentResult =
@@ -271,16 +281,34 @@ export async function provisionChannelManagedAgent(
     context?.managedAgents &&
     context.channelMemberPubkeys
   ) {
-    const reusable = findReusablePersonaAgent(
-      context.managedAgents,
-      input.personaId,
-      context.channelMemberPubkeys,
-    );
+    const reusable = input.ensurePersonaMembership
+      ? findReusablePersonaDeploymentAgent(
+          context.managedAgents,
+          {
+            personaId: input.personaId,
+            teamId: input.teamId,
+            runtimeCommand: input.runtime.command,
+            runtimeArgs: input.runtime.defaultArgs,
+            runtimeMcpCommand: input.runtime.mcpCommand,
+            backend: input.backend,
+            model: input.model,
+            systemPrompt: input.systemPrompt,
+            respondTo: input.respondTo,
+            respondToAllowlist: input.respondToAllowlist,
+            parallelism: input.parallelism,
+          },
+          context.channelMemberPubkeys,
+        )
+      : findReusablePersonaAgent(
+          context.managedAgents,
+          input.personaId,
+          context.channelMemberPubkeys,
+          input.teamId ?? null,
+        );
     if (reusable) {
       // Apply the caller's respondTo settings so the user's permission
       // choice in the dialog is always honored, even when reusing.
-      const needsRespondToUpdate =
-        input.respondTo && input.respondTo !== "owner-only";
+      const needsRespondToUpdate = input.respondTo !== undefined;
       const updatedAgent = needsRespondToUpdate
         ? (
             await updateManagedAgent({
@@ -317,8 +345,7 @@ export async function provisionChannelManagedAgent(
       context.channelMemberPubkeys,
     );
     if (reusable) {
-      const needsRespondToUpdate =
-        input.respondTo && input.respondTo !== "owner-only";
+      const needsRespondToUpdate = input.respondTo !== undefined;
       const updatedAgent = needsRespondToUpdate
         ? (
             await updateManagedAgent({
@@ -366,6 +393,7 @@ export async function provisionChannelManagedAgent(
     backend: input.backend,
     respondTo: input.respondTo,
     respondToAllowlist: input.respondToAllowlist,
+    parallelism: input.parallelism,
   });
 
   // Tauri returns Ok() even on deploy failure — spawnError carries the message.
@@ -425,8 +453,75 @@ export async function createChannelManagedAgents(
   for (let i = 0; i < inputs.length; i++) {
     const input = inputs[i];
     try {
+      if (
+        input.ensurePersonaMembership &&
+        input.personaId &&
+        !input.forceNewInstance
+      ) {
+        const attached = findAttachedPersonaAgent(
+          managedAgents,
+          {
+            personaId: input.personaId,
+            teamId: input.teamId,
+            runtimeCommand: input.runtime.command,
+            runtimeArgs: input.runtime.defaultArgs,
+            runtimeMcpCommand: input.runtime.mcpCommand,
+            backend: input.backend,
+            model: input.model,
+            systemPrompt: input.systemPrompt,
+            respondTo: input.respondTo,
+            respondToAllowlist: input.respondToAllowlist,
+            parallelism: input.parallelism,
+          },
+          channelMemberPubkeys,
+        );
+        if (attached) {
+          let agent = attached;
+          let started = false;
+          const ensureRunning = input.ensureRunning ?? true;
+          const isRunning =
+            agent.status === "running" || agent.status === "deployed";
+          // Retry a previous failed start, but preserve an intentional manual
+          // stop. Without durable template provenance we cannot safely infer
+          // that every stopped, matching instance is template-owned.
+          if (ensureRunning && !isRunning && agent.lastError) {
+            agent = await startManagedAgent(agent.pubkey);
+            started = true;
+          }
+          successes.push({
+            agent,
+            membershipAdded: false,
+            started,
+            created: false,
+            runtimeId: input.runtime.id,
+          });
+          continue;
+        }
+
+        const conflictingAttached = managedAgents.some(
+          (agent) =>
+            agent.personaId === input.personaId &&
+            (agent.teamId ?? null) === (input.teamId ?? null) &&
+            channelMemberPubkeys.has(normalizePubkey(agent.pubkey)),
+        );
+        if (conflictingAttached) {
+          throw new Error(
+            "A different deployment of this persona is already attached to the channel.",
+          );
+        }
+      }
       const result = await createChannelManagedAgent(channelId, input, context);
       successes.push(result);
+      const resultPubkey = normalizePubkey(result.agent.pubkey);
+      const existingIndex = managedAgents.findIndex(
+        (agent) => normalizePubkey(agent.pubkey) === resultPubkey,
+      );
+      if (existingIndex >= 0) {
+        managedAgents[existingIndex] = result.agent;
+      } else {
+        managedAgents.push(result.agent);
+      }
+      channelMemberPubkeys.add(resultPubkey);
     } catch (error) {
       failures.push({
         kind: input.personaId ? "persona" : "generic",

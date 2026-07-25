@@ -5,9 +5,11 @@ import {
   commandsMatch,
   parseTimestamp,
   pickPreferredManagedAgent,
-  findReusablePersonaAgent,
+  findAttachedPersonaAgent,
   findReusableGenericAgent,
   findReusableAgent,
+  findReusablePersonaAgent,
+  findReusablePersonaDeploymentAgent,
 } from "./agentReuse.ts";
 
 const PUB_A = "a".repeat(64);
@@ -19,9 +21,18 @@ function makeAgent(overrides = {}) {
     id: "agent-1",
     pubkey: PUB_A,
     agentCommand: "goose",
+    agentArgs: [],
+    mcpCommand: "",
+    backend: { type: "local" },
+    model: null,
     status: "running",
     personaId: null,
+    personaOrphaned: false,
+    personaOutOfDate: false,
+    respondTo: "owner-only",
+    respondToAllowlist: [],
     systemPrompt: null,
+    teamId: null,
     updatedAt: "2026-01-15T00:00:00Z",
     ...overrides,
   };
@@ -213,6 +224,157 @@ test("findReusablePersonaAgent: pubkey comparison is case-insensitive", () => {
   const channelMembers = new Set([PUB_A]);
   const result = findReusablePersonaAgent([agent], "p1", channelMembers);
   assert.equal(result, undefined);
+});
+
+test("findReusablePersonaAgent: does not reuse an instance from another team", () => {
+  const agent = makeAgent({
+    personaId: "p1",
+    pubkey: PUB_A,
+    teamId: "team-a",
+  });
+  const result = findReusablePersonaAgent(
+    [agent],
+    "p1",
+    new Set([PUB_B]),
+    "team-b",
+  );
+  assert.equal(result, undefined);
+});
+
+const ATTACHED_SPEC = {
+  personaId: "p1",
+  runtimeCommand: "goose",
+  runtimeArgs: [],
+  runtimeMcpCommand: "",
+  backend: { type: "local" },
+  systemPrompt: "Follow the plan",
+};
+
+test("findAttachedPersonaAgent: returns an exact deployment already in the channel", () => {
+  const agent = makeAgent({
+    personaId: "p1",
+    pubkey: PUB_A.toUpperCase(),
+    systemPrompt: "Follow the plan",
+  });
+  const result = findAttachedPersonaAgent(
+    [agent],
+    ATTACHED_SPEC,
+    new Set([PUB_A]),
+  );
+  assert.equal(result, agent);
+});
+
+test("findAttachedPersonaAgent: ignores exact deployments outside the channel", () => {
+  const agent = makeAgent({
+    personaId: "p1",
+    pubkey: PUB_A,
+    systemPrompt: "Follow the plan",
+  });
+  const result = findAttachedPersonaAgent(
+    [agent],
+    ATTACHED_SPEC,
+    new Set([PUB_B]),
+  );
+  assert.equal(result, undefined);
+});
+
+test("findAttachedPersonaAgent: rejects stale or mismatched deployments", () => {
+  const base = makeAgent({
+    personaId: "p1",
+    pubkey: PUB_A,
+    systemPrompt: "Follow the plan",
+  });
+  const channelMembers = new Set([PUB_A]);
+
+  assert.equal(
+    findAttachedPersonaAgent(
+      [{ ...base, personaOutOfDate: true }],
+      ATTACHED_SPEC,
+      channelMembers,
+    ),
+    undefined,
+  );
+  assert.equal(
+    findAttachedPersonaAgent(
+      [{ ...base, teamId: "other-team" }],
+      { ...ATTACHED_SPEC, teamId: "expected-team" },
+      channelMembers,
+    ),
+    undefined,
+  );
+  assert.equal(
+    findAttachedPersonaAgent(
+      [{ ...base, agentCommand: "claude-acp" }],
+      ATTACHED_SPEC,
+      channelMembers,
+    ),
+    undefined,
+  );
+  assert.equal(
+    findAttachedPersonaAgent(
+      [{ ...base, backend: { type: "provider", id: "remote", config: {} } }],
+      ATTACHED_SPEC,
+      channelMembers,
+    ),
+    undefined,
+  );
+  assert.equal(
+    findAttachedPersonaAgent(
+      [{ ...base, agentArgs: ["--different"] }],
+      ATTACHED_SPEC,
+      channelMembers,
+    ),
+    undefined,
+  );
+  assert.equal(
+    findAttachedPersonaAgent(
+      [{ ...base, respondTo: "anyone" }],
+      ATTACHED_SPEC,
+      channelMembers,
+    ),
+    undefined,
+  );
+  assert.equal(
+    findAttachedPersonaAgent(
+      [{ ...base, parallelism: 8 }],
+      { ...ATTACHED_SPEC, parallelism: 4 },
+      channelMembers,
+    ),
+    undefined,
+  );
+});
+
+test("findReusablePersonaDeploymentAgent: only reuses an exact deployment outside the channel", () => {
+  const exact = makeAgent({
+    id: "exact",
+    personaId: "p1",
+    pubkey: PUB_A,
+    systemPrompt: "Follow the plan",
+  });
+  const wrongRuntime = makeAgent({
+    id: "wrong-runtime",
+    personaId: "p1",
+    pubkey: PUB_B,
+    systemPrompt: "Follow the plan",
+    agentCommand: "claude-acp",
+  });
+
+  assert.equal(
+    findReusablePersonaDeploymentAgent(
+      [wrongRuntime, exact],
+      ATTACHED_SPEC,
+      new Set([PUB_C]),
+    ),
+    exact,
+  );
+  assert.equal(
+    findReusablePersonaDeploymentAgent(
+      [exact],
+      ATTACHED_SPEC,
+      new Set([PUB_A]),
+    ),
+    undefined,
+  );
 });
 
 test("findReusableGenericAgent: finds agent with matching command and no persona/prompt", () => {
