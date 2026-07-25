@@ -17,10 +17,10 @@ export const ko = {
       },
       groupAriaLabel: "{{group}} 설정 항목",
       backToApp: "앱으로 돌아가기",
-      checkingCommunityAccess: "커뮤니티 접근 권한을 확인하고 있습니다…",
-      communityAccessCheckFailed: "커뮤니티 접근 권한을 확인하지 못했습니다.",
+      checkingCommunityAccess: "초대 권한을 확인하고 있습니다…",
+      communityAccessCheckFailed: "초대 설정을 확인하지 못했습니다.",
       communityAccessUnavailable:
-        "커뮤니티 접근 정보를 사용할 수 없습니다. 릴레이 복구가 진행 중일 수 있습니다.",
+        "초대 설정을 사용할 수 없습니다. 릴레이 복구가 진행 중일 수 있습니다.",
       tryAgain: "다시 시도",
     },
     sections: {
@@ -33,7 +33,7 @@ export const ko = {
       compute: "컴퓨팅",
       shortcuts: "단축키",
       hostedCommunities: "호스팅 커뮤니티",
-      communityMembers: "커뮤니티 접근",
+      communityMembers: "초대",
       moderation: "관리",
       customEmoji: "사용자 이모지",
       localArchive: "로컬 보관함",

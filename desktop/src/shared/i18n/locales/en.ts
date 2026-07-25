@@ -14,10 +14,10 @@ export const en = {
       },
       groupAriaLabel: "{{group}} settings sections",
       backToApp: "Back to app",
-      checkingCommunityAccess: "Checking community access…",
-      communityAccessCheckFailed: "Community access could not be checked.",
+      checkingCommunityAccess: "Checking invite permissions…",
+      communityAccessCheckFailed: "Invite settings could not be checked.",
       communityAccessUnavailable:
-        "Community access data is unavailable. Relay recovery may still be in progress.",
+        "Invite settings are unavailable. Relay recovery may still be in progress.",
       tryAgain: "Try again",
     },
     sections: {
@@ -30,7 +30,7 @@ export const en = {
       compute: "Compute",
       shortcuts: "Shortcuts",
       hostedCommunities: "Hosted communities",
-      communityMembers: "Community access",
+      communityMembers: "Invites",
       moderation: "Moderation",
       customEmoji: "Custom emoji",
       localArchive: "Local archive",

@@ -4,7 +4,10 @@ import { AlertCircle, ArrowLeft, LoaderCircle, RefreshCw } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
 import { useMyRelayMembershipLookupQuery } from "@/features/community-members/hooks";
-import { shouldWarnMissingMembershipSnapshot } from "@/shared/api/relayMembers";
+import {
+  canManageCommunityMembers,
+  shouldWarnMissingMembershipSnapshot,
+} from "@/shared/api/relayMembers";
 import { getFeature } from "@/shared/features/manifest";
 import type { TranslationKey } from "@/shared/i18n";
 import {
@@ -131,8 +134,6 @@ export function SettingsView({
   const myMembershipQuery = useMyRelayMembershipLookupQuery();
   const featureState = useFeatureSnapshot();
   const visibleSections = React.useMemo(() => {
-    const membership = myMembershipQuery.data?.membership;
-
     return settingsSections.filter((s) => {
       // Feature gate check. Manifest is preview-only — if the gate id is in
       // the manifest, it's preview and needs an opt-in; if it's not, it's
@@ -143,12 +144,10 @@ export function SettingsView({
           return false;
         }
       }
-      // Community members requires admin/owner role
+      // Invites and member management require a discovered owner/admin role.
+      // Open relays have no membership snapshot or invite controls.
       if (s.value === "community-members") {
-        return (
-          membership != null &&
-          (membership.role === "owner" || membership.role === "admin")
-        );
+        return canManageCommunityMembers(myMembershipQuery.data);
       }
       return true;
     });

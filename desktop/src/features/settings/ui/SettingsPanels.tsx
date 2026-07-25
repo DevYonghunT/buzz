@@ -12,7 +12,6 @@ import {
   FlaskConical,
   Keyboard,
   LayoutTemplate,
-  LockKeyhole,
   MessagesSquare,
   MonitorCog,
   Moon,
@@ -21,6 +20,7 @@ import {
   Smile,
   Sun,
   SunMoon,
+  Ticket,
   UserRound,
   type LucideIcon,
 } from "lucide-react";
@@ -207,7 +207,7 @@ export const settingsSections: SettingsSectionDescriptor[] = [
   {
     value: "community-members",
     label: "settings.sections.communityMembers",
-    icon: LockKeyhole,
+    icon: Ticket,
   },
   {
     value: "moderation",
