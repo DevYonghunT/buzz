@@ -34,7 +34,14 @@ use nostr::{EventBuilder, Filter, Keys, Kind, Tag};
 const STREAM_MESSAGE_KIND: u16 = 9;
 const CREATE_GROUP_KIND: u16 = 9007;
 const PUT_USER_KIND: u16 = 9000;
+const REMOVE_USER_KIND: u16 = 9001;
 const JOIN_REQUEST_KIND: u16 = 9021;
+
+/// The channel-access caches are 10s TTL (`AppState`, `state.rs`). Membership
+/// changes invalidate the affected pubkey's entry explicitly, so revocation
+/// must land well inside this window — if a test only passed after waiting it
+/// out, the invalidation is not actually wired.
+const CACHE_TTL: Duration = Duration::from_secs(10);
 
 /// Long enough for the relay to fan out, short enough that a suite of
 /// "nothing must arrive" assertions stays quick.
@@ -95,6 +102,23 @@ async fn add_member(owner: &Keys, channel_id: &str, target: &Keys) {
     assert!(
         body["accepted"].as_bool().unwrap_or(false),
         "add_member not accepted: {body}"
+    );
+}
+
+/// Remove `target` from `channel_id`, signed by the channel owner.
+async fn remove_member(owner: &Keys, channel_id: &str, target: &Keys) {
+    let event = EventBuilder::new(Kind::Custom(REMOVE_USER_KIND), "")
+        .tags(vec![
+            Tag::parse(["h", channel_id]).unwrap(),
+            Tag::parse(["p", &target.public_key().to_hex()]).unwrap(),
+        ])
+        .sign_with_keys(owner)
+        .unwrap();
+
+    let body = post_event_as(owner, &event, None).await;
+    assert!(
+        body["accepted"].as_bool().unwrap_or(false),
+        "remove_member not accepted: {body}"
     );
 }
 
@@ -195,6 +219,66 @@ async fn seed_message(author: &Keys, channel_id: &str) -> String {
     assert!(ok.accepted, "seed message rejected: {}", ok.message);
     client.disconnect().await.ok();
     content
+}
+
+/// Seed a message carrying a unique, searchable token.
+///
+/// The token is a single alphanumeric run so Postgres FTS indexes it as one
+/// lexeme; a token containing punctuation would tokenize unpredictably and the
+/// "no hits" assertions would pass for the wrong reason.
+async fn seed_search_message(author: &Keys, channel_id: &str, token: &str) {
+    let mut client = BuzzTestClient::connect(&relay_url(), author)
+        .await
+        .expect("search seed connect");
+    let ok = client
+        .send_text_message(
+            author,
+            channel_id,
+            &format!("searchable {token} body"),
+            STREAM_MESSAGE_KIND,
+        )
+        .await
+        .expect("search seed publish");
+    assert!(ok.accepted, "search seed rejected: {}", ok.message);
+    client.disconnect().await.ok();
+    // Postgres FTS indexes on write, but the relay acknowledges before the
+    // read replica view settles; give the index a beat before searching.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+}
+
+/// Run a NIP-50 search across the community and return matching contents.
+///
+/// Deliberately unscoped by channel: the point is to check whether the search
+/// gate re-derives channel access on its own, so handing it an `h` filter
+/// would let the channel filter do the work instead.
+async fn ws_search(client: &mut BuzzTestClient, token: &str) -> Vec<String> {
+    let sid = sub_id("search");
+    let filter = Filter::new()
+        .kind(Kind::Custom(STREAM_MESSAGE_KIND))
+        .search(token);
+    client
+        .subscribe(&sid, vec![filter])
+        .await
+        .expect("search subscribe");
+
+    let mut hits = Vec::new();
+    loop {
+        match client.recv_event(EOSE_WAIT).await {
+            Ok(RelayMessage::Event {
+                subscription_id,
+                event,
+            }) if subscription_id == sid => hits.push(event.content.clone()),
+            Ok(RelayMessage::Eose { subscription_id }) if subscription_id == sid => break,
+            Ok(RelayMessage::Closed {
+                subscription_id, ..
+            }) if subscription_id == sid => break,
+            Ok(_) => {}
+            Err(TestClientError::Timeout) => break,
+            Err(e) => panic!("unexpected transport error during search: {e}"),
+        }
+    }
+    client.close_subscription(&sid).await.ok();
+    hits
 }
 
 /// Outcome of a WS REQ, distinguishing "allowed but empty" from "refused".
@@ -586,4 +670,201 @@ async fn agent_nonmember_receives_no_live_fanout() {
         Err(e) => panic!("unexpected transport error: {e}"),
     }
     agent_client.disconnect().await.ok();
+}
+
+// ─── membership changes take effect against the cache ──────────────────────
+
+/// Revocation must not wait out the 10s access-cache TTL.
+///
+/// `AppState::invalidate_membership` drops the removed pubkey's
+/// `member_channels_cache` entry, so a removed agent loses access at once. The
+/// assertion is deliberately made well inside `CACHE_TTL`: if this only passed
+/// after the TTL elapsed, the explicit invalidation would be dead code and
+/// every revocation would carry a ten-second window of retained access.
+#[tokio::test]
+#[ignore]
+async fn agent_loses_access_immediately_on_removal() {
+    let owner = Keys::generate();
+    let agent = Keys::generate();
+    let channel_owner = Keys::generate();
+    let channel = create_channel(&channel_owner, "open").await;
+    let seeded = seed_message(&channel_owner, &channel).await;
+
+    add_member(&channel_owner, &channel, &agent).await;
+    let mut agent_client = connect_agent(&agent, &owner).await;
+
+    // Warm the cache through a successful read, so the next read is served
+    // from a populated entry rather than a cold miss.
+    let before = ws_read(&mut agent_client, &channel).await;
+    assert!(
+        before.saw(&seeded),
+        "member agent should read before removal, got {before:?}"
+    );
+
+    let started = std::time::Instant::now();
+    remove_member(&channel_owner, &channel, &agent).await;
+
+    let after = ws_read(&mut agent_client, &channel).await;
+    let elapsed = started.elapsed();
+
+    assert!(
+        !after.saw(&seeded),
+        "removed agent still read the channel: {after:?}"
+    );
+    after.assert_refused("agent reading after removal");
+    assert!(
+        elapsed < CACHE_TTL,
+        "revocation only took effect after {elapsed:?}, at or beyond the {CACHE_TTL:?} \
+         cache TTL — membership invalidation is not reaching member_channels_cache"
+    );
+    agent_client.disconnect().await.ok();
+}
+
+/// Granting membership also has to beat the cache, from the other direction.
+///
+/// A denied read populates nothing useful, but the negative result must not
+/// linger: an agent added to a channel should be able to read it without
+/// reconnecting or waiting out the TTL.
+#[tokio::test]
+#[ignore]
+async fn agent_gains_access_immediately_on_add() {
+    // The agent's owner also owns the channel. Once a key is classified as a
+    // managed agent, `channel_add_policy = 'owner_only'` means only its owner
+    // may add it anywhere — see `stranger_cannot_conscript_a_classified_agent`.
+    let owner = Keys::generate();
+    let agent = Keys::generate();
+    let channel = create_channel(&owner, "open").await;
+    let seeded = seed_message(&owner, &channel).await;
+
+    let mut agent_client = connect_agent(&agent, &owner).await;
+    let before = ws_read(&mut agent_client, &channel).await;
+    before.assert_refused("agent reading before being added");
+
+    let started = std::time::Instant::now();
+    add_member(&owner, &channel, &agent).await;
+
+    let after = ws_read(&mut agent_client, &channel).await;
+    let elapsed = started.elapsed();
+
+    assert!(
+        after.saw(&seeded),
+        "agent added to the channel still could not read it: {after:?}"
+    );
+    assert!(
+        elapsed < CACHE_TTL,
+        "grant only took effect after {elapsed:?}, at or beyond the {CACHE_TTL:?} cache TTL"
+    );
+    agent_client.disconnect().await.ok();
+}
+
+// ─── search is a read path too ─────────────────────────────────────────────
+
+/// NIP-50 search must not surface a private channel's content to a non-member.
+///
+/// Search runs through `buzz-search` rather than the channel-scoped event
+/// query, so it is a separate gate reaching the same rows. A leak here would
+/// hand a stranger the exact message bodies the channel gate refuses.
+#[tokio::test]
+#[ignore]
+async fn search_does_not_leak_private_channel_to_human_nonmember() {
+    let owner = Keys::generate();
+    let stranger = Keys::generate();
+    let channel = create_channel(&owner, "private").await;
+    let token = format!("matrixtoken{}", uuid::Uuid::new_v4().simple());
+    seed_search_message(&owner, &channel, &token).await;
+
+    let mut client = BuzzTestClient::connect(&relay_url(), &stranger)
+        .await
+        .expect("stranger connect");
+    let hits = ws_search(&mut client, &token).await;
+
+    assert!(
+        hits.is_empty(),
+        "private channel content reachable by search from a non-member: {hits:?}"
+    );
+    client.disconnect().await.ok();
+}
+
+/// Same gate, exercised by a managed agent against an open channel it never
+/// joined. Search must respect the agent rule, not just channel visibility.
+#[tokio::test]
+#[ignore]
+async fn search_does_not_leak_open_channel_to_nonmember_agent() {
+    let owner = Keys::generate();
+    let agent = Keys::generate();
+    let channel_owner = Keys::generate();
+    let channel = create_channel(&channel_owner, "open").await;
+    let token = format!("matrixtoken{}", uuid::Uuid::new_v4().simple());
+    seed_search_message(&channel_owner, &channel, &token).await;
+
+    let mut agent_client = connect_agent(&agent, &owner).await;
+    let hits = ws_search(&mut agent_client, &token).await;
+
+    assert!(
+        hits.is_empty(),
+        "non-member agent reached an open channel's content by search: {hits:?}"
+    );
+    agent_client.disconnect().await.ok();
+}
+
+/// Control: the channel's own member finds the same token. Without this, an
+/// unindexed or misspelled token would make both leak tests vacuously pass.
+#[tokio::test]
+#[ignore]
+async fn search_finds_the_token_for_a_member() {
+    let owner = Keys::generate();
+    let channel = create_channel(&owner, "private").await;
+    let token = format!("matrixtoken{}", uuid::Uuid::new_v4().simple());
+    seed_search_message(&owner, &channel, &token).await;
+
+    let mut client = BuzzTestClient::connect(&relay_url(), &owner)
+        .await
+        .expect("owner connect");
+    let hits = ws_search(&mut client, &token).await;
+
+    assert!(
+        !hits.is_empty(),
+        "the channel owner could not find their own message by search — \
+         the leak tests above prove nothing until this passes"
+    );
+    client.disconnect().await.ok();
+}
+
+/// A third party cannot conscript someone else's managed agent.
+///
+/// Migration 0025 backfills `channel_add_policy = 'owner_only'` for every key
+/// carrying an `agent_owner_pubkey`, so once a key is classified only its owner
+/// may add it to a channel. Without this, any community member could pull a
+/// stranger's agent into their own room and have it act there — the membership
+/// rule would gate the agent's reach while leaving the *grant* unguarded.
+///
+/// Note the ordering this depends on: the policy binds at classification time.
+/// A key added to a channel *before* it ever authenticates with a NIP-OA tag is
+/// added as an ordinary user and keeps that membership afterwards.
+#[tokio::test]
+#[ignore]
+async fn stranger_cannot_conscript_a_classified_agent() {
+    let owner = Keys::generate();
+    let agent = Keys::generate();
+    let stranger = Keys::generate();
+    let channel = create_channel(&stranger, "open").await;
+
+    // Classify the agent first: the policy only exists once the relay has
+    // resolved an owner for this key.
+    let agent_client = connect_agent(&agent, &owner).await;
+    agent_client.disconnect().await.ok();
+
+    let event = EventBuilder::new(Kind::Custom(PUT_USER_KIND), "")
+        .tags(vec![
+            Tag::parse(["h", &channel]).unwrap(),
+            Tag::parse(["p", &agent.public_key().to_hex()]).unwrap(),
+        ])
+        .sign_with_keys(&stranger)
+        .unwrap();
+    let body = post_event_as(&stranger, &event, None).await;
+
+    assert!(
+        !body["accepted"].as_bool().unwrap_or(false),
+        "a stranger added someone else's managed agent to their channel: {body}"
+    );
 }
