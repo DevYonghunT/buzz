@@ -1,0 +1,243 @@
+# SchoolX 워크스페이스 catalog 설계 (세션 D)
+
+이 문서는 세션 D의 설계 산출물이다. 버전이 있는 내장 catalog, relay에서 다시
+확인 가능한 provenance, idempotent saga, machine-readable result ledger의
+구조를 고정한다. 제품 범위는
+[`DEVELOPMENT_PLAN.md`](DEVELOPMENT_PLAN.md) §6·Phase 3, 보안 전제는
+[`SECURITY_CONTRACT.md`](SECURITY_CONTRACT.md), 세션 운영은
+[`IMPLEMENTATION_HANDOFF.md`](IMPLEMENTATION_HANDOFF.md)를 따른다.
+
+## 1. 이번 세션 범위
+
+에이전트 없이, private 업무방 두 개만 재현 가능하게 적용한다.
+
+| 항목 | 범위 |
+|---|---|
+| catalog 항목 | `meeting`(메인 회의방), `planning`(기획방) — 둘 다 `private` |
+| saga 단계 | 채널 생성 → 시작 캔버스 → owner 확인 |
+| 적용 화면 | 설정 화면의 새 카드 (미리보기 · 적용 · 결과 · 재시도) |
+| CLI | 읽기 전용 — catalog 목록과 preflight 판정까지 |
+| relay | kind 39500 등록 3곳 |
+
+**범위 밖 (Phase 4 이후):** 에이전트·persona provisioning, workflow, 나머지
+8개 업무방, 멤버 초대. ledger 스키마에는 자리만 두고 `not_implemented`로
+표시한다.
+
+## 2. 확정된 구조 결정
+
+| 결정 | 선택 | 이유 |
+|---|---|---|
+| provenance 표현 | 새 Nostr kind 39500 (채널 스코프 addressable) | 로컬 파일이 아닌 relay에 남고, private 채널 ACL이 그대로 적용된다 |
+| catalog 위치 | 새 공유 크레이트 `schoolx-catalog`에 컴파일 내장 | 디스크로 드리프트하지 않고, desktop과 CLI가 같은 정의를 읽는다 |
+| saga 실행기 | 같은 크레이트 + Tauri command | fault injection을 브라우저 없이 `cargo test`로 검증한다 |
+
+## 3. 왜 provenance를 채널 메타데이터에 넣지 않는가
+
+relay는 kind 39000을 **DB 컬럼에서만 재구성한다**
+(`crates/buzz-relay/src/handlers/side_effects.rs`의
+`emit_group_discovery_events`). `name`, `about`, `visibility`, `t`, `topic`,
+`purpose`, `archived`, `ttl`만 태그로 나가고, 채널 생성 이벤트(kind 9007)에
+실은 임의 태그는 어디에도 보존되지 않는다.
+
+따라서 provenance는 **별도 이벤트**여야 한다. relay는 미등록 kind를 거부하므로
+(`handlers/ingest.rs`의 `required_scope_for_kind`) 새 kind 등록이 필요하다.
+
+## 4. provenance 이벤트 — kind 39500
+
+**프로토콜 리뷰 대상.** 계획서 §6이 요구한 "다른 Buzz 배포에서도 재사용
+가능한 workspace-template manifest"다. SchoolX 전용 필드를 넣지 않는다.
+
+```
+kind    39500
+d       <catalog_id>:<item_key>          항목당 정확히 하나
+h       <channel_id>                     채널 스코프 저장 → private ACL 적용
+content JSON (아래)
+```
+
+```json
+{
+  "catalog_id": "schoolx.default",
+  "catalog_version": 1,
+  "item_key": "meeting",
+  "generation": 1,
+  "steps": { "channel": "done", "canvas": "done", "membership": "done" },
+  "applied_at": "2026-07-28T09:00:00Z"
+}
+```
+
+- **addressable 대역(30000–39999)** 이라 NIP-33 LWW가 적용된다. 재시도해도
+  이벤트가 쌓이지 않고 항상 최신 하나가 권위다.
+- client-signed, `Scope::ChannelsWrite` — `KIND_CANVAS`(40100)와 같은 취급.
+- **예약 대역 `39500–39599`.** SQL 마이그레이션 `9001+`와 같은 이유다. upstream이
+  같은 번호를 쓰면 조용히 충돌하고, 충돌은 컴파일 타임에 잡히지 않는다.
+
+relay 변경은 세 곳뿐이다.
+
+| 파일 | 변경 |
+|---|---|
+| `crates/buzz-core/src/kind.rs` | 상수와 예약 대역 주석 |
+| `crates/buzz-relay/src/handlers/ingest.rs` | `required_scope_for_kind` |
+| `crates/buzz-relay/src/handlers/ingest.rs` | `requires_h_channel_scope` |
+
+### 의도적 트레이드오프
+
+채널 스코프 저장이라 **private 채널의 provenance는 그 채널 멤버만 읽는다.**
+다른 관리자가 preflight를 돌리면 자기가 멤버가 아닌 항목은 "이미 적용됨"을
+볼 수 없고 `conflict`로 떨어진다.
+
+전역 스코프로 바꾸면 비멤버가 private 채널의 존재를 알게 되어
+[`SECURITY_CONTRACT.md`](SECURITY_CONTRACT.md)가 깨진다. 자동 채택 대신
+사용자 해결을 요구하는 쪽이 안전한 실패다.
+
+## 5. 채널 ID 도출
+
+```
+UUIDv5(SCHOOLX_CATALOG_NAMESPACE,
+       "schoolx-catalog:v1:{relay_scope}:{catalog_id}:{item_key}:{generation}")
+```
+
+`desktop/src-tauri/src/commands/channels.rs`의 `starter_channel_uuid()`와 같은
+패턴이다. **`catalog_version`은 넣지 않는다** — catalog 버전이 올라가도
+`meeting`은 같은 방이어야 한다.
+
+판정 권위는 provenance 이벤트이고, 결정론적 ID는 중복 방지 보조 장치다.
+증명서를 남기기 직전에 앱이 죽어도 같은 ID의 두 번째 생성이 relay에서
+거부되므로 방이 두 개 생기지 않는다.
+
+## 6. 삭제된 항목: 왜 증명서로 감지할 수 없는가
+
+**확인된 사실 — 구현자가 되돌리면 안 된다.**
+
+1. 채널 삭제는 soft delete다 (`handle_delete_group` → `soft_delete_channel`).
+2. `soft_delete_discovery_events`는 **kind 39000/39001/39002만** 지운다.
+   39500 행은 살아남는다.
+3. 그러나 채널 조회가 전부 `deleted_at IS NULL`로 걸러지므로
+   (`crates/buzz-db/src/channel.rs`), **살아남은 증명서를 읽을 수 없다.**
+
+따라서 "증명서는 완료인데 방이 없다"는 대조는 불가능하고, 앱 눈에는
+"적용한 적 없음"과 구별되지 않는다.
+
+**대신 쓰는 사실:** 채널 생성은
+`INSERT ... ON CONFLICT (community_id, id) DO NOTHING`이고
+(`crates/buzz-db/src/channel.rs`), soft-delete된 행이 그 ID를 계속 점유한다.
+**한 번 쓴 채널 번호는 영구히 탄다.**
+
+| 같은 ID로 생성 시도 | 의미 |
+|---|---|
+| 성공 | 정말 처음이다 |
+| `duplicate: channel already exists` + 접근 가능 목록에 없음 | 예전에 만들었고 지금은 삭제됐다 |
+
+미리보기 단계에서는 이 둘을 구분할 수 없다. 미리보기는
+`create_or_recreate`로 표시하고, 적용 시 거부가 나오면 **그 항목만 멈추고**
+나머지 항목은 계속 진행한다. 사용자가 "다시 만들기"를 선택하면 `generation`을
+올려 새 ID로 만들고 증명서에 세대를 기록한다.
+
+## 7. preflight 판정표
+
+| 판정 | 조건 | 동작 |
+|---|---|---|
+| `create_or_recreate` | 증명서 없음 + 동명 채널 없음 | 생성 시도. 거부되면 `deleted`로 확정 |
+| `resume` | 증명서 있음 + 일부 단계 미완료 | 미완료 단계만 실행 |
+| `no_change` | 증명서 있음 + 전 단계 완료 | 아무것도 하지 않음 |
+| `deleted` | 생성이 `duplicate`로 거부됨 + 접근 불가 | 자동 재생성 없음. 명시적 선택만 |
+| `conflict` | 증명서 없음 + 동명 채널 있음 | 자동 채택 없음. 사용자 해결 요청 |
+| `retired` | 증명서 있음 + catalog에 항목 없음 | 목록에서 숨김. **기존 채널은 유지** |
+
+판정 근거는 이름이 아니라 증명서다. 이름은 `conflict` 감지에만 쓴다.
+
+`renamed`는 판정이 아니라 **별도 플래그**다. 사용자가 이름을 바꾼 항목도
+단계가 미완료면 `resume`, 완료면 `no_change`로 판정된다. 플래그는 미리보기와
+ledger에 표시만 하고, **이름을 catalog 값으로 되돌리지 않는다.** 판정과
+분리해야 "이름을 바꿨고 캔버스도 실패한" 항목이 재시도에서 누락되지 않는다.
+
+## 8. saga 단계와 보상 규칙
+
+단계: **채널 생성 → 시작 캔버스 → owner 확인**
+
+각 단계는 (1) 증명서를 보고 완료면 건너뛰고, (2) 실행하고, (3) 증명서를
+갱신한다.
+
+- **실패해도 되돌리지 않는다.** 채널 생성 후 캔버스에서 실패하면 채널을
+  지우지 않고 `canvas: failed`로 기록한다. 재시도는 캔버스부터 시작한다.
+- 보상은 **이번 실행에서 새로 만든 리소스**만 대상이다. 기존 사용자 데이터는
+  어떤 경우에도 자동 삭제하지 않는다.
+- 한 항목의 실패가 다른 항목을 막지 않는다.
+
+`membership` 단계는 이번 세션에서 **적용자가 실제로 owner로 들어갔는지
+확인하고 증명서에 기록하는 데까지**만 한다. 초대는 범위 밖이다.
+
+## 9. 공개 범위 preflight
+
+catalog의 두 항목은 모두 `private`이 기본이다. 관리자가 `open`으로 바꾸면
+미리보기와 확인 화면에 두 문장을 함께 띄운다.
+
+- 모든 로그인 사용자가 멤버가 아니어도 읽고 쓸 수 있습니다.
+- 관리형 에이전트는 명시적으로 추가된 경우에만 접근합니다.
+
+두 번째 문장은 세션 A에서 서버로 강제한 사실이고, 사람이 반대로 오해하기
+쉬운 지점이다.
+
+## 10. result ledger
+
+적용 실행이 반환하는 machine-readable 결과다. UI와 CLI가 같은 것을 읽는다.
+
+```json
+{
+  "catalog_id": "schoolx.default",
+  "catalog_version": 1,
+  "items": [
+    {
+      "item_key": "meeting",
+      "decision": "create_or_recreate",
+      "channel_id": "…",
+      "generation": 1,
+      "steps": [
+        { "step": "channel", "status": "done" },
+        { "step": "canvas", "status": "failed", "error": "…" },
+        { "step": "membership", "status": "pending" }
+      ],
+      "outcome": "partial",
+      "user_action": null
+    }
+  ]
+}
+```
+
+`outcome` ∈ `applied` · `unchanged` · `partial` · `blocked`.
+`user_action` ∈ `null` · `confirm_recreate` · `resolve_conflict`.
+
+계획서 Phase 3의 "성공, 실패, 건너뜀, 사용자 조치 필요"가 각각
+`outcome`과 `user_action`에 대응한다.
+
+## 11. 검증 계획
+
+| 검증 | 명령 | 확인 대상 |
+|---|---|---|
+| 판정표 단위 테스트 | `cargo test -p schoolx-catalog` | 7개 판정 전부 |
+| fault injection | `cargo test -p schoolx-catalog` | 단계별 실패 후 재시도가 desired state 도달 |
+| 재적용 | `cargo test -p schoolx-catalog` | 두 번째 적용이 `no_change`이고 채널 수 동일 |
+| catalog snapshot | `cargo test -p schoolx-catalog` | 항목 키·이름·공개 범위 고정 |
+| relay kind 수용 | `just test-e2e` | 39500 발행·조회, 비멤버 차단 |
+| 데스크톱 | `pnpm --dir desktop test` | 설정 카드 렌더와 결과 표시 |
+
+effect trait로 relay I/O를 주입하므로 fault injection은 live relay 없이
+돈다. relay 왕복이 필요한 것만 E2E로 간다.
+
+**완료 표시 조건:** Phase 3 완료 기준 7개 중 하나라도 증거가 없으면 이 단계를
+완료로 적지 않는다 ([`IMPLEMENTATION_HANDOFF.md`](IMPLEMENTATION_HANDOFF.md)
+기본 원칙).
+
+## 12. 근거가 된 코드 경로
+
+| 사실 | 경로 |
+|---|---|
+| 39000은 DB 컬럼에서만 재구성 | `crates/buzz-relay/src/handlers/side_effects.rs` `emit_group_discovery_events` |
+| 미등록 kind 거부 | `crates/buzz-relay/src/handlers/ingest.rs` `required_scope_for_kind` |
+| 채널 스코프 게이트 | `crates/buzz-relay/src/handlers/ingest.rs` `requires_h_channel_scope` |
+| 결정론적 채널 ID 선례 | `desktop/src-tauri/src/commands/channels.rs` `starter_channel_uuid` |
+| 중복 채널 거부 | `crates/buzz-relay/src/handlers/ingest.rs` / `crates/buzz-db/src/channel.rs` `create_channel_with_id` |
+| soft delete | `crates/buzz-relay/src/handlers/side_effects.rs` `handle_delete_group` |
+| 삭제 채널 조회 차단 | `crates/buzz-db/src/channel.rs` (`deleted_at IS NULL`) |
+| 기존 template 저장소 | `desktop/src-tauri/src/templates/storage.rs` |
+| 기존 적용 경로 (교체 대상) | `desktop/src/features/channel-templates/useApplyTemplate.ts` |
+| CLI 템플릿 읽기 | `crates/buzz-cli/src/commands/channel_templates.rs` |
