@@ -150,4 +150,48 @@ mod tests {
         let back: Provenance = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(p, back);
     }
+
+    /// Golden-value regression test. `round_trips_through_json` above is
+    /// symmetric — it serializes then deserializes and compares the Rust
+    /// values, so it stays green even if a field were renamed via
+    /// `#[serde(rename = "...")]` or `StepStatus`'s
+    /// `#[serde(rename_all = "lowercase")]` were changed to another casing.
+    /// This test pins the actual JSON bytes instead: the exact field names
+    /// and the exact enum spellings, matching the kind 39500 content shape
+    /// documented in `docs/schoolx-2/WORKSPACE_CATALOG.md` §4.
+    ///
+    /// Changing this expected literal is a breaking wire-format change: it
+    /// orphans every already-published provenance event, which relies on
+    /// these exact key names and enum spellings to be parsed by later app
+    /// versions. Do not update this literal to make a failing test pass —
+    /// treat a failure here as a regression to fix, not a value to re-pin.
+    #[test]
+    fn golden_json_matches_known_wire_format() {
+        let mut p = sample();
+        p.steps = StepStates {
+            channel: StepStatus::Done,
+            canvas: StepStatus::Failed,
+            membership: StepStatus::Pending,
+        };
+
+        let actual = serde_json::to_value(&p).expect("serialize to Value");
+        let expected = serde_json::json!({
+            "catalog_id": "schoolx.default",
+            "catalog_version": 1,
+            "item_key": "meeting",
+            "generation": 1,
+            "steps": {
+                "channel": "done",
+                "canvas": "failed",
+                "membership": "pending"
+            },
+            "applied_at": "2026-07-28T09:00:00Z"
+        });
+
+        assert_eq!(
+            actual, expected,
+            "kind 39500 wire format changed (field names or enum spellings) — \
+             this orphans already-published provenance events, see doc comment above"
+        );
+    }
 }
