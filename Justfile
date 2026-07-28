@@ -271,6 +271,53 @@ ci: check test-unit desktop-test desktop-build desktop-tauri-check desktop-tauri
 test:
     ./scripts/run-tests.sh all
 
+# Run the relay-backed e2e suites (the #[ignore]d tests in buzz-test-client).
+#
+# `just test` runs `cargo test --test '*'` without `--ignored`, so these never
+# execute there. They need a live relay, which needs MinIO in addition to
+# Postgres and Redis — the relay's git object-store conformance probe aborts
+# startup without an S3 backend. Boots the relay, waits for /health, runs the
+# suites, and always tears the relay back down.
+#
+# Pass a suite name to narrow: `just test-e2e e2e_access_matrix`.
+test-e2e suite="": _ensure-migrations
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export PATH="{{justfile_directory()}}/bin:$PATH"
+    docker compose up -d minio minio-init
+    cargo build -p buzz-relay
+    # Run the built binary, not `cargo run`: killing cargo leaves the relay it
+    # spawned running, which then holds port 3000 against the next invocation.
+    relay_log="$(mktemp -t buzz-relay-e2e)"
+    echo "relay log: ${relay_log}"
+    ./target/debug/buzz-relay >"${relay_log}" 2>&1 &
+    relay_pid=$!
+    trap 'kill "${relay_pid}" 2>/dev/null || true; wait "${relay_pid}" 2>/dev/null || true' EXIT
+    echo -n "Waiting for relay"
+    for _ in $(seq 1 60); do
+        if curl -fsS http://localhost:3000/health >/dev/null 2>&1; then
+            echo " ready"
+            break
+        fi
+        if ! kill -0 "${relay_pid}" 2>/dev/null; then
+            echo " relay exited during startup:" >&2
+            tail -20 "${relay_log}" >&2
+            exit 1
+        fi
+        echo -n "."
+        sleep 2
+    done
+    curl -fsS http://localhost:3000/health >/dev/null
+    # --test-threads=1 keeps the "nothing was delivered" assertions honest:
+    # concurrent suites share one relay and one community.
+    if [ -n "{{suite}}" ]; then
+        RELAY_URL=ws://localhost:3000 cargo test -p buzz-test-client \
+            --test {{suite}} -- --ignored --test-threads=1
+    else
+        RELAY_URL=ws://localhost:3000 cargo test -p buzz-test-client \
+            --tests -- --ignored --test-threads=1
+    fi
+
 # Run unit tests only (no infra needed)
 test-unit:
     #!/usr/bin/env bash
