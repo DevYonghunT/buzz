@@ -31,6 +31,8 @@ import type { TimelineMessage } from "@/features/messages/types";
 import { canManageMessageForCurrentUser } from "@/features/messages/lib/canManageMessage";
 import type { UserProfileLookup } from "@/features/profile/lib/identity";
 import type { ChannelType } from "@/shared/api/types";
+import type { AppLocale } from "@/shared/i18n/locale";
+import { useAppLocale } from "@/shared/i18n/useAppLocale";
 import { cn } from "@/shared/lib/cn";
 import { DayDivider } from "./DayDivider";
 import { MessageRow } from "./MessageRow";
@@ -164,6 +166,7 @@ export const TimelineMessageList = React.memo(function TimelineMessageList({
   onVirtualizerRangeChanged,
   onVirtualizerScrollerChange,
 }: TimelineMessageListProps) {
+  const { locale } = useAppLocale();
   const entries = React.useMemo(
     () =>
       mainEntries ??
@@ -327,6 +330,7 @@ export const TimelineMessageList = React.memo(function TimelineMessageList({
         dayGroups={dayGroups}
         historyExhausted={historyExhausted}
         leadingContent={leadingContent}
+        locale={locale}
         onAtBottomStateChange={onAtBottomStateChange}
         onStartReached={onStartReached}
         onVirtualizerApiChange={onVirtualizerApiChange}
@@ -349,13 +353,15 @@ export const TimelineMessageList = React.memo(function TimelineMessageList({
           data-day-label={
             group.headingTimestamp === null
               ? undefined
-              : formatDayHeading(group.headingTimestamp)
+              : formatDayHeading(group.headingTimestamp, locale)
           }
           data-testid="message-timeline-day-group"
           key={group.key}
         >
           {group.headingTimestamp === null ? null : (
-            <DayDivider label={formatDayHeading(group.headingTimestamp)} />
+            <DayDivider
+              label={formatDayHeading(group.headingTimestamp, locale)}
+            />
           )}
           {group.items.map((item) => (
             <TimelineRowShell item={item} key={getTimelineItemKey(item)}>
@@ -377,6 +383,7 @@ function timelineItemMessageId(item: TimelineNonDayItem): string | null {
 type VirtualizedTimelineRowsProps = {
   dayGroups: TimelineDayGroup[];
   historyExhausted: boolean;
+  locale: AppLocale;
   leadingContent?: React.ReactNode;
   onAtBottomStateChange?: (atBottom: boolean) => void;
   onStartReached?: () => boolean;
@@ -415,6 +422,7 @@ function VirtualizedTimelineItemShell({
 
 function VirtualizedTimelineRows({
   dayGroups,
+  locale,
   historyExhausted,
   leadingContent,
   onAtBottomStateChange,
@@ -612,7 +620,7 @@ function VirtualizedTimelineRows({
               return <div key={virtualizedItemKey(item)}>{item.content}</div>;
             }
             if (item.kind === "day-divider") {
-              const dayLabel = formatDayHeading(item.headingTimestamp);
+              const dayLabel = formatDayHeading(item.headingTimestamp, locale);
               return (
                 <div
                   // The sticky pill needs travel room, but its containing block

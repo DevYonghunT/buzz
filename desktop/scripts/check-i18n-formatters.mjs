@@ -75,7 +75,6 @@ const PENDING_CONVERSION = new Set([
   "src/features/community-members/ui/CommunityMembersSettingsCard.tsx:to-locale-string",
   "src/features/home/lib/inbox.ts:intl-literal-locale",
   "src/features/home/ui/FeedSection.tsx:intl-literal-locale",
-  "src/features/messages/lib/dateFormatters.ts:intl-literal-locale",
   "src/features/messages/ui/DraftsPanel.tsx:intl-literal-locale",
   "src/features/projects/lib/projectsViewHelpers.ts:to-locale-string",
   "src/features/projects/ui/ProjectCommitDetailPanel.tsx:to-locale-string",

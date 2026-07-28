@@ -2,6 +2,7 @@ import {
   formatFullDateTime,
   formatTimeWithoutDayPeriod,
 } from "@/features/messages/lib/dateFormatters";
+import { useAppLocale } from "@/shared/i18n/useAppLocale";
 import { cn } from "@/shared/lib/cn";
 import {
   Tooltip,
@@ -23,7 +24,10 @@ export function MessageTimestamp({
   hideDayPeriod?: boolean;
   time: string;
 }) {
-  const displayTime = hideDayPeriod ? formatTimeWithoutDayPeriod(time) : time;
+  const { locale } = useAppLocale();
+  const displayTime = hideDayPeriod
+    ? formatTimeWithoutDayPeriod(time, locale)
+    : time;
 
   return (
     <TooltipProvider
@@ -42,7 +46,7 @@ export function MessageTimestamp({
           </p>
         </TooltipTrigger>
         <TooltipContent side="top">
-          {formatFullDateTime(createdAt)}
+          {formatFullDateTime(createdAt, locale)}
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>

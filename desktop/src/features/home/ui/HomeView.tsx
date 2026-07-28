@@ -62,6 +62,7 @@ import { deleteMessage, sendChannelMessage } from "@/shared/api/tauri";
 import type { HomeFeedResponse } from "@/shared/api/types";
 import { KIND_REACTION } from "@/shared/constants/kinds";
 import { topChromeInset } from "@/shared/layout/chromeLayout";
+import { useAppLocale } from "@/shared/i18n/useAppLocale";
 import { cn } from "@/shared/lib/cn";
 import { normalizePubkey } from "@/shared/lib/pubkey";
 import { useElementWidth } from "@/shared/hooks/use-mobile";
@@ -101,6 +102,7 @@ export function HomeView({
   onOpenContext,
   onRefresh,
 }: HomeViewProps) {
+  const { locale } = useAppLocale();
   const relaySelfPubkey = useRelaySelfQuery().data;
   const [homeInboxRef, homeInboxWidthPx] = useElementWidth<HTMLDivElement>();
   const isNarrowHomeViewport =
@@ -839,7 +841,7 @@ export function HomeView({
                     parentId: result.parentEventId,
                     rootId: result.rootEventId,
                     tags: emojiTags,
-                    timeLabel: formatTime(result.createdAt),
+                    timeLabel: formatTime(result.createdAt, locale),
                   };
                   setLocalRepliesByItemId((current) => ({
                     ...current,

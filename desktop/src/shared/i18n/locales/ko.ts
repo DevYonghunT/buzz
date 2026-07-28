@@ -42,6 +42,13 @@ export const ko = {
       updates: "업데이트",
     },
   },
+  time: {
+    today: "오늘",
+    yesterday: "어제",
+    justNow: "방금 전",
+    // 한국어는 "5월 19일에"처럼 조사를 붙이지 않고 날짜만 둔다.
+    onDate: "{{date}}",
+  },
   appearance: {
     title: "화면 및 언어",
     description: "테마와 인터페이스 언어를 선택하세요.",

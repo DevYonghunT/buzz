@@ -503,8 +503,10 @@ const overrides = new Map([
   // member-agent-flags: messageProfiles merge + ref stabilisation split out to
   // useMessageProfiles.ts, ratcheting 1002 -> 972 (under the 1000 default;
   // entry kept as a ratchet). +7 rebase onto main (#1698 timeline-window
-  // growth), 972 -> 979.
-  ["src/features/channels/ui/ChannelScreen.tsx", 979],
+  // growth), 972 -> 979. schoolx-2 세션 C: the timeline formatting memo moved
+  // to useChannelTimelineMessages.ts so the locale it now needs lives next to
+  // the call instead of adding another hook here, 979 -> 964.
+  ["src/features/channels/ui/ChannelScreen.tsx", 964],
   // forced-unread persistence: markChannelUnread now writes through to
   // forcedUnreadStore (localStorage) so the sidebar badge survives reload and
   // the rail observer can read it. Three clear points added (markChannelRead,

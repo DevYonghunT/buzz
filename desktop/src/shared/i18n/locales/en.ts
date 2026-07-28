@@ -45,6 +45,20 @@ export const en = {
       updates: "Updates",
     },
   },
+  time: {
+    /**
+     * Day-divider labels and relative reply times in the message timeline.
+     *
+     * English keeps the exact wording it shipped with — ordinal dates
+     * ("May 19th") and "on <date>" — because adding Korean must not restyle
+     * English product copy. Korean has no ordinal suffix and no leading
+     * preposition, so `onDate` is the bare date there.
+     */
+    today: "Today",
+    yesterday: "Yesterday",
+    justNow: "just now",
+    onDate: "on {{date}}",
+  },
   appearance: {
     title: "Appearance",
     description: "Choose a theme and interface language.",

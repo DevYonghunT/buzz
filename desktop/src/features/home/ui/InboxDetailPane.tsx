@@ -40,6 +40,7 @@ import { UpdateIndicator } from "@/features/settings/UpdateIndicator";
 import type { Channel, UserProfileSummary } from "@/shared/api/types";
 import { resolveMentionProps } from "@/shared/lib/resolveMentionNames";
 import { TopChromeInsetHeader } from "@/shared/layout/TopChromeInsetHeader";
+import { useAppLocale } from "@/shared/i18n/useAppLocale";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import {
@@ -160,6 +161,7 @@ function InboxMessageDetailPane({
   onToggleReaction,
 }: InboxDetailPaneProps) {
   const detailPaneRef = React.useRef<HTMLElement | null>(null);
+  const { locale } = useAppLocale();
   const { activeCommunity } = useCommunities();
   // Refs for the shared anchored-scroll hook's container and content roots.
   const scrollContainerRef = React.useRef<HTMLDivElement | null>(null);
@@ -236,7 +238,7 @@ function InboxMessageDetailPane({
               isSelected: true,
               mentionNames: item.mentionNames,
               mentionPubkeysByName: item.mentionPubkeysByName,
-              timeLabel: formatTime(item.item.createdAt),
+              timeLabel: formatTime(item.item.createdAt, locale),
             },
             ...pendingReplyMessages,
           ]

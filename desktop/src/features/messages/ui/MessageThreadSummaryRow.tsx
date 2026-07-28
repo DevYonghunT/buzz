@@ -15,6 +15,7 @@ import {
   THREAD_REPLY_LINE_WIDTH_REM,
   THREAD_REPLY_ROW_MARGIN_INLINE_REM,
 } from "@/features/messages/lib/threadTreeLayout";
+import { useAppLocale } from "@/shared/i18n/useAppLocale";
 import { cn } from "@/shared/lib/cn";
 import { UserAvatar } from "@/shared/ui/UserAvatar";
 
@@ -84,6 +85,7 @@ export function MessageThreadSummaryRow({
   summaryIndentOffsetRem?: number;
   unreadCount?: number;
 }) {
+  const { locale } = useAppLocale();
   const indentRem = getThreadReplyIndentRem(depth);
   const hoverLeftRem =
     indentRem + THREAD_REPLY_ROW_MARGIN_INLINE_REM + summaryIndentOffsetRem;
@@ -96,7 +98,7 @@ export function MessageThreadSummaryRow({
   )})`;
   const replyLabel = summary.replyCount === 1 ? "reply" : "replies";
   const summaryAriaLabel = summary.lastReplyAt
-    ? `View thread with ${summary.replyCount} ${replyLabel}, last reply ${formatThreadSummaryLastReplyTime(summary.lastReplyAt)}`
+    ? `View thread with ${summary.replyCount} ${replyLabel}, last reply ${formatThreadSummaryLastReplyTime(summary.lastReplyAt, locale)}`
     : `View thread with ${summary.replyCount} ${replyLabel}`;
   const guideDepths = depthGuideDepths
     ? [...depthGuideDepths]
@@ -261,7 +263,10 @@ export function MessageThreadSummaryRow({
                     data-testid="message-thread-summary-last-reply"
                   >
                     last reply{" "}
-                    {formatThreadSummaryLastReplyTime(summary.lastReplyAt)}
+                    {formatThreadSummaryLastReplyTime(
+                      summary.lastReplyAt,
+                      locale,
+                    )}
                   </span>
                   <span
                     className="col-start-1 row-start-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"

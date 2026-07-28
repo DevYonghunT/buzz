@@ -43,7 +43,6 @@ import {
   useSendMessageMutation,
   useToggleReactionMutation,
 } from "@/features/messages/hooks";
-import { formatTimelineMessages } from "@/features/messages/lib/formatTimelineMessages";
 import {
   channelWindowThreadSummaries,
   type ChannelWindowThreadSummary,
@@ -75,6 +74,7 @@ import { AUXILIARY_PANEL_SINGLE_COLUMN_BREAKPOINT_PX } from "@/shared/layout/Aux
 import { normalizePubkey } from "@/shared/lib/pubkey";
 import { useChannelActivityTyping } from "./useChannelActivityTyping";
 import { useChannelAgentSessions } from "./useChannelAgentSessions";
+import { useChannelTimelineMessages } from "./useChannelTimelineMessages";
 import { useMessageProfiles } from "./useMessageProfiles";
 import { useChannelPanelHistoryState } from "./useChannelPanelHistoryState";
 import { useChannelProfilePanel } from "./useChannelProfilePanel";
@@ -385,33 +385,18 @@ export function ChannelScreen({
     }
     return { personaLookup: pLookup, respondToLookup: rLookup };
   }, [managedAgentsQuery.data, personasQuery.data]);
-  const timelineMessages = React.useMemo(
-    () =>
-      formatTimelineMessages(
-        resolvedMessages,
-        activeChannel,
-        currentPubkey,
-        currentProfile?.avatarUrl ?? null,
-        messageProfiles,
-        channelMembers,
-        personaLookup,
-        respondToLookup,
-        relaySelfPubkey,
-        messageOwnerProfiles,
-      ),
-    [
-      activeChannel,
-      channelMembers,
-      currentProfile?.avatarUrl,
-      currentPubkey,
-      messageProfiles,
-      messageOwnerProfiles,
-      personaLookup,
-      relaySelfPubkey,
-      respondToLookup,
-      resolvedMessages,
-    ],
-  );
+  const timelineMessages = useChannelTimelineMessages({
+    activeChannel,
+    channelMembers,
+    currentPubkey,
+    currentUserAvatarUrl: currentProfile?.avatarUrl ?? null,
+    messageOwnerProfiles,
+    messageProfiles,
+    personaLookup,
+    relaySelfPubkey,
+    resolvedMessages,
+    respondToLookup,
+  });
   const threadSummaries: ReadonlyMap<string, ChannelWindowThreadSummary> =
     React.useMemo(
       () =>

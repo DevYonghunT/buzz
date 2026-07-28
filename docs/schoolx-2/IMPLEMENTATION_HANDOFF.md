@@ -61,9 +61,9 @@
 - 전체 도구 경로를 실제 relay로 검증한 open/private 접근 E2E matrix
 - SchoolX 아이콘 자산, 업데이트 서버 endpoint, 배포 서명 주체
 - 앱 셸, 로그인, 온보딩, 채널 목록, 메시지, 검색 등 핵심 화면 전체 번역
-- 아직 남은 화면의 하드코딩된 `en-US`와 영어 상대시간 제거
+- 남은 24개 호출부의 하드코딩된 `en-US`와 OS locale 추종 제거
+  (`desktop/scripts/check-i18n-formatters.mjs`의 `PENDING_CONVERSION`이 목록)
 - 한글 IME 조합, 멘션, 자동완성, 검색 회귀 테스트
-- 한국어 key 누락 시 영어 fallback E2E
 - versioned workspace catalog, provenance, idempotent saga
 - SchoolX persona, 관리형 에이전트, coordinator
 - audience 정책 primitive를 실제 요약 생성·게시 seam에 연결하고 게시 직전
@@ -242,7 +242,7 @@ schoolx-upstream-merge`로 upstream을 받는다.** 절차와 근거는
 
 </details>
 
-### 세션 C — i18n foundation 보강과 핵심 화면 번역
+### 세션 C — i18n foundation 보강과 핵심 화면 번역 · **진행 중**
 
 foundation 구조 보강은 현재 작업트리에 구현됐다.
 
@@ -251,8 +251,41 @@ foundation 구조 보강은 현재 작업트리에 구현됐다.
 - typed resource와 실제 namespace
 - 날짜·시간·숫자 formatter 계약과 대표 호출부
 
-다음에는 missing-key 영어 fallback E2E와 아직 하드코딩된 formatter를
-정리한 뒤 화면별 문자열을 추출한다.
+**세션 C에서 끝난 것 (2026-07-28):**
+
+- i18next init 옵션을 `shared/i18n/config.ts`로 분리 — 테스트가 배포되는
+  설정을 검사한다. 이전에는 테스트가 자체 옵션을 만들어 써서 `fallbackLng`를
+  읽는 테스트가 하나도 없었다.
+- 한국어 키 누락 시 영어 fallback: 단위 테스트와 E2E(`__BUZZ_E2E_I18N__`로
+  런타임에 catalog에 구멍을 뚫는다)
+- `check-i18n-formatters.mjs`를 `pnpm check`에 연결 — locale이 고정되거나
+  OS를 따라가는 호출부를 막는다. 남은 24개는 `PENDING_CONVERSION`에 기록
+- 메시지 타임라인 날짜·시간 로컬라이즈(`messages/lib/dateFormatters.ts`와
+  소비자 7곳), `time` 네임스페이스 신설
+
+**세션 C에서 확인된 사실 중 다음 세 가지는 이후 세션이 전제해야 한다.**
+
+1. **네임스페이스 누락은 fallback으로 구제되지 않는다.** 키 하나가 없으면
+   영어로 대체되지만, `ko`에 네임스페이스가 통째로 없으면 원시 키
+   `appearance.title`이 화면에 나온다. `{ lng: "en" }`을 명시해도 그렇다.
+   `nsSeparator`가 "."이라 i18next가 접두사의 네임스페이스 여부를 *현재
+   언어에 로드된 목록*으로 판단하기 때문이다. 막아주는 것은 런타임이 아니라
+   `ko satisfies TranslationShape<typeof en>`와 키 parity 테스트뿐이다.
+   **네임스페이스를 추가할 때는 `en`, `ko`, `APP_I18N_NAMESPACES`를 한 번에
+   바꾼다.**
+2. **한국어 day period를 "오전/오후"로 가정하지 않는다.** 현재 CLDR(ICU 78)은
+   `ko-KR`에 "AM"/"PM"을 준다. 마커는 ICU 릴리스마다 바뀌는 데이터이고
+   webview와 Node가 다를 수 있으므로, 마커를 다루는 코드는 하드코딩하지 말고
+   `formatToParts`로 되물어야 한다. 한국어 정확 문자열을 단위 테스트에
+   박으면 ICU 버전에 묶인다.
+3. **영어 제품 문구는 한국어 추가의 부수효과로 바뀌지 않는다.** 서수
+   ("May 19th")와 상대시간 문구는 글자 그대로 보존했고 테스트가 고정한다.
+   한국어만 `Intl` 표준형을 쓴다.
+
+**남은 것:** `PENDING_CONVERSION`의 24개 호출부 전환, 한글 IME·멘션·자동완성·
+검색 회귀 테스트, 그리고 아래 권장 순서의 화면별 문자열 추출. 타임라인 주변
+문구("last reply", "reply/replies" 같은 영어 복수형)는 아직 하드코딩이며
+화면 추출 단계에서 처리한다.
 
 위 패턴과 테스트가 확정된 뒤 화면별 문자열 추출만 낮은 추론으로 나눌 수
 있다.

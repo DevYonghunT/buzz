@@ -39,6 +39,7 @@ import {
 import { resolveEventAuthorPubkey } from "@/shared/lib/authors";
 import { normalizePubkey } from "@/shared/lib/pubkey";
 import { formatTime } from "@/features/messages/lib/dateFormatters";
+import { type AppLocale, FALLBACK_APP_LOCALE } from "@/shared/i18n/locale";
 // Pure overlay helper lives in a sibling .mjs so node:test (no TS loader)
 // can exercise the exact same source the renderer uses.
 import { applyEditTagOverlay } from "@/features/messages/lib/applyEditTagOverlay.mjs";
@@ -196,6 +197,17 @@ export function formatTimelineMessages(
   relaySelfPubkey?: string | null,
   /** Profiles for verified agent owners, fetched in one batch by the surface. */
   ownerProfiles?: UserProfileLookup,
+  /**
+   * App locale for the `time` field — the only locale-dependent output here.
+   *
+   * Optional so the fixture-driven tests, which are positional and care about
+   * threading and edits rather than clock text, do not each have to pass eight
+   * `undefined`s to reach it. It defaults to the same English these rows have
+   * always rendered, so omitting it changes nothing. **Surfaces that render to
+   * a user must pass the real locale** — `ChannelScreen` and
+   * `useHomeInboxContextMessages` do.
+   */
+  locale: AppLocale = FALLBACK_APP_LOCALE,
 ): TimelineMessage[] {
   const currentPubkeyLower = currentPubkey?.toLowerCase();
   const roleByPubkey = new Map<string, string>();
@@ -456,7 +468,7 @@ export function formatTimelineMessages(
         role === "bot"
           ? respondToLookup?.get(authorPubkey.toLowerCase())
           : undefined,
-      time: formatTime(event.created_at),
+      time: formatTime(event.created_at, locale),
       body: edit ? edit.content : event.content,
       parentId: thread.parentId,
       rootId: thread.rootId,
