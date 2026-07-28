@@ -338,6 +338,11 @@ test-unit:
         # Gateway unit and black-box HTTP tests are infra-free. Postgres-backed
         # contract/race tests run in the dedicated CI job below.
         cargo nextest run -p buzz-push-gateway
+        # schoolx-catalog: catalog/channel-id/provenance unit tests, including
+        # the compile-time assert that guards against KIND_WORKSPACE_PROVENANCE
+        # drifting out of sync with buzz-core's independently declared copy.
+        # Pure Rust, no Postgres/Redis, so it belongs in the infra-free unit job.
+        cargo nextest run -p schoolx-catalog --lib
     else
         ./scripts/run-tests.sh unit
     fi

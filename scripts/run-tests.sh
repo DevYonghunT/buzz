@@ -100,6 +100,13 @@ run_unit_tests() {
 
   run_test_step "buzz-push-gateway tests" \
     cargo test -p buzz-push-gateway -- --nocapture
+
+  # schoolx-catalog: catalog/channel-id/provenance unit tests, including the
+  # compile-time assert that guards against KIND_WORKSPACE_PROVENANCE drifting
+  # out of sync with buzz-core's independently declared copy. Pure Rust, no
+  # Postgres/Redis, so it belongs in the infra-free unit job.
+  run_test_step "schoolx-catalog tests" \
+    cargo test -p schoolx-catalog --lib -- --nocapture
 }
 
 # ---- DB / integration tests (infra required) --------------------------------

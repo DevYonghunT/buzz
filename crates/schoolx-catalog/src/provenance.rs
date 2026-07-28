@@ -111,6 +111,16 @@ mod tests {
         assert!((30000..=39999).contains(&KIND_WORKSPACE_PROVENANCE));
     }
 
+    // Compile-time: catches a value-only drift between this crate's
+    // KIND_WORKSPACE_PROVENANCE and buzz-core's independently declared copy.
+    // `just clippy` compiles this test target, so a deleted or renamed
+    // constant already fails the build — but changing one constant's
+    // *value* alone still compiles fine and would only be caught by the
+    // runtime test below, which needs `cargo test -p schoolx-catalog` to
+    // actually run. This assert runs on every build that compiles the test
+    // target, closing that gap.
+    const _: () = assert!(KIND_WORKSPACE_PROVENANCE == buzz_core::kind::KIND_WORKSPACE_PROVENANCE);
+
     #[test]
     fn kind_matches_buzz_core_declaration() {
         // buzz-core는 같은 kind 번호를 `crates/buzz-core/src/kind.rs`에

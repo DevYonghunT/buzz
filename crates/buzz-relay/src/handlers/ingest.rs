@@ -3190,16 +3190,14 @@ mod tests {
 
     #[test]
     fn workspace_provenance_requires_h_channel_scope() {
-        assert!(requires_h_channel_scope(
-            buzz_core::kind::KIND_WORKSPACE_PROVENANCE
-        ));
+        assert!(requires_h_channel_scope(KIND_WORKSPACE_PROVENANCE));
     }
 
     #[test]
     fn workspace_provenance_is_a_channel_write() {
         let dummy = make_dummy_event();
         assert_eq!(
-            required_scope_for_kind(buzz_core::kind::KIND_WORKSPACE_PROVENANCE, &dummy).unwrap(),
+            required_scope_for_kind(KIND_WORKSPACE_PROVENANCE, &dummy).unwrap(),
             Scope::ChannelsWrite
         );
     }
