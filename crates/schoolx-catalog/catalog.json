@@ -1,0 +1,22 @@
+{
+  "catalog_id": "schoolx.default",
+  "catalog_version": 1,
+  "items": [
+    {
+      "item_key": "meeting",
+      "name": "메인 회의방",
+      "description": "전사 회의, 종합 보고, 음성 Huddle",
+      "channel_type": "stream",
+      "visibility": "private",
+      "canvas": "# 메인 회의방\n\n## 이 방의 목적\n전사 회의와 종합 보고를 진행합니다.\n\n## 운영 규칙\n- 결정은 결정 기록 아래에 남깁니다.\n- 회의 요약은 사람이 확인한 뒤 이 캔버스에 올립니다.\n\n## 결정 기록\n\n## 주간 요약\n\n## 할 일\n"
+    },
+    {
+      "item_key": "planning",
+      "name": "기획",
+      "description": "사업 기획, 일정, 제안",
+      "channel_type": "stream",
+      "visibility": "private",
+      "canvas": "# 기획\n\n## 이 방의 목적\n사업 기획과 일정, 제안을 다룹니다.\n\n## 운영 규칙\n- 안건은 포럼 글로 올리고 토론은 스레드로 유지합니다.\n- 확정된 내용만 결정 기록에 옮깁니다.\n\n## 결정 기록\n\n## 주간 요약\n\n## 할 일\n"
+    }
+  ]
+}
