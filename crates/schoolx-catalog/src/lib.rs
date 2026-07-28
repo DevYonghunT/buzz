@@ -4,6 +4,7 @@
 //! 설계는 `docs/schoolx-2/WORKSPACE_CATALOG.md`.
 
 pub mod catalog;
+pub mod channel_id;
 
 pub use catalog::{Catalog, CatalogItem, Visibility};
 
