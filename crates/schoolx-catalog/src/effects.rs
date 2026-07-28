@@ -94,8 +94,12 @@ pub(crate) mod fake {
     /// clippy가 실제로 dead_code로 잡는 건 이 struct 자체와 바로 아래
     /// inherent impl뿐이다(필드 하나하나가 아니라). 그래서
     /// `#[allow(dead_code)]`를 모듈 전체가 아니라 이 두 곳에만 건다 —
-    /// 그래야 나중에 이 struct에 추가되는 필드나 메서드가 dead_code 검사를
-    /// 조용히 피해가지 않는다.
+    /// 그러면 나중에 `mod fake`에 추가되는 **다른 최상위 항목**은 계속
+    /// dead_code 검사를 받는다.
+    ///
+    /// 다만 struct에 건 allow는 그 struct의 **모든 필드**에 전파된다. 즉
+    /// 여기에 새 필드를 넣고 아무도 읽지 않아도 clippy는 침묵한다(실측 확인).
+    /// 필드가 죽었는지는 사람이 봐야 한다.
     #[allow(dead_code)]
     #[derive(Default)]
     pub(crate) struct FakeEffects {

@@ -1112,6 +1112,25 @@ mod tests {
             .expect("item present")
     }
 
+    /// 이미 적용된 항목을 시드한다.
+    ///
+    /// provenance는 채널 스코프 이벤트라 채널이 사라지면 읽을 수 없다. fake도
+    /// 그렇게 동작하므로 — `fetch_provenance`가 `channels`에 살아 있는 채널의
+    /// 항목만 돌려준다 — 시딩은 반드시 채널과 짝으로 해야 한다. provenance만
+    /// 넣으면 preflight에는 "적용한 적 없음"으로 보인다.
+    fn seed_applied(fx: &FakeEffects, item_key: &str, name: &str, steps: StepStates) -> Uuid {
+        let channel_id = derive_channel_id("wss://relay.test", "schoolx.default", item_key, 1);
+        fx.channels.lock().expect("lock").push(ChannelRef {
+            id: channel_id,
+            name: name.into(),
+        });
+        fx.provenance
+            .lock()
+            .expect("lock")
+            .push((channel_id, provenance(item_key, steps)));
+        channel_id
+    }
+
     #[tokio::test]
     async fn fresh_install_creates_everything() {
         let fx = FakeEffects::new();
@@ -1126,10 +1145,7 @@ mod tests {
     #[tokio::test]
     async fn completed_item_is_no_change() {
         let fx = FakeEffects::new();
-        fx.provenance
-            .lock()
-            .expect("lock")
-            .push(provenance("meeting", done()));
+        seed_applied(&fx, "meeting", "메인 회의방", done());
 
         let items = preflight(crate::builtin(), &fx).await.expect("preflight");
         assert_eq!(find(&items, "meeting").decision, Decision::NoChange);
@@ -1142,14 +1158,16 @@ mod tests {
     #[tokio::test]
     async fn partial_item_resumes() {
         let fx = FakeEffects::new();
-        fx.provenance.lock().expect("lock").push(provenance(
+        seed_applied(
+            &fx,
             "meeting",
+            "메인 회의방",
             StepStates {
                 channel: StepStatus::Done,
                 canvas: StepStatus::Failed,
                 membership: StepStatus::Pending,
             },
-        ));
+        );
 
         let items = preflight(crate::builtin(), &fx).await.expect("preflight");
         assert_eq!(find(&items, "meeting").decision, Decision::Resume);
@@ -1174,20 +1192,17 @@ mod tests {
     #[tokio::test]
     async fn rename_is_a_flag_not_a_decision() {
         let fx = FakeEffects::new();
-        let channel_id =
-            derive_channel_id("wss://relay.test", "schoolx.default", "meeting", 1);
-        fx.channels.lock().expect("lock").push(ChannelRef {
-            id: channel_id,
-            name: "2026 전체회의".into(),
-        });
-        fx.provenance.lock().expect("lock").push(provenance(
+        // catalog 이름은 "메인 회의방"인데 멤버가 바꿔 놓은 상태.
+        seed_applied(
+            &fx,
             "meeting",
+            "2026 전체회의",
             StepStates {
                 channel: StepStatus::Done,
                 canvas: StepStatus::Failed,
                 membership: StepStatus::Pending,
             },
-        ));
+        );
 
         let items = preflight(crate::builtin(), &fx).await.expect("preflight");
         let meeting = find(&items, "meeting");
@@ -1199,10 +1214,8 @@ mod tests {
     #[tokio::test]
     async fn item_dropped_from_catalog_is_retired() {
         let fx = FakeEffects::new();
-        fx.provenance
-            .lock()
-            .expect("lock")
-            .push(provenance("finance", done()));
+        // catalog에 없는 항목이지만 예전 버전에서 적용된 채로 남아 있다.
+        seed_applied(&fx, "finance", "재무", done());
 
         let items = preflight(crate::builtin(), &fx).await.expect("preflight");
         assert_eq!(find(&items, "finance").decision, Decision::Retired);
@@ -1579,6 +1592,7 @@ mod tests {
         let fx = FakeEffects::new();
         apply(crate::builtin(), &fx, &both()).await.expect("first");
         let before = fx.channels.lock().expect("lock").len();
+        let published_before = fx.published.lock().expect("lock").len();
 
         let ledger = apply(crate::builtin(), &fx, &both()).await.expect("second");
 
@@ -1586,6 +1600,9 @@ mod tests {
             assert_eq!(entry.outcome, Outcome::Unchanged, "{}", entry.item_key);
         }
         assert_eq!(fx.channels.lock().expect("lock").len(), before);
+        // 변경 없음이면 provenance를 다시 발행하지도 않는다. `published`는
+        // 필터 없는 append-only 로그라 발행 횟수를 그대로 센다.
+        assert_eq!(fx.published.lock().expect("lock").len(), published_before);
     }
 
     #[tokio::test]
@@ -1650,9 +1667,10 @@ mod tests {
             .expect("first");
 
         // 사용자가 방을 지운다: 접근 가능 목록에서 사라지지만 ID는 계속 탄 채다.
-        // provenance도 채널 스코프라 읽을 수 없게 된다.
+        // provenance는 손대지 않는다 — 채널 스코프라 채널이 사라지는 것만으로
+        // 읽을 수 없게 되고, fake도 그렇게 동작한다. 두 저장소를 같이 비우면
+        // relay가 만들 수 없는 상태를 테스트가 대신 만들어 주는 셈이 된다.
         fx.channels.lock().expect("lock").clear();
-        fx.provenance.lock().expect("lock").clear();
 
         let ledger = apply(crate::builtin(), &fx, &["meeting".to_string()])
             .await
