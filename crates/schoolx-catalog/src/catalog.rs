@@ -93,4 +93,29 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn visibility_private_as_str() {
+        assert_eq!(Visibility::Private.as_str(), "private");
+    }
+
+    #[test]
+    fn visibility_open_as_str() {
+        assert_eq!(Visibility::Open.as_str(), "open");
+    }
+
+    #[test]
+    fn catalog_item_lookup_by_key() {
+        let catalog = crate::builtin();
+        let item = catalog.item("meeting");
+        assert!(item.is_some());
+        assert_eq!(item.unwrap().item_key, "meeting");
+    }
+
+    #[test]
+    fn catalog_item_lookup_nonexistent_key_returns_none() {
+        let catalog = crate::builtin();
+        let item = catalog.item("nonexistent");
+        assert!(item.is_none());
+    }
 }
