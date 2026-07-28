@@ -82,29 +82,52 @@ pub trait CatalogEffects: Send + Sync {
 }
 
 #[cfg(test)]
-// Task 6/7가 이 fake를 실제 테스트에서 쓰기 전까지는 아무것도 호출되지
-// 않는다 — 이 task는 경계만 놓는다는 브리프대로다. `-D warnings` 아래
-// dead_code를 허용해 두면 이후 task가 이 struct를 쓰기 시작하는 순간
-// 자연히 무해해진다.
-#[allow(dead_code)]
 pub(crate) mod fake {
     use super::*;
     use std::collections::{HashMap, HashSet};
     use std::sync::Mutex;
 
     /// 실패를 주입할 수 있는 인메모리 구현.
+    ///
+    /// Task 6/7이 이 fake를 실제 테스트에서 쓰기 전까지는 아래 필드 중
+    /// 무엇도 값을 갖지 않는다 — 이 task는 경계만 놓는다는 브리프대로다.
+    /// clippy가 실제로 dead_code로 잡는 건 이 struct 자체와 바로 아래
+    /// inherent impl뿐이다(필드 하나하나가 아니라). 그래서
+    /// `#[allow(dead_code)]`를 모듈 전체가 아니라 이 두 곳에만 건다 —
+    /// 그래야 나중에 이 struct에 추가되는 필드나 메서드가 dead_code 검사를
+    /// 조용히 피해가지 않는다.
+    #[allow(dead_code)]
     #[derive(Default)]
     pub(crate) struct FakeEffects {
         pub channels: Mutex<Vec<ChannelRef>>,
-        pub provenance: Mutex<Vec<Provenance>>,
+        /// `(channel_id, provenance)` 쌍. 실제 relay에서 provenance
+        /// 이벤트는 채널 스코프다 — 자기 채널에 실려서 저장되고, 그 채널이
+        /// soft delete되면 함께 읽을 수 없게 된다. channel_id 없이는 이
+        /// 상태를 표현할 수조차 없어야 하므로, `channels`와의 연결을 필드
+        /// 타입 자체에 새긴다. 가시성 필터링은 `fetch_provenance`가 한다.
+        pub provenance: Mutex<Vec<(Uuid, Provenance)>>,
         /// 이미 점유된 채널 UUID — soft delete된 것 포함.
         pub burned_ids: Mutex<HashSet<Uuid>>,
         pub canvases: Mutex<HashMap<Uuid, String>>,
         /// 이 이름의 연산을 한 번 실패시킨다.
         pub fail_once: Mutex<HashSet<String>>,
+        /// 모든 `publish_provenance` 호출의 append-only 로그.
+        ///
+        /// `provenance`와 달리 절대 걸러내거나 지우지 않는다 — 몇 번
+        /// 발행이 시도됐는지를 테스트가 손실 없이 그대로 assert할 수
+        /// 있게 하는 것이 유일한 목적이며, 이건 의도적인 설계지 필터링을
+        /// 깜빡한 게 아니다.
         pub published: Mutex<Vec<(Uuid, Provenance)>>,
+        /// 현재 사용자가 owner인 채널 UUID 집합.
+        ///
+        /// `channels`(= 접근 가능한/보이는 채널)와 고의로 분리한다 —
+        /// 그래야 "채널은 존재하고 접근도 되지만 내가 owner는 아니다"라는,
+        /// `channels` 멤버십만으로는 표현할 수 없는 상태를 테스트가 만들 수
+        /// 있다.
+        pub owned: Mutex<HashSet<Uuid>>,
     }
 
+    #[allow(dead_code)]
     impl FakeEffects {
         pub(crate) fn new() -> Self {
             Self::default()
@@ -135,15 +158,29 @@ pub(crate) mod fake {
             Ok(self.channels.lock().expect("lock").clone())
         }
 
+        // 채널-존재 필터가 채널 스코프 저장을 모델링한다: provenance는 항상
+        // 어떤 채널에 실려서 저장되므로, 그 채널이 `channels`에서 사라지면
+        // (soft delete) provenance도 자동으로 읽을 수 없게 되어야 한다.
+        // 이건 최적화가 아니라 의도된 동작이다 — 실제 relay에서 채널 스코프
+        // 이벤트는 채널이 삭제되면 함께 조회 불가능해진다.
         async fn fetch_provenance(&self, catalog_id: &str) -> Result<Vec<Provenance>, EffectError> {
             self.take_failure("fetch_provenance")?;
+            let live_channels: HashSet<Uuid> = self
+                .channels
+                .lock()
+                .expect("lock")
+                .iter()
+                .map(|c| c.id)
+                .collect();
             Ok(self
                 .provenance
                 .lock()
                 .expect("lock")
                 .iter()
-                .filter(|p| p.catalog_id == catalog_id)
-                .cloned()
+                .filter(|(channel_id, p)| {
+                    p.catalog_id == catalog_id && live_channels.contains(channel_id)
+                })
+                .map(|(_, p)| p.clone())
                 .collect())
         }
 
@@ -156,6 +193,7 @@ pub(crate) mod fake {
                 id: spec.id,
                 name: spec.name,
             });
+            self.owned.lock().expect("lock").insert(spec.id);
             Ok(CreateOutcome::Created)
         }
 
@@ -170,12 +208,7 @@ pub(crate) mod fake {
 
         async fn is_owner(&self, channel_id: Uuid) -> Result<bool, EffectError> {
             self.take_failure("is_owner")?;
-            Ok(self
-                .channels
-                .lock()
-                .expect("lock")
-                .iter()
-                .any(|c| c.id == channel_id))
+            Ok(self.owned.lock().expect("lock").contains(&channel_id))
         }
 
         async fn publish_provenance(
@@ -188,10 +221,11 @@ pub(crate) mod fake {
                 .lock()
                 .expect("lock")
                 .push((channel_id, provenance.clone()));
-            // NIP-33 LWW: 같은 d 태그는 교체된다.
+            // NIP-33 LWW: 같은 d 태그는 교체된다 — retain-then-push라 같은
+            // d_tag로 재발행해도 정확히 한 항목만 남고, 그 값은 새 값이다.
             let mut store = self.provenance.lock().expect("lock");
-            store.retain(|p| p.d_tag() != provenance.d_tag());
-            store.push(provenance.clone());
+            store.retain(|(_, p)| p.d_tag() != provenance.d_tag());
+            store.push((channel_id, provenance.clone()));
             Ok(())
         }
 
