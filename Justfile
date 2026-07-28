@@ -1021,13 +1021,25 @@ schoolx-upstream-merge:
         exit 1
     fi
     git fetch upstream
-    safety="schoolx-pre-upstream-sync-$(date +%Y%m%d)"
+    # Minute-stamped, not date-stamped: two syncs in one day used to collide on
+    # the name, and the old recipe kept the FIRST one — so the printed rollback
+    # command pointed at a tip from before the day's earlier work and would have
+    # discarded it. A stale rollback point is worse than none, so a name that is
+    # taken by a different commit is a hard failure now. The suffix still sorts
+    # lexicographically, which is how `schoolx-upstream-check` picks the newest.
+    safety="schoolx-pre-upstream-sync-$(date +%Y%m%d-%H%M)"
     if git rev-parse --verify --quiet "${safety}" >/dev/null; then
-        echo "rollback branch ${safety} already exists, keeping it"
+        if [[ "$(git rev-parse "${safety}")" != "$(git rev-parse HEAD)" ]]; then
+            echo "✗ rollback branch ${safety} exists but does not point at HEAD" >&2
+            echo "  it is $(git rev-parse --short "${safety}"), HEAD is $(git rev-parse --short HEAD)" >&2
+            echo "  delete or rename it before merging" >&2
+            exit 1
+        fi
+        echo "rollback branch ${safety} already at HEAD, reusing it"
     else
         git branch "${safety}" "${branch}"
-        echo "rollback branch: ${safety}  (git reset --hard ${safety})"
     fi
+    echo "rollback branch: ${safety}  (git reset --hard ${safety})"
     if git merge upstream/main --no-edit; then
         echo
         echo "✓ merged cleanly"

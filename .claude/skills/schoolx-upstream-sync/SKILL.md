@@ -43,8 +43,11 @@ just schoolx-upstream-preflight   # fetch, divergence, conflict candidates
 just schoolx-upstream-merge       # rollback branch, merge, then the 3 checks
 ```
 
-`schoolx-upstream-merge` saves `schoolx-pre-upstream-sync-<YYYYMMDD>` before
-merging. Rollback is `git reset --hard schoolx-pre-upstream-sync-<date>`.
+`schoolx-upstream-merge` saves `schoolx-pre-upstream-sync-<YYYYMMDD-HHMM>`
+before merging and prints the exact rollback command. The stamp carries the
+minute because two syncs in one day collide on a date-only name — the recipe
+used to keep the older branch, so the rollback it advertised pointed at a tip
+from before the day's earlier work.
 
 ### If the merge conflicts
 
