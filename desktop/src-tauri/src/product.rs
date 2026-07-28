@@ -143,12 +143,12 @@ mod tests {
     fn product_strings_do_not_collide_with_buzz() {
         let buzz_values = [
             "buzz",
-            "xyz.block.buzz.app",
-            "xyz.block.buzz.app.dev",
-            ".buzz",
-            ".buzz-dev",
-            "buzz-desktop",
-            "buzz-desktop-dev",
+            "xyz.block.buzz.app",     // schoolx:buzz-name-ok
+            "xyz.block.buzz.app.dev", // schoolx:buzz-name-ok
+            ".buzz",                  // schoolx:buzz-name-ok
+            ".buzz-dev",              // schoolx:buzz-name-ok
+            "buzz-desktop",           // schoolx:buzz-name-ok
+            "buzz-desktop-dev",       // schoolx:buzz-name-ok
         ];
         let schoolx_values = [
             DEEP_LINK_SCHEME,

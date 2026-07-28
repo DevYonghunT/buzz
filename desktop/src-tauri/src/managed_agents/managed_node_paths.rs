@@ -1,13 +1,25 @@
 use std::path::PathBuf;
 
+/// Root under the platform data dir holding this build's managed Node.js
+/// toolchain and npm prefix.
+///
+/// Product-scoped (see [`crate::product::PRODUCT_NAME`]): this is a *sibling*
+/// of the bundle-identifier app-data directory, not inside it, so it does not
+/// inherit that isolation. Left as `"Buzz"` it would put SchoolX's downloaded
+/// Node runtime and npm-installed ACP adapters in a co-installed Buzz's
+/// directory, where either product could overwrite the other's toolchain.
+fn managed_toolchain_root() -> Option<PathBuf> {
+    dirs::data_dir().map(|dir| dir.join(crate::product::PRODUCT_NAME))
+}
+
 pub(crate) fn buzz_managed_npm_prefix() -> Option<PathBuf> {
-    dirs::data_dir().map(|dir| dir.join("Buzz").join("node-tools"))
+    managed_toolchain_root().map(|dir| dir.join("node-tools"))
 }
 
 const BUZZ_MANAGED_NODE_VERSION: &str = "v24.18.0";
 
 pub(crate) fn buzz_managed_node_root() -> Option<PathBuf> {
-    dirs::data_dir().map(|dir| dir.join("Buzz").join("runtimes").join("node"))
+    managed_toolchain_root().map(|dir| dir.join("runtimes").join("node"))
 }
 
 pub(crate) fn buzz_managed_node_bin_dir() -> Option<PathBuf> {

@@ -33,7 +33,8 @@ function isBuzzRuntime(runtime: AcpRuntimeCatalogEntry): boolean {
 export function getRuntimeDisplayLabel(
   runtime: AcpRuntimeCatalogEntry,
 ): string {
-  return isBuzzRuntime(runtime) ? "Buzz" : runtime.label;
+  // The buzz-agent runtime's own name, not the product name.
+  return isBuzzRuntime(runtime) ? "Buzz" : runtime.label; // schoolx:buzz-name-ok
 }
 
 function getRuntimeLogoUrl(runtime: AcpRuntimeCatalogEntry): string | null {

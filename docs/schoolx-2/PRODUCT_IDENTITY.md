@@ -65,6 +65,30 @@
 `secret_store.rs`에 "서비스명은 상수이며 번들 식별자를 따르지 않는다"고
 명시돼 있었다.
 
+### 손으로 훑어서는 다 못 찾는다
+
+위 표는 계획서와 코드 읽기로 찾은 것이다. 이후 `just schoolx-upstream-check`를
+만들어 기계적으로 훑자 **손으로 놓친 다섯 곳이 더 나왔다.** 전부 컴파일되고,
+1,824개 Tauri 테스트를 통과하고, 타입 검사도 통과하던 코드다.
+
+| 위치 | 증상 |
+|---|---|
+| `lib.rs` dev nest 판별 | `n == ".buzz-dev"` 비교가 `~/.schoolx-dev`와 영원히 불일치 → dev nest 마이그레이션이 아예 안 돎 |
+| `managed_agents/storage.rs` | dev 키 마이그레이션이 `SecretStore::keyring("buzz-desktop")` — **Buzz의 프로덕션 키체인을 읽음**. 게이트도 옛 이름이라 우연히 도달 불가였을 뿐 |
+| `commands/project_repo_paths.rs` | repos 루트 폴백이 `~/.buzz/REPOS` — 함께 설치된 Buzz의 체크아웃을 SchoolX 에이전트에게 넘김 |
+| `managed_agents/managed_node_paths.rs` | 관리형 Node 툴체인과 npm prefix가 `<data-dir>/Buzz/` — 번들 식별자 디렉터리의 **형제**라 그 격리를 물려받지 않음 |
+| `runtime/instance_reaper.rs` | 살아있는 데스크톱 프로세스 이름 목록이 `"Buzz"` → productName이 `SchoolX`가 되면 **모든 프로세스가 죽은 것으로 보여 reaper가 실행 중인 에이전트를 죽임** |
+
+교훈은 두 가지다. 첫째, 제품 정체성은 한 곳에 모여 있지 않고 `$HOME` 경로,
+데이터 디렉터리의 형제 폴더, 프로세스 이름 목록처럼 서로 다른 층에 흩어져
+있다. 둘째, **이 종류의 실수는 타입 검사도 테스트도 잡지 못한다** — 이름이
+안 맞으면 조건이 조용히 거짓이 될 뿐이다. 그래서 grep 기반 가드를 상시
+검사로 남겼다.
+
+의도적인 잔존 문자열(Cargo 패키지명, `buzz-agent` 런타임 표시명)은 소스에
+`// schoolx:buzz-name-ok` 주석으로 명시적으로 빠져나간다. 정규식이 추측하게
+두지 않고 코드를 읽는 사람이 볼 수 있는 자리에서 판단을 기록하기 위해서다.
+
 ### 남의 제품 데이터를 지우지도 않는다
 
 격리는 읽기·쓰기만이 아니다. upstream의 초기화 경로는 `~/.sprout`(Buzz의

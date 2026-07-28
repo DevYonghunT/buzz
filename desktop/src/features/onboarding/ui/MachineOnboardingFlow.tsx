@@ -153,7 +153,7 @@ export function MachineOnboardingFlow({
               transitionKey="machine-identity"
             >
               <img
-                alt="Buzz"
+                alt="Buzz" // schoolx:buzz-name-ok — buzz-agent runtime logo
                 className="w-full max-w-[600px]"
                 src="/landing/buzz-wordmark.png"
               />

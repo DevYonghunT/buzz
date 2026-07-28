@@ -1,14 +1,23 @@
 use super::*;
 
-/// Binary names for the Buzz desktop/Tauri process. Used by dead-instance
-/// detection to confirm the owning desktop is still alive.
+/// Binary names for this product's desktop/Tauri process. Used by
+/// dead-instance detection to confirm the owning desktop is still alive.
+///
+/// Two naming sources, and only one of them was rebranded. The macOS bundle
+/// executable takes its name from `productName` in `tauri.conf.json`, so it
+/// follows [`crate::product::PRODUCT_NAME`]. The `buzz-desktop*` entries come
+/// from the **Cargo package name**, which SchoolX did not rename — those stay
+/// as-is and are not product strings.
+///
+/// Getting this wrong is silent and destructive: an unmatched name makes every
+/// live desktop process look dead, and the reaper kills its agents.
 const DESKTOP_BINARY_NAMES: &[&str] = &[
-    "Buzz",
-    "buzz-desktop",
-    "buzz_desktop",
+    crate::product::PRODUCT_NAME,
+    "buzz-desktop", // schoolx:buzz-name-ok — Cargo package name
+    "buzz_desktop", // schoolx:buzz-name-ok — Cargo package name
     // Linux limits /proc/<pid>/comm to 15 visible bytes, truncating the
     // AppImage shim's real executable name, `buzz-desktop.bin`.
-    "buzz-desktop.bi",
+    "buzz-desktop.bi", // schoolx:buzz-name-ok — Cargo package name
 ];
 
 /// Check if a process name matches a known Buzz desktop binary.

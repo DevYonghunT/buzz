@@ -500,7 +500,7 @@ mod tests {
             assert_eq!(
                 classify_deep_link(&url),
                 Err(DeepLinkRejection::ForeignScheme("buzz".to_string())),
-                "legacy buzz://{kind} must be rejected, naming the scheme",
+                "legacy buzz://{kind} must be rejected, naming the scheme", // schoolx:buzz-name-ok
             );
         }
     }

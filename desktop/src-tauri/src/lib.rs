@@ -531,7 +531,7 @@ pub fn run() {
             // doesn't re-populate what was just wiped.
             let is_dev_nest = managed_agents::nest_dir()
                 .and_then(|p| p.file_name().map(|n| n.to_os_string()))
-                .is_some_and(|n| n == ".buzz-dev");
+                .is_some_and(|n| n == product::NEST_DIR_DEV);
             if !reset_outcome.completed && is_dev_nest {
                 migration::migrate_dev_nest();
             }

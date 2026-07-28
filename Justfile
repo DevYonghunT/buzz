@@ -973,3 +973,177 @@ benchmark *ARGS:
 # Stop the benchmark Docker stack (state and channels are kept)
 benchmark-down:
     docker compose --project-name buzz-benchmark down
+
+# ─── SchoolX fork maintenance ─────────────────────────────────────────────────
+
+# Read-only: creates no branch and merges nothing.
+# Fetch upstream, report divergence, and list files both sides touched
+schoolx-upstream-preflight:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export PATH="{{justfile_directory()}}/bin:$PATH"
+    branch="$(git rev-parse --abbrev-ref HEAD)"
+    if [[ -n "$(git status --porcelain)" ]]; then
+        echo "✗ working tree is dirty — commit or stash before merging upstream" >&2
+        exit 1
+    fi
+    git fetch upstream
+    base="$(git merge-base "${branch}" upstream/main)"
+    read -r ours theirs <<<"$(git rev-list --left-right --count "${branch}...upstream/main")"
+    echo
+    echo "branch:            ${branch}"
+    echo "merge-base:        ${base}"
+    echo "upstream tip:      $(git log -1 --format='%H %ad %s' --date=short upstream/main)"
+    echo "SchoolX commits:   ${ours}"
+    echo "upstream commits:  ${theirs}"
+    if [[ "${theirs}" == "0" ]]; then
+        echo
+        echo "✓ already up to date with upstream/main"
+        exit 0
+    fi
+    echo
+    echo "── files both sides touched (conflict candidates) ──"
+    comm -12 \
+        <(git diff --name-only "${base}" "${branch}" | sort) \
+        <(git diff --name-only "${base}" upstream/main | sort)
+    echo
+    echo "Next: just schoolx-upstream-merge"
+
+# Saves a dated rollback branch first; stops at the merge on conflict.
+# Merge upstream/main, then run the silent-conflict checks
+schoolx-upstream-merge:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export PATH="{{justfile_directory()}}/bin:$PATH"
+    branch="$(git rev-parse --abbrev-ref HEAD)"
+    if [[ -n "$(git status --porcelain)" ]]; then
+        echo "✗ working tree is dirty — commit or stash first" >&2
+        exit 1
+    fi
+    git fetch upstream
+    safety="schoolx-pre-upstream-sync-$(date +%Y%m%d)"
+    if git rev-parse --verify --quiet "${safety}" >/dev/null; then
+        echo "rollback branch ${safety} already exists, keeping it"
+    else
+        git branch "${safety}" "${branch}"
+        echo "rollback branch: ${safety}  (git reset --hard ${safety})"
+    fi
+    if git merge upstream/main --no-edit; then
+        echo
+        echo "✓ merged cleanly"
+    else
+        echo
+        echo "✗ merge stopped on conflicts. Resolve, then run:"
+        echo "    just schoolx-upstream-check"
+        echo
+        echo "  pnpm-lock.yaml: do not hand-edit. Take upstream's and regenerate —"
+        echo "    git checkout --theirs pnpm-lock.yaml && pnpm install --lockfile-only"
+        exit 1
+    fi
+    just schoolx-upstream-check
+
+# Each of these has merged without a textual conflict before, so a clean
+# merge proves nothing about them. Check 3 scans only what changed since
+# `since` (default: the newest schoolx-pre-upstream-sync-* branch, i.e. what
+# the last merge brought in). Pass a ref, or "all" to scan the whole tree.
+# Check the three things a clean upstream merge does NOT give you
+schoolx-upstream-check since="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export PATH="{{justfile_directory()}}/bin:$PATH"
+    fail=0
+
+    # 1. Migration version collision. sqlx keys `_sqlx_migrations` by version
+    # but does NOT reject duplicates at compile time: a collision builds green
+    # and strands one of the two migrations forever. SchoolX uses 9001+.
+    echo "── 1/3 migration version collisions ──"
+    dupes="$(ls migrations/ | cut -c1-4 | sort | uniq -d || true)"
+    if [[ -n "${dupes}" ]]; then
+        echo "✗ duplicate migration versions: ${dupes}"
+        echo "  Move the SchoolX-owned file into the reserved 9001+ range and"
+        echo "  update the guard in crates/buzz-db/src/migration.rs."
+        fail=1
+    else
+        echo "✓ no duplicate version prefixes"
+    fi
+
+    # 2. Security contract. A file that resolves readable channels via the
+    # open-inclusive lookup must also consult the member-only one — that pair
+    # is how the managed-agent gate is applied. A file with only the
+    # open-inclusive call is a read path that skips the gate entirely.
+    # `state.rs` is excluded: it defines both. See SECURITY_CONTRACT.md §2.
+    echo "── 2/3 managed-agent membership gate ──"
+    unpaired=""
+    while read -r f; do
+        [[ "${f}" == *"/state.rs" ]] && continue
+        grep -q "get_member_channel_ids_cached" "${f}" || unpaired+="  ${f}"$'\n'
+    done < <(grep -rl "get_accessible_channel_ids_cached" crates/buzz-relay/src --include="*.rs" || true)
+    if [[ -n "${unpaired}" ]]; then
+        echo "✗ these resolve readable channels without the member-only lookup:"
+        printf '%s' "${unpaired}"
+        echo "  Upstream may have added a read path that skips the gate."
+        fail=1
+    else
+        echo "✓ every open-inclusive lookup site also uses the member-only one"
+    fi
+
+    # 3. Product identity. Upstream code hardcoding a Buzz identifier in a new
+    # path would silently share a data directory, keychain, URL scheme, or
+    # process name with a co-installed Buzz. Matches identity literals only —
+    # not the `buzz-desktop:` log prefix, not `buzz-agent`/`buzz-cli` binary
+    # names, and not comment lines. See PRODUCT_IDENTITY.md §3.
+    #
+    # Scoped to changed files by default: a whole-tree scan is dominated by
+    # test fixtures and deliberate negative assertions, and "what upstream
+    # just changed" is the question that actually matters after a merge.
+    since="{{since}}"
+    if [[ -z "${since}" ]]; then
+        since="$(git for-each-ref --sort=-refname --format='%(refname:short)' \
+            'refs/heads/schoolx-pre-upstream-sync-*' | head -1)"
+    fi
+    roots=(desktop/src-tauri/src desktop/src crates/buzz-cli/src web/src)
+    # No `mapfile`: macOS ships bash 3.2.
+    files=()
+    if [[ -z "${since}" || "${since}" == "all" ]]; then
+        echo "── 3/3 Buzz product identifiers (whole tree) ──"
+        while IFS= read -r f; do files+=("${f}"); done < <(
+            git ls-files "${roots[@]}" | grep -E '\.(rs|ts|tsx)$' || true)
+    else
+        echo "── 3/3 Buzz product identifiers (changed since ${since}) ──"
+        while IFS= read -r f; do files+=("${f}"); done < <(
+            git diff --name-only --diff-filter=d "${since}...HEAD" -- "${roots[@]}" \
+                | grep -E '\.(rs|ts|tsx)$' || true)
+    fi
+    if [[ "${#files[@]}" -eq 0 ]]; then
+        echo "✓ no source files in scope"
+    else
+        # Deliberate occurrences opt out in the source with a trailing
+        # `schoolx:buzz-name-ok` comment, so "is this product identity or a
+        # technical name?" is answered where the reader can see the code
+        # rather than guessed at by a regex here.
+        hits="$(grep -nH -E 'xyz\.block\.(buzz|sprout)\.app|"buzz-desktop(-dev)?"|"\.buzz(-dev)?"|"Buzz"|buzz://' \
+            "${files[@]}" \
+            | grep -v -E ':[0-9]+: *(//|///|\*|/\*)' \
+            | grep -v -E '/tests?/|/tests?\.rs:|_tests\.rs:|\.test\.|\.spec\.|\.example' \
+            | grep -v -E 'schoolx:buzz-name-ok|assert' || true)"
+        if [[ -n "${hits}" ]]; then
+            echo "✗ review these — route product strings through the product layer:"
+            echo "${hits}"
+            fail=1
+        else
+            echo "✓ no Buzz identity literals in ${#files[@]} file(s) in scope"
+        fi
+    fi
+
+    echo
+    if [[ "${fail}" -ne 0 ]]; then
+        echo "✗ checks failed — see above before running the test suites"
+        exit 1
+    fi
+    echo "✓ all three checks passed"
+    echo
+    echo "Now verify, then record the sync in docs/schoolx-2/BASELINE.md"
+    echo "and the table in DEVELOPMENT_PLAN.md §10:"
+    echo "    just desktop-tauri-test"
+    echo "    pnpm --dir desktop typecheck && pnpm --dir desktop check && pnpm --dir desktop test"
+    echo "    just test-e2e e2e_access_matrix     # security contract gate"

@@ -206,6 +206,15 @@ relay에서 전부 통과). 실행은 `just test-e2e e2e_access_matrix`.
    컴파일 타임에 거부하지 않아 충돌이 조용히 마이그레이션 하나를 영구
    무효화한다.
 
+**각 세션은 시작 전에 `just schoolx-upstream-preflight` → `just
+schoolx-upstream-merge`로 upstream을 받는다.** 절차와 근거는
+`.claude/skills/schoolx-upstream-sync/SKILL.md`에 있고, 이 스킬은 모든 세션의
+스킬 목록에 자동으로 뜬다.
+
+`schoolx-upstream-check`의 제품 식별자 검사는 사람이 훑어서 놓친 5건을
+잡았다 — 전부 컴파일되고 테스트를 통과하던 코드다. 목록은
+[`PRODUCT_IDENTITY.md`](PRODUCT_IDENTITY.md) §3.
+
 **세션 B에서 넘긴 것:** 아이콘 자산, 업데이트 서버 endpoint, 배포 서명 주체.
 셋 다 코드가 아니라 디자인·계정 결정이라 세션 F(패키징)에서 처리한다.
 현재 배포본은 여전히 Buzz 아이콘을 달고 나온다.

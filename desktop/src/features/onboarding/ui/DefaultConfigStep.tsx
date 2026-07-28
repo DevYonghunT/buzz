@@ -42,7 +42,8 @@ type DefaultConfigStepProps = {
 
 function formatHarnessLabel(runtime: AcpRuntimeCatalogEntry | undefined) {
   if (!runtime) return "Select a harness";
-  return runtime.id === "buzz-agent" ? "Buzz" : runtime.label;
+  // The buzz-agent runtime's own name, not the product name.
+  return runtime.id === "buzz-agent" ? "Buzz" : runtime.label; // schoolx:buzz-name-ok
 }
 
 function AgentDefaultsSection({

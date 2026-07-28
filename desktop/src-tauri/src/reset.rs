@@ -445,7 +445,7 @@ mod tests {
         let legacy_dir = tmp
             .path()
             .join("Application Support")
-            .join("xyz.block.sprout.app");
+            .join("xyz.block.sprout.app"); // schoolx:buzz-name-ok
         std::fs::create_dir_all(&legacy_dir).unwrap();
         std::fs::write(legacy_dir.join("identity.key"), b"old-identity").unwrap();
 
@@ -628,7 +628,7 @@ mod tests {
         let legacy_dir = tmp
             .path()
             .join("Application Support")
-            .join("xyz.block.sprout.app");
+            .join("xyz.block.sprout.app"); // schoolx:buzz-name-ok
         std::fs::create_dir_all(legacy_dir.join("agents")).unwrap();
         std::fs::write(legacy_dir.join("identity.key"), b"sprout-nsec").unwrap();
 
@@ -807,7 +807,7 @@ mod tests {
         std::fs::create_dir_all(&app_data).unwrap();
         std::fs::write(app_data.join("config.json"), b"{}").unwrap();
 
-        let legacy = app_support.join("xyz.block.sprout.app");
+        let legacy = app_support.join("xyz.block.sprout.app"); // schoolx:buzz-name-ok
         std::fs::create_dir_all(&legacy).unwrap();
         std::fs::write(legacy.join("identity.key"), b"sprout-key").unwrap();
 
@@ -852,7 +852,7 @@ mod tests {
         assert!(!legacy.exists(), "legacy must be gone");
         // No trash directories should remain.
         let trash_app = app_support.join("io.github.schoolx520.app.reset-trash");
-        let trash_legacy = app_support.join("xyz.block.sprout.app.reset-trash");
+        let trash_legacy = app_support.join("xyz.block.sprout.app.reset-trash"); // schoolx:buzz-name-ok
         assert!(!trash_app.exists(), "app trash must be cleaned");
         assert!(!trash_legacy.exists(), "legacy trash must be cleaned");
     }
