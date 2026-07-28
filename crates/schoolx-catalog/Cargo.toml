@@ -19,3 +19,4 @@ async-trait = "0.1"
 # the production dependency graph stays one-way (buzz-core does not depend on
 # schoolx-catalog).
 buzz-core = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt"] }

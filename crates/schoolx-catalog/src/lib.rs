@@ -6,6 +6,7 @@
 pub mod catalog;
 pub mod channel_id;
 pub mod effects;
+pub mod preflight;
 pub mod provenance;
 
 pub use catalog::{Catalog, CatalogItem, Visibility};
