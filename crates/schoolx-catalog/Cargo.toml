@@ -12,3 +12,10 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true, features = ["v5"] }
 async-trait = "0.1"
+
+[dev-dependencies]
+# Dev-only: lets the drift-guard test in `src/provenance.rs` assert that this
+# crate's KIND_WORKSPACE_PROVENANCE matches buzz-core's copy. Kept dev-only so
+# the production dependency graph stays one-way (buzz-core does not depend on
+# schoolx-catalog).
+buzz-core = { workspace = true }

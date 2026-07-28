@@ -112,6 +112,23 @@ mod tests {
     }
 
     #[test]
+    fn kind_matches_buzz_core_declaration() {
+        // buzz-core는 같은 kind 번호를 `crates/buzz-core/src/kind.rs`에
+        // 독립적으로 선언한다 — buzz-core가 schoolx-catalog에 의존할 수
+        // 없으므로 두 상수는 단일 소스를 공유하지 못하고 일부러 중복된다.
+        // 이 테스트가 그 중복이 조용히 벌어지는 것을 막는 유일한 장치다.
+        // 둘 중 하나만 바뀌면 relay의 scope/h-tag 처리(buzz-relay)와 이
+        // 크레이트의 provenance 인코딩이 서로 다른 kind 번호를 쓰게 되어,
+        // provenance 발행이 relay에서 전부 거부되거나 잘못 라우팅된다.
+        // buzz-core는 이 assert만을 위한 dev-dependency이며, 프로덕션
+        // 의존성 그래프에 순환을 만들지 않는다.
+        assert_eq!(
+            KIND_WORKSPACE_PROVENANCE,
+            buzz_core::kind::KIND_WORKSPACE_PROVENANCE
+        );
+    }
+
+    #[test]
     fn d_tag_pairs_catalog_and_item() {
         assert_eq!(sample().d_tag(), "schoolx.default:meeting");
     }

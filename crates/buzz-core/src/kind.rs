@@ -388,6 +388,20 @@ pub const KIND_WORKFLOW_DEF: u32 = 30620;
 /// `hidden_at` per viewer; this is the only Nostr-visible projection of it.
 pub const KIND_DM_VISIBILITY: u32 = 30622;
 
+// SchoolX 예약 대역 (39500–39599)
+//
+// 이 대역은 SchoolX 포크 전용이다. upstream이 같은 번호를 쓰면 조용히
+// 충돌하며, sqlx 마이그레이션 중복과 마찬가지로 컴파일 타임에 잡히지 않는다.
+// 새 SchoolX kind는 반드시 이 대역에서 고른다.
+
+/// 워크스페이스 template provenance manifest (채널 스코프 addressable).
+///
+/// `d` = `<catalog_id>:<item_key>`, `h` = 적용으로 만들어진 channel ID.
+/// content는 catalog 버전과 단계별 적용 상태를 담는다. SchoolX 전용 필드를
+/// 넣지 않으므로 다른 Buzz 배포도 그대로 쓸 수 있다.
+/// 설계: `docs/schoolx-2/WORKSPACE_CATALOG.md`.
+pub const KIND_WORKSPACE_PROVENANCE: u32 = 39500;
+
 /// Lower bound of the NIP-33 parameterized replaceable range (30000–39999).
 pub const PARAM_REPLACEABLE_KIND_MIN: u32 = 30000;
 /// Upper bound of the NIP-33 parameterized replaceable range (30000–39999).
