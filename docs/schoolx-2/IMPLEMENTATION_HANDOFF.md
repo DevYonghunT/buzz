@@ -19,8 +19,12 @@
 - 브랜치: `codex/schoolx-2-foundation`
 - foundation commit: `a3e1ca4fb5f199b8ade62e14c120967ddab190d9`
 - parent Buzz snapshot: `acfbb1bb6af54cb29cb152496ff43b8285dcb8cf`
-- 현재 상태: foundation commit 위의 검토 작업트리이며 아직 commit하지 않음
-- Phase 상태: Phase 0 미완료, Phase 1 서버 기반 일부 구현, Phase 2 i18n 구조 기반 구현
+- 마지막 upstream 동기화: `ab3af828` (2026-07-25, merge)
+- 현재 상태: 위 작업이 모두 commit·push됨
+- Phase 상태: **Phase 0 완료**, Phase 1 계약 고정 완료(요약 audience 연결 제외),
+  Phase 2 i18n 구조 기반 구현
+
+세션 0(기준선)과 세션 A(보안 계약)는 끝났다. 다음은 세션 B다.
 
 ### 구현되어 있는 것
 
@@ -122,7 +126,31 @@
 - `BASELINE.md`의 필수 표에서 `미검증` 항목이 없어야 한다.
 - 같은 명령과 commit으로 다른 작업자가 결과를 재현할 수 있어야 한다.
 
-### 세션 A — 보안과 호환성 계약
+### 세션 A — 보안과 호환성 계약 · **완료 (2026-07-28)**
+
+산출물은 [`SECURITY_CONTRACT.md`](SECURITY_CONTRACT.md)와
+`crates/buzz-test-client/tests/e2e_access_matrix.rs`(17개 테스트, 살아있는
+relay에서 전부 통과). 실행은 `just test-e2e e2e_access_matrix`.
+
+세션 A에서 확인된 사실 중 다음 세 가지는 이후 세션이 반드시 전제해야 한다.
+
+1. 판정은 `PrincipalClass::requires_explicit_channel_membership()` 한 곳뿐이며
+   읽기·쓰기 전 경로가 이것을 참조한다. 새 경로가 이 함수를 거치지 않으면
+   계약이 깨진다.
+2. 분류는 태그를 빼도 유지된다(영속 `users.agent_owner_pubkey`). 제한 대상이
+   스스로 제한을 벗을 수 없다.
+3. 분류된 에이전트는 소유자만 채널에 추가할 수 있다(마이그레이션 0025). 단
+   이 정책은 **분류 시점에 바인딩**되므로, 에이전트로 쓸 키는 채널에 넣기
+   전에 소유자 attestation으로 한 번 접속시킨다.
+
+**세션 A에서 넘긴 것:** source audience 교집합의 실제 게시 경로 연결.
+`buzz-core::audience`는 primitive와 단위 테스트까지만 있고 어떤 생성·게시
+경로에도 연결돼 있지 않다. 연결 대상인 요약 기능 자체가 아직 없어 검증할
+표면이 없으므로 **세션 E**에서 기능과 함께 구현·검증한다. 그전까지 "출처 기반
+자동 교차 게시"를 제공한다고 표현하지 않는다.
+
+<details>
+<summary>원래 계획 (참고)</summary>
 
 새 고추론 세션으로 시작하며 템플릿과 에이전트보다 먼저 끝낸다.
 
@@ -142,6 +170,8 @@
 - private 채널 비멤버가 어느 도구 경로로도 존재, 제목, 메시지, 검색 결과를 얻거나 쓰지 못한다.
 - 허용 audience보다 넓은 target에 private-source 요약 본문이 생성되지 않는다.
 - 이후 세션이 사용할 machine-readable policy와 E2E matrix가 확정돼 있다.
+
+</details>
 
 ### 세션 B — 제품 설정과 브랜딩
 

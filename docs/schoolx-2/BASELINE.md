@@ -227,6 +227,17 @@ cp .env.example .env         # 없으면 생성. .gitignore에 등록돼 있다
 docker compose up -d postgres redis
 ```
 
+**살아있는 relay가 필요한 e2e에는 MinIO도 올린다.** relay는 기동 중
+git object-store 정합성 프로브(A3 gate)를 돌리고, S3 백엔드가 없으면
+`git conformance probe failed: s3 backend error`로 **중단된다**. Postgres와
+Redis만으로는 relay가 뜨지 않는다.
+
+```bash
+docker compose up -d minio minio-init
+```
+
+`just test-e2e`는 이 두 컨테이너를 스스로 올리므로 수동 실행 시에만 필요하다.
+
 **호스트 포트 5432 충돌에 주의한다.** 이 환경에는 Homebrew
 `postgresql@17`이 brew service로 떠 있고 `127.0.0.1:5432`를 명시적으로
 바인딩한다. colima는 포트를 `*:5432` 와일드카드로 포워딩하므로 두
