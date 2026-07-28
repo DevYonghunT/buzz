@@ -3,6 +3,7 @@ import type { TranslationShape } from "@/shared/i18n/types";
 
 export const ko = {
   app: {
+    productName: "스쿨엑스",
     loading: {
       settingUpCommunity: "커뮤니티를 준비하고 있습니다…",
       switchingCommunity: "커뮤니티를 전환하고 있습니다…",

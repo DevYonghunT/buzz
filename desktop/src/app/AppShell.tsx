@@ -617,7 +617,7 @@ export function AppShell() {
     unreadChannelNotificationCount,
   });
 
-  // Dispatch `buzz://message` deep links into the router.
+  // Dispatch `schoolx://message` deep links into the router.
   useMessageDeepLinks();
 
   const handleOpenNewDm = React.useCallback(

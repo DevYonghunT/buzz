@@ -714,6 +714,7 @@ merge 할 때마다 아래를 남긴다. 마지막 확인 SHA는 `BASELINE.md`�
 | 날짜 | upstream SHA | 받은 커밋 수 | 충돌 파일 | 비고 |
 |---|---|---:|---|---|
 | 2026-07-25 | `ab3af828` | 57 | `SettingsPanels.tsx`, `SettingsView.tsx`, `tests/helpers/bridge.ts` | 첫 동기화. upstream #2738이 "커뮤니티 접근" 문구를 "초대"로 바꿔 i18n 카탈로그와 충돌 |
+| 2026-07-28 | `925a9a7b` | 85 | `pnpm-lock.yaml` | 세션 B 시작 전. 텍스트 충돌은 lockfile뿐이었으나 자동 병합된 `migrations/`에서 버전 번호 충돌(0025 중복)이 조용히 발생 — 이후 SchoolX 마이그레이션은 예약 대역 `9001+` |
 
 ### 충돌 해소 원칙
 
@@ -725,6 +726,16 @@ merge 할 때마다 아래를 남긴다. 마지막 확인 SHA는 `BASELINE.md`�
 건드리지 않았다는 뜻일 뿐이며, SchoolX 보안 불변식(관리형 에이전트의
 membership 강제)이 걸린 relay 경로는 upstream이 새 조회 경로를 추가했는지
 매번 확인한다.
+
+**네임스페이스 충돌은 텍스트 충돌로 나타나지 않는다.** 2026-07-28 동기화에서
+upstream과 SchoolX가 같은 마이그레이션 번호(0025)로 서로 다른 파일을 추가했고,
+git은 다른 파일이라 충돌 없이 병합했으며 빌드도 통과했다. 매 동기화 후 다음을
+확인한다.
+
+- `ls migrations/` — 같은 4자리 접두사가 둘 이상인지. SchoolX는 `9001+`를 쓴다.
+- 새 이벤트 kind 정수가 `buzz-core/src/kind.rs`에서 겹치는지.
+- 제품 식별자(번들 ID, 딥링크 스킴, nest, 키체인)를 upstream이 새 경로에서
+  하드코딩했는지. `PRODUCT_IDENTITY.md` §3의 표가 대상 목록이다.
 
 권장 브랜치 흐름:
 

@@ -1,5 +1,12 @@
 export const en = {
   app: {
+    /**
+     * Product name as shown *inside* the UI. Deliberately separate from the
+     * OS-level bundle name in `tauri.conf.json`, which stays ASCII `SchoolX`
+     * so app paths, the DMG volume, and Windows/Linux packaging stay
+     * predictable. See `shared/product`.
+     */
+    productName: "SchoolX",
     loading: {
       settingUpCommunity: "Setting up your community…",
       switchingCommunity: "Switching community…",

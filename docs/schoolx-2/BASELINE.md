@@ -71,6 +71,25 @@ Docker Desktop은 설치하지 않았다. 이 환경의 Docker 데몬은 colima�
 desktop 단위 테스트 수 차이(3,401 → 3,420)는 SchoolX가 추가한 19개
 테스트다. 양쪽 모두 실패 0이다.
 
+### 세션 B (2026-07-28, upstream `925a9a7b` 병합 후)
+
+병합으로 upstream 테스트가 늘어 부모 스냅샷과 개수를 직접 비교할 수 없다.
+기준은 "이 트리에서 모두 통과"다.
+
+| command | exit | passed | failed | 분류 |
+|---|---:|---:|---:|---|
+| `pnpm --dir desktop typecheck` | 0 | - | - | 통과 |
+| `pnpm --dir desktop check` | 0 | - | - | 통과 |
+| `pnpm --dir desktop test` | 0 | 3,745 | 0 | 통과 |
+| `pnpm --dir desktop build` | 0 | - | - | 통과 |
+| `just desktop-tauri-test` | 0 | 1,824 | 0 | 통과 (14 ignored) |
+| `pnpm --dir web check` / `typecheck` | 0 | - | - | 통과 |
+| `cargo test -p buzz-cli --lib` | 0 | 251 | 0 | 통과 |
+| `just desktop-tauri-clippy` | 0 | - | - | 통과 |
+| playwright `navigation`·`i18n`·`invite-link-copy` (smoke) | 0 | 18 | 0 | 통과 (1 skipped) |
+| `just test-e2e e2e_access_matrix` | 0 | **17** | 0 | 통과 — 세션 A 계약이 병합 후에도 성립 |
+| `just test` | 1 | - | 2 | `fake_llm.rs` steer 계열, 기존 실패 (아래) |
+
 소요 시간은 cargo/vite 캐시 상태에 좌우된다. 위 값은 원본 worktree가
 cold, 현재 checkout이 warm인 상태에서 측정했으므로 성능 비교에 쓰지
 않는다.
@@ -126,12 +145,35 @@ parent  run 3: exit=101  FAILED tool_metadata_caps_enforced
 notification_before_response`와 `steer_folds_into_active_turn_without_
 cancelling`도 취소·steering 경합을 다루는 타이밍 의존 테스트다.
 
-**따라서 SchoolX 회귀가 아니라 기존 환경 플래키로 분류한다.** 다만 표본이
-작다. 원본은 3회 중 1회 완전 통과했고 현재는 3회 모두 실패했으므로,
-"현재가 더 나쁘지 않다"까지 주장하지는 않는다. 새로운 실패 *양상*이
-없다는 것까지만 근거가 있다. 이 세 테스트가 앞으로 실패하더라도 이름이
-위 목록과 같으면 SchoolX 회귀로 취급하지 않되, 목록 밖의 이름이 나오면
-다시 조사한다.
+**따라서 SchoolX 회귀가 아니라 기존 환경 플래키로 분류한다.**
+
+#### 2026-07-28 재조사 — 원인은 CPU 부하다
+
+세션 B의 `just test`에서 목록 밖 이름(`steer_rejected_on_empty_prompt`)이
+나와 위 규칙대로 재조사했다. 격리 실행에서는 재현되지 않았고, **CPU 코어
+수만큼 busy loop을 띄운 상태**에서 `cargo test -p buzz-agent --test fake_llm`을
+8회씩 돌리자 양쪽에서 재현됐다.
+
+| snapshot | 8회 중 실패 | 나온 이름 |
+|---|---:|---|
+| 현재 (`schoolx`, 병합 후) | 7 | `steer_folds_into_active_turn_without_cancelling`, `cancelled_turn_with_usage_emits_notification_before_response`, `steer_rejected_on_empty_prompt` |
+| 부모 (`acfbb1bb`) | 6 | 위 3종 + `steer_rejected_on_run_id_mismatch` |
+
+부모가 현재 트리에서 나오지 않은 이름까지 실패시켰다. 부하 없는 격리
+실행에서는 부모도 5회 중 2회 `steer_folds_into_active_turn_without_cancelling`이
+실패했다.
+
+**분류를 개별 테스트 이름에서 파일 단위로 넓힌다.**
+`crates/buzz-agent/tests/fake_llm.rs`의 steer·cancel 계열 전체가 이 하드웨어의
+CPU 부하에 민감하며, 부모 스냅샷이 최소한 같은 빈도로 실패한다. 이 파일의
+테스트 실패는 SchoolX 회귀로 취급하지 않는다. 이 파일 **밖**의 새 실패는
+여전히 조사 대상이다.
+
+이 계열이 실패했을 때는 부하 없는 상태에서 해당 테스트만 재실행해 확인한다.
+
+```bash
+cargo test -p buzz-agent --test fake_llm
+```
 
 ### 아직 미검증
 
@@ -174,12 +216,40 @@ fresh-install `en-US`→영어, 미지원 `ja-JP`→한국어, 한·영 양방�
 
 | 항목 | 값 |
 |---|---|
-| 마지막 확인 SHA | `ab3af828714ab699dfc87644d234014987a4fe6b` |
-| 확인 일시 | 2026-07-25 |
-| 받은 커밋 수 | 57 (`acfbb1bb`부터) |
-| 병합 전 SchoolX tip | `14790a94` (`schoolx-pre-upstream-sync-20260725` 브랜치로 보존) |
+| 마지막 확인 SHA | `925a9a7bf230e67a18abc8fc7996fa39d620846b` |
+| 확인 일시 | 2026-07-28 |
+| 받은 커밋 수 | 85 (`ab3af828`부터) |
+| 병합 전 SchoolX tip | `b9425960` (`schoolx-pre-upstream-sync-20260728` 브랜치로 보존) |
+| 텍스트 충돌 | `pnpm-lock.yaml` 1건 |
 
 다음 동기화 때 이 표의 SHA를 갱신한다.
+
+### 2026-07-28 동기화에서 드러난 것
+
+텍스트 충돌은 lockfile 하나였지만 **자동 병합된 파일에서 조용한 충돌이
+하나 나왔다.** upstream이 `0025_relay_invites.sql`을 추가하면서 SchoolX의
+`0025_restrict_managed_agent_channel_add_policy.sql`과 마이그레이션 버전
+번호가 겹쳤다. sqlx는 `_sqlx_migrations`를 version으로 키잉하면서도 중복
+버전을 컴파일 타임에 거부하지 않는다 — 이 상태에서 `cargo build -p buzz-db`는
+통과했고, 개발 DB는 version 25를 SchoolX 마이그레이션으로 이미 기록하고 있어
+upstream의 `relay_invites`가 **영구히 적용되지 않는** 상태였다.
+
+이후 SchoolX 전용 마이그레이션은 **예약 대역 `9001+`** 를 쓴다. 자세한 이유는
+[`PRODUCT_IDENTITY.md`](PRODUCT_IDENTITY.md) §5.
+
+개발 DB는 통째로 초기화하지 않고 잘못된 원장 한 줄만 제거해 복구했다.
+SchoolX 마이그레이션이 idempotent한 `UPDATE`라 재적용이 안전하다.
+
+```bash
+psql "$DATABASE_URL" -c \
+  "DELETE FROM _sqlx_migrations WHERE version = 25 \
+   AND description = 'restrict managed agent channel add policy';"
+cargo run -p buzz-admin -- migrate
+```
+
+`cargo run -p buzz-admin -- migrate`는 `.env`를 읽지 않는다. `DATABASE_URL`을
+셸에서 명시적으로 export해야 컨테이너(5433)에 붙는다. 안 하면 호스트
+Homebrew postgres(5432)에 붙어 `role "buzz" does not exist`로 죽는다.
 
 전체 stdout 로그는 세션 로컬 경로에 있었고 repo에 보존하지 않았다. 위
 표의 명령을 그대로 재실행하면 같은 값을 얻는다.

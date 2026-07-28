@@ -1,4 +1,4 @@
-//! Buzz Nest — persistent agent workspace at `~/.buzz`.
+//! Buzz Nest — persistent agent workspace at `~/.schoolx`.
 //!
 //! Creates a shared knowledge directory on first launch so every
 //! Buzz-spawned agent starts with orientation (AGENTS.md) and a
@@ -40,7 +40,7 @@ const NEST_DIRS: &[&str] = &[
 pub(crate) const AGENTS_MD: &str = include_str!("nest_agents.md");
 
 /// Default SKILL.md content for the buzz-cli skill.
-/// Written to ~/.buzz/.agents/skills/buzz-cli/SKILL.md on first init.
+/// Written to ~/.schoolx/.agents/skills/buzz-cli/SKILL.md on first init.
 const BUZZ_CLI_SKILL_MD: &str = include_str!("nest_skill.md");
 
 /// Template content version for AGENTS.md static content (above managed markers).
@@ -58,14 +58,14 @@ const END_MARKER: &str = "<!-- END BUZZ MANAGED -->";
 /// Canonical skill directory path relative to the nest root.
 const CANONICAL_SKILL_DIR: &str = ".agents/skills/buzz-cli";
 
-/// Nest directory name for production builds.
-const NEST_DIR_PROD: &str = ".buzz";
+/// Nest directory name for production builds. Product-scoped: see
+/// [`crate::product::NEST_DIR_PROD`].
+const NEST_DIR_PROD: &str = crate::product::NEST_DIR_PROD;
 
-/// Nest directory name for dev builds. Dev builds (those whose Tauri app-data
-/// directory name starts with `"xyz.block.buzz.app.dev"`) use a separate nest
-/// so that the DMG and dev-build instances don't clobber each other's
-/// `.repos-dir` dotfile and `REPOS` symlink.
-const NEST_DIR_DEV: &str = ".buzz-dev";
+/// Nest directory name for dev builds, so the DMG and dev-build instances
+/// don't clobber each other's `.repos-dir` dotfile and `REPOS` symlink.
+/// Product-scoped: see [`crate::product::NEST_DIR_DEV`].
+const NEST_DIR_DEV: &str = crate::product::NEST_DIR_DEV;
 
 /// Process-lifetime nest directory. Initialized once at startup via
 /// [`init_nest_dir`] before any call to [`nest_dir`].
@@ -83,7 +83,7 @@ static NEST_DIR: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new
 /// `OnceLock` is set exactly once.
 ///
 /// `is_dev` should be `true` when the running binary is a dev build — i.e.
-/// when the Tauri app-data directory name starts with `"xyz.block.buzz.app.dev"`.
+/// when the Tauri app-data directory name starts with `"io.github.schoolx520.app.dev"`.
 /// Pass `false` for production (signed DMG) builds.
 pub fn init_nest_dir(is_dev: bool) {
     let suffix = if is_dev { NEST_DIR_DEV } else { NEST_DIR_PROD };
@@ -93,11 +93,11 @@ pub fn init_nest_dir(is_dev: bool) {
     let _ = NEST_DIR.set(path);
 }
 
-/// Returns the nest root path (`~/.buzz` for prod, `~/.buzz-dev` for dev),
+/// Returns the nest root path (`~/.schoolx` for prod, `~/.schoolx-dev` for dev),
 /// or `None` if the home directory cannot be resolved.
 ///
 /// If [`init_nest_dir`] has not been called yet (e.g. in unit tests), falls
-/// back to the production path `~/.buzz`.
+/// back to the production path `~/.schoolx`.
 pub fn nest_dir() -> Option<PathBuf> {
     match NEST_DIR.get() {
         Some(path) => path.clone(),
@@ -117,21 +117,21 @@ fn path_is_dev_nest(path: &std::path::Path) -> bool {
         .unwrap_or(false)
 }
 
-/// Returns `true` when the running binary is using the dev nest (`~/.buzz-dev`).
+/// Returns `true` when the running binary is using the dev nest (`~/.schoolx-dev`).
 ///
 /// This is `true` for all dev builds — `just staging` and `just dev` — because
 /// [`init_nest_dir`] is called with `is_dev = true` when the Tauri app-data
-/// directory starts with `"xyz.block.buzz.app.dev"`.
+/// directory starts with `"io.github.schoolx520.app.dev"`.
 ///
 /// Returns `false` when:
-/// - The nest is the production nest (`~/.buzz`, signed DMG).
+/// - The nest is the production nest (`~/.schoolx`, signed DMG).
 /// - [`init_nest_dir`] has not been called yet (unit tests, home dir
 ///   unresolvable) — the fallback path is always the prod nest.
 pub fn nest_is_dev() -> bool {
     nest_dir().map(|p| path_is_dev_nest(&p)).unwrap_or(false)
 }
 
-/// Creates the Buzz nest at `~/.buzz` if it doesn't already exist.
+/// Creates the Buzz nest at `~/.schoolx` if it doesn't already exist.
 ///
 /// Delegates to [`ensure_nest_at`] with the resolved nest directory.
 /// Returns an error string if the home directory cannot be resolved.
@@ -337,7 +337,7 @@ fn ensure_skill_symlinks(_root: &Path) -> Result<(), String> {
 ///
 /// Dev builds (`is_dev = true`) use `"buzz-dev"` so that a running DMG and a
 /// concurrent dev build each own a separate link and never clobber each other —
-/// the same isolation that separates `~/.buzz` (prod) from `~/.buzz-dev` (dev).
+/// the same isolation that separates `~/.schoolx` (prod) from `~/.schoolx-dev` (dev).
 pub fn cli_link_name(is_dev: bool) -> &'static str {
     if is_dev {
         "buzz-dev"
@@ -352,7 +352,7 @@ pub fn cli_link_name(is_dev: bool) -> &'static str {
 /// The link name is split by `is_dev` so that an installed DMG and a
 /// concurrently running dev build each maintain their own symlink and never
 /// overwrite each other's target — the same isolation that separates the
-/// `~/.buzz` and `~/.buzz-dev` nests (see [`NEST_DIR_DEV`]).
+/// `~/.schoolx` and `~/.schoolx-dev` nests (see [`NEST_DIR_DEV`]).
 ///
 /// On every boot: replaces any existing symlink unconditionally (the `buzz` /
 /// `buzz-dev` name is our namespace), creates a new one if absent, and leaves

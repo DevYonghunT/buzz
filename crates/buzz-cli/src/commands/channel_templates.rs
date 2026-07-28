@@ -15,7 +15,12 @@ use crate::error::CliError;
 /// Tauri bundle identifier for the production desktop app. `dirs::data_dir()`
 /// joined with this segment matches `app.path().app_data_dir()` exactly
 /// (Tauri resolves app-data as the platform data dir plus the identifier).
-const PROD_BUNDLE_IDENTIFIER: &str = "xyz.block.buzz.app";
+///
+/// Product-scoped: must stay equal to `product::BUNDLE_IDENTIFIER` in
+/// `desktop/src-tauri/src/product.rs`. The two cannot share a constant because
+/// buzz-cli and the Tauri crate are independent crates, so the CLI would
+/// otherwise read a co-installed Buzz's template store instead of SchoolX's.
+const PROD_BUNDLE_IDENTIFIER: &str = "io.github.schoolx520.app";
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct ChannelTemplateRecord {
@@ -65,7 +70,7 @@ fn default_visibility() -> String {
 ///
 /// `override_path` (from `--templates-file`) always wins — useful for the dev
 /// store or tests. Otherwise defaults to the prod bundle's app-data dir:
-/// `<platform-data-dir>/xyz.block.buzz.app/templates/channel-templates.json`.
+/// `<platform-data-dir>/io.github.schoolx520.app/templates/channel-templates.json`.
 pub fn resolve_templates_path(override_path: Option<&str>) -> Result<PathBuf, CliError> {
     if let Some(p) = override_path {
         return Ok(PathBuf::from(p));
@@ -83,7 +88,7 @@ pub fn resolve_templates_path(override_path: Option<&str>) -> Result<PathBuf, Cl
 fn load_templates(path: &Path) -> Result<Vec<ChannelTemplateRecord>, CliError> {
     if !path.exists() {
         return Err(CliError::NotFound(format!(
-            "no channel templates store found at {} (create a template in Buzz Desktop first, \
+            "no channel templates store found at {} (create a template in the SchoolX desktop app first, \
              or pass --templates-file)",
             path.display()
         )));
@@ -143,7 +148,19 @@ mod tests {
     #[test]
     fn resolve_templates_path_defaults_to_prod_bundle() {
         let path = resolve_templates_path(None).unwrap();
-        assert!(path.ends_with("xyz.block.buzz.app/templates/channel-templates.json"));
+        assert!(path.ends_with(format!(
+            "{PROD_BUNDLE_IDENTIFIER}/templates/channel-templates.json"
+        )));
+    }
+
+    /// The CLI resolves the desktop template store by bundle identifier. If
+    /// this ever drifts back to Buzz's, `buzz channels create --template`
+    /// silently reads a co-installed Buzz's templates.
+    #[test]
+    fn templates_path_does_not_point_at_buzz() {
+        assert_ne!(PROD_BUNDLE_IDENTIFIER, "xyz.block.buzz.app");
+        let path = resolve_templates_path(None).unwrap();
+        assert!(!path.to_string_lossy().contains("xyz.block.buzz.app"));
     }
 
     #[test]

@@ -2,7 +2,7 @@
 //!
 //! **Worktree sync** (`sync_shared_agent_data`): Per-launch symlink creation
 //! from the current worktree data directory to the canonical dev data
-//! directory (`xyz.block.buzz.app.dev`). Only runs when
+//! directory (`io.github.schoolx520.app.dev`). Only runs when
 //! `BUZZ_SHARE_IDENTITY=1` and `BUZZ_PRIVATE_KEY` is set. All dev
 //! instances share the same physical files — edits in any worktree are
 //! immediately visible to all others.
@@ -21,9 +21,7 @@ use tauri::Manager;
 
 use crate::util::replace_with_symlink;
 
-const CANONICAL_DEV_IDENTIFIER: &str = "xyz.block.buzz.app.dev";
-const LEGACY_CANONICAL_DEV_IDENTIFIER: &str = "xyz.block.sprout.app.dev";
-const LEGACY_RELEASE_IDENTIFIER: &str = "xyz.block.sprout.app";
+const CANONICAL_DEV_IDENTIFIER: &str = crate::product::DEV_BUNDLE_IDENTIFIER;
 
 /// JSON files symlinked from worktree data directories to the canonical
 /// dev data directory. Only data files — never `agent-pids/` or `logs/`.
@@ -41,8 +39,8 @@ const SHARED_AGENT_DIRS: &[&str] = &["agents/teams"];
 
 /// Returns `true` when `name` is a dev data dir name — i.e. it is exactly the
 /// canonical dev identifier or a worktree variant separated by a `.` (e.g.
-/// `xyz.block.buzz.app.dev.my-branch`). Rejects prefix-collisions such as
-/// `xyz.block.buzz.app.developer`. This is the authoritative dev/prod
+/// `io.github.schoolx520.app.dev.my-branch`). Rejects prefix-collisions such as
+/// `io.github.schoolx520.app.developer`. This is the authoritative dev/prod
 /// discriminator shared by `run_boot_migrations`, `sync_shared_agent_data`,
 /// and `reconcile_target_dir`.
 pub(crate) fn is_dev_data_dir_name(name: &str) -> bool {
@@ -56,16 +54,20 @@ fn canonical_dev_data_dir(current: &Path) -> Option<PathBuf> {
     current.parent().map(|p| p.join(CANONICAL_DEV_IDENTIFIER))
 }
 
-pub(crate) fn legacy_app_data_dir(current: &Path) -> Option<PathBuf> {
-    let name = current.file_name()?.to_str()?;
-    let legacy_name = if name.starts_with(CANONICAL_DEV_IDENTIFIER) {
-        name.replacen(CANONICAL_DEV_IDENTIFIER, LEGACY_CANONICAL_DEV_IDENTIFIER, 1)
-    } else if name.starts_with("xyz.block.buzz.app") {
-        name.replacen("xyz.block.buzz.app", LEGACY_RELEASE_IDENTIFIER, 1)
-    } else {
-        return None;
-    };
-    current.parent().map(|parent| parent.join(legacy_name))
+/// Predecessor app-data directory whose contents should be adopted, if any.
+///
+/// Upstream Buzz uses this to carry state across its own `sprout` → `buzz`
+/// rename. **SchoolX has no predecessor identity**: it is a rebrand of Buzz,
+/// not a rename of an earlier SchoolX. Adopting `xyz.block.buzz.app` here
+/// would copy a co-installed Buzz's identity, agent settings, and workspace
+/// state into SchoolX on first launch — the exact cross-product read the
+/// isolation requirement forbids — so this always returns `None`.
+///
+/// Kept as a function rather than deleting the call site: upstream's boot
+/// ordering treats "adopt legacy data" as a step that must precede every disk
+/// read, and keeping the seam makes future upstream merges mechanical.
+pub(crate) fn legacy_app_data_dir(_current: &Path) -> Option<PathBuf> {
+    None
 }
 
 fn copy_dir_all(src: &Path, dst: &Path) -> std::io::Result<()> {
@@ -144,7 +146,7 @@ fn run_boot_migrations_inner(app: &tauri::AppHandle, reset_completed: bool) {
         false
     };
 
-    // On dev builds, copy `.repos-dir` from ~/.buzz → ~/.buzz-dev BEFORE
+    // On dev builds, copy `.repos-dir` from ~/.schoolx → ~/.schoolx-dev BEFORE
     // control returns to lib.rs where resolve_repos_at_boot() reads it. This
     // ensures the dev nest boots with the correct workspace on its first launch,
     // matching what the prod nest had configured. Skip-if-dest-exists so it is
@@ -250,35 +252,22 @@ const LEGACY_NEST_KNOWLEDGE: &[&str] = &[
     ".scratch",
 ];
 
-/// Migrate the legacy agent nest (`~/.sprout`) into the current nest.
+/// Migrate a legacy agent nest into the current nest.
 ///
-/// PR #960 renamed the nest directory but shipped no migration, stranding the
-/// agent's accumulated knowledge in `~/.sprout` while `~/.buzz` booted empty —
-/// so agents searched `$HOME` for files they "remembered", triggering macOS TCC
-/// prompts. This copies only the knowledge directories (see
-/// [`LEGACY_NEST_KNOWLEDGE`]), never `REPOS/`.
+/// Upstream Buzz uses this to carry agent knowledge across its own `~/.sprout`
+/// → `~/.schoolx` nest rename. **SchoolX has no legacy nest of its own**, and the
+/// nests that do exist on disk (`~/.sprout`, `~/.schoolx`) belong to Buzz. Copying
+/// either into `~/.schoolx` would import a co-installed Buzz's agent knowledge,
+/// which the isolation decision for this product rules out, so this is a no-op.
 ///
-/// Non-fatal and idempotent, mirroring [`migrate_legacy_app_data_dir`]: a copy
-/// error is logged and never aborts startup. There is no completion sentinel —
-/// the migration re-runs on every launch while `~/.sprout` exists, which is
-/// cheap because the copy is tiny and `copy_dir_all` skips files that already
-/// exist in the destination. This relies on `REPOS/` being out of scope; if it
-/// is ever added back, a sentinel or off-thread copy becomes mandatory.
+/// The seam is kept (rather than deleting the call in `lib.rs`) so upstream
+/// changes around boot ordering keep merging mechanically, and so a future
+/// SchoolX nest rename has an obvious place to hook into.
 ///
-/// Returns `true` when a legacy `~/.sprout` nest was present (migration ran),
-/// so the caller can emit a one-time hint inviting the user to delete it. The
-/// frontend dedupes the hint, so re-firing while `~/.sprout` lingers is benign.
+/// Returns `false` always: no legacy nest was adopted, so the caller emits no
+/// "you can delete the old nest" hint.
 pub fn migrate_legacy_nest() -> bool {
-    let Some(home) = dirs::home_dir() else {
-        eprintln!("buzz-desktop: nest-migration: cannot resolve home directory");
-        return false;
-    };
-    // Destination is the current build's nest dir (`.buzz` or `.buzz-dev`).
-    let Some(current_nest) = crate::managed_agents::nest_dir() else {
-        eprintln!("buzz-desktop: nest-migration: cannot resolve nest directory");
-        return false;
-    };
-    migrate_legacy_nest_at(&home.join(".sprout"), &current_nest)
+    false
 }
 
 /// Copy the [`LEGACY_NEST_KNOWLEDGE`] entries from `legacy` to `current`.
@@ -291,9 +280,10 @@ fn migrate_legacy_nest_at(legacy: &Path, current: &Path) -> bool {
         return false;
     }
     // A deliberate dev reset pre-creates this marker to opt out of every
-    // production/legacy nest import. Normal first-run migration still copies
-    // `.sprout` before `migrate_dev_nest()` writes the marker later in boot.
-    if current.file_name().is_some_and(|name| name == ".buzz-dev")
+    // production nest import.
+    if current
+        .file_name()
+        .is_some_and(|name| name == crate::product::NEST_DIR_DEV)
         && current.join(DEV_NEST_MIGRATED_SENTINEL).exists()
     {
         return false;
@@ -307,7 +297,7 @@ fn migrate_legacy_nest_at(legacy: &Path, current: &Path) -> bool {
         let result = if src.is_dir() {
             copy_dir_all(&src, &dst)
         } else if *name == "AGENTS.md" {
-            // `ensure_nest` writes a default `~/.buzz/AGENTS.md` before this
+            // `ensure_nest` writes a default `~/.schoolx/AGENTS.md` before this
             // migration runs, so the plain absent-only guard would always skip
             // the legacy file and strand the user's instructions. Overwrite the
             // destination only when it is still the untouched generated default;
@@ -333,11 +323,11 @@ fn migrate_legacy_nest_at(legacy: &Path, current: &Path) -> bool {
 }
 
 /// Filename of the completion sentinel written after a successful dev-nest
-/// knowledge migration. Presence of this file means `~/.buzz` content has
-/// already been copied into `~/.buzz-dev` and subsequent boots can skip the
+/// knowledge migration. Presence of this file means `~/.schoolx` content has
+/// already been copied into `~/.schoolx-dev` and subsequent boots can skip the
 /// copy. Using an explicit marker instead of checking for RESEARCH/PLANS
 /// content decouples the dev migration from the `.sprout` migration, which
-/// also copies into `~/.buzz-dev` and could otherwise set the sentinel early.
+/// also copies into `~/.schoolx-dev` and could otherwise set the sentinel early.
 const DEV_NEST_MIGRATED_SENTINEL: &str = ".dev-nest-migrated";
 
 /// Returns true when `migrate_dev_repos_dir` should run: dev build AND no
@@ -351,7 +341,7 @@ pub(crate) fn should_migrate_dev_repos_dir(is_dev: bool, reset_completed: bool) 
 /// non-destructively. Extracted so tests can inject temp paths without
 /// touching `dirs::home_dir()` or the global `nest_dir()` OnceLock.
 pub(crate) fn migrate_dev_repos_dir_at(home: &Path, dev_nest: &Path) {
-    let src = home.join(".buzz").join(".repos-dir");
+    let src = home.join(crate::product::NEST_DIR_PROD).join(".repos-dir");
     if !src.exists() {
         return;
     }
@@ -399,22 +389,22 @@ pub(crate) fn maybe_migrate_dev_repos_dir(
     }
 }
 
-/// One-time migration of dev-build nest contents from `~/.buzz` → `~/.buzz-dev`.
+/// One-time migration of dev-build nest contents from `~/.schoolx` → `~/.schoolx-dev`.
 ///
 /// When a dev build first boots after this change ships, it switches from the
-/// shared `~/.buzz` nest to a dedicated `~/.buzz-dev` nest. Without migration,
+/// shared `~/.schoolx` nest to a dedicated `~/.schoolx-dev` nest. Without migration,
 /// all accumulated knowledge (RESEARCH/, PLANS/, GUIDES/, WORK_LOGS/, mem_*
 /// slugs, AGENTS.md, managed-agents.json) would be invisible to dev instances.
 ///
 /// Migration is non-destructive: `copy_dir_all` skips files already at the
 /// destination, so a partially-migrated state is safe to re-run. The source
-/// `~/.buzz` is never deleted — prod builds continue to use it normally.
+/// `~/.schoolx` is never deleted — prod builds continue to use it normally.
 ///
 /// Completion is tracked by a [`DEV_NEST_MIGRATED_SENTINEL`] file written into
-/// `~/.buzz-dev`. Using an explicit sentinel (rather than RESEARCH/PLANS file
-/// presence) decouples this migration from the `.sprout` → `~/.buzz-dev`
+/// `~/.schoolx-dev`. Using an explicit sentinel (rather than RESEARCH/PLANS file
+/// presence) decouples this migration from the `.sprout` → `~/.schoolx-dev`
 /// migration that runs earlier in the same boot, which might otherwise populate
-/// RESEARCH/PLANS and incorrectly suppress the `~/.buzz` copy.
+/// RESEARCH/PLANS and incorrectly suppress the `~/.schoolx` copy.
 ///
 /// Only runs on dev builds (checked by the caller). Returns `true` when
 /// contents were copied (useful for a one-time log message, not required).
@@ -423,8 +413,8 @@ pub fn migrate_dev_nest() -> bool {
         eprintln!("buzz-desktop: dev-nest-migration: cannot resolve home directory");
         return false;
     };
-    let legacy = home.join(".buzz");
-    let current = home.join(".buzz-dev");
+    let legacy = home.join(crate::product::NEST_DIR_PROD);
+    let current = home.join(crate::product::NEST_DIR_DEV);
     // If legacy doesn't exist, nothing to migrate.
     if !legacy.exists() {
         return false;

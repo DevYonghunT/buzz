@@ -3,20 +3,20 @@
 //! `observer_archive_default_enabled()` returns `true` when either:
 //! - `BUZZ_BUILD_OBSERVER_ARCHIVE_DEFAULT` was set at build time (internal
 //!   builds bake in the flag via `build.rs`), **or**
-//! - the running binary is using the dev nest (`~/.buzz-dev`), which is the
+//! - the running binary is using the dev nest (`~/.schoolx-dev`), which is the
 //!   case for all dev builds launched with `just staging` or `just dev`.
 //!
 //! When `true`, the frontend reconciles the observer archive subscription
 //! every startup — unconditionally ensuring kind 24200 exists in the DB
 //! regardless of stale localStorage markers.
 //!
-//! OSS prod builds (baked flag unset, prod nest `~/.buzz`) return `false` —
+//! OSS prod builds (baked flag unset, prod nest `~/.schoolx`) return `false` —
 //! no reconciliation; the user manages the subscription via Settings.
 
 /// Returns `true` when observer-feed archive policy is enforced.
 ///
 /// True when the build has the internal baked flag set, or when the running
-/// binary is using the dev nest (`~/.buzz-dev`). The frontend calls this
+/// binary is using the dev nest (`~/.schoolx-dev`). The frontend calls this
 /// every startup to decide whether to reconcile the `owner_p` subscription.
 #[tauri::command]
 pub fn observer_archive_default_enabled() -> bool {
@@ -29,7 +29,7 @@ mod tests {
     use super::*;
 
     // `nest_is_dev()` is deterministic-false in unit tests: NEST_DIR OnceLock
-    // is uninitialized → falls back to prod `~/.buzz` (nest.rs:101-106), so
+    // is uninitialized → falls back to prod `~/.schoolx` (nest.rs:101-106), so
     // the compiled flag is the sole variable. No runner normalization needed.
     //
     // #[ignore]: requires BUZZ_TEST_EXPECTED_OBSERVER_ARCHIVE_DEFAULT to be

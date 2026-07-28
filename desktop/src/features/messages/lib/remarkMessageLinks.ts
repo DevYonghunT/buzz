@@ -1,13 +1,15 @@
 /**
- * Remark plugin that detects bare `buzz://message?…` URLs in text nodes and
+ * Remark plugin that detects bare `schoolx://message?…` URLs in text nodes and
  * replaces each with a custom `message-link` HAST element. Legacy
- * `buzz://message?…` URLs are accepted during the rename. The `markdown.tsx`
- * components map renders that as an inline pill (channel name + click-to-open)
- * instead of the raw 100-char URL.
+ * `buzz://message?…` URLs are recognized too, so messages written before the
+ * SchoolX rename keep rendering as pills instead of decaying into raw text —
+ * see `messageLink.ts` for why reading the old scheme is safe. The
+ * `markdown.tsx` components map renders that as an inline pill (channel name +
+ * click-to-open) instead of the raw 100-char URL.
  *
  * Why this plugin exists: `remark-gfm`'s autolinker only covers `http(s)://`
- * and `www.`. Custom schemes like `buzz://` only reach the `<a>` component
- * override when the user wrote an explicit `[label](buzz://…)` link.
+ * and `www.`. Custom schemes like `schoolx://` only reach the `<a>` component
+ * override when the user wrote an explicit `[label](schoolx://…)` link.
  *
  * Mirrors `remarkChannelLinks` / `remarkMentions` — same factory, same HAST
  * shape — so the rendering layer treats all three uniformly. Trailing
@@ -20,7 +22,12 @@
 // --experimental-strip-types`. `tsconfig.json` enables `allowImportingTsExtensions`.
 import { createRemarkPrefixPlugin } from "../../../shared/lib/createRemarkPrefixPlugin.ts";
 
-const MESSAGE_URL_PATTERN = /(?:buzz|buzz):\/\/message\?[^\s<>"')\]]+/g;
+// Current scheme first, legacy second. Kept as a literal rather than built
+// from `shared/product` constants because this module is also loaded by
+// `markdown.test.mjs` under `node --experimental-strip-types`, and a dynamic
+// `RegExp` here would lose the compile-time literal the linter checks.
+// `messageLink.test.mjs` asserts the two stay in sync.
+const MESSAGE_URL_PATTERN = /(?:schoolx|buzz):\/\/message\?[^\s<>"')\]]+/g;
 const TRAILING_PUNCTUATION_PATTERN = /[.,;:!?]+$/;
 
 function trimMessageLinkMatch(matchText: string) {

@@ -77,12 +77,12 @@ pub use storage::*;
 pub use teams::*;
 pub use types::*;
 
-/// Returns the Buzz nest directory (`~/.buzz`) if it exists as a real
+/// Returns the Buzz nest directory (`~/.schoolx`) if it exists as a real
 /// directory (not a symlink), falling back to the user's home directory.
 ///
 /// Used as the default working directory for spawned agent processes.
 /// `ensure_nest()` must be called during app setup before this is first
-/// invoked, so that `~/.buzz` exists and gets cached.
+/// invoked, so that `~/.schoolx` exists and gets cached.
 ///
 /// Cached for the process lifetime via `OnceLock`.
 /// Returns `None` in sandboxed/containerized environments where `$HOME` is
@@ -93,7 +93,7 @@ pub fn default_agent_workdir() -> Option<std::path::PathBuf> {
     static WORKDIR: OnceLock<Option<std::path::PathBuf>> = OnceLock::new();
     WORKDIR
         .get_or_init(|| {
-            // Prefer ~/.buzz if it exists (created by ensure_nest()).
+            // Prefer ~/.schoolx if it exists (created by ensure_nest()).
             // Reject symlinks to prevent redirect attacks — is_dir()
             // follows symlinks, so check symlink_metadata() first.
             // Fall back to $HOME for resilience.

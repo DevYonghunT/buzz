@@ -21,6 +21,7 @@ mod native_websocket;
 mod nostr_bind;
 pub mod nostr_convert;
 mod prevent_sleep;
+pub mod product;
 mod ptt_shortcut;
 mod relay;
 mod relay_admission;
@@ -171,7 +172,7 @@ pub fn run() {
             }
             // Forward any deep link URLs from the duplicate launch.
             for arg in &argv {
-                if arg.starts_with("buzz://") {
+                if arg.starts_with(product::DEEP_LINK_URL_PREFIX) {
                     handle_deep_link_url(app, arg);
                 }
             }
@@ -488,7 +489,7 @@ pub fn run() {
                     .store(port, std::sync::atomic::Ordering::Relaxed);
             });
 
-            // Create the Buzz nest (~/.buzz or ~/.buzz-dev for dev builds) before
+            // Create the Buzz nest (~/.schoolx or ~/.schoolx-dev for dev builds) before
             // agents are restored, so default_agent_workdir() resolves to the
             // nest directory. Non-fatal: agents fall back to $HOME if nest
             // creation fails.
@@ -523,10 +524,10 @@ pub fn run() {
             }
 
             // One-time migration for dev builds: copy accumulated knowledge
-            // from the shared ~/.buzz nest into the new dedicated ~/.buzz-dev
+            // from the shared ~/.schoolx nest into the new dedicated ~/.schoolx-dev
             // nest so no work is lost when the nest is first namespaced.
-            // Runs only when nest_dir() resolved to ~/.buzz-dev (dev instance).
-            // Suppressed after a reset so re-importing ~/.buzz into ~/.buzz-dev
+            // Runs only when nest_dir() resolved to ~/.schoolx-dev (dev instance).
+            // Suppressed after a reset so re-importing ~/.schoolx into ~/.schoolx-dev
             // doesn't re-populate what was just wiped.
             let is_dev_nest = managed_agents::nest_dir()
                 .and_then(|p| p.file_name().map(|n| n.to_os_string()))

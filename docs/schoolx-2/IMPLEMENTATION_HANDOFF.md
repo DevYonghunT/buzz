@@ -19,12 +19,13 @@
 - 브랜치: `codex/schoolx-2-foundation`
 - foundation commit: `a3e1ca4fb5f199b8ade62e14c120967ddab190d9`
 - parent Buzz snapshot: `acfbb1bb6af54cb29cb152496ff43b8285dcb8cf`
-- 마지막 upstream 동기화: `ab3af828` (2026-07-25, merge)
+- 마지막 upstream 동기화: `925a9a7b` (2026-07-28, merge, 85커밋)
 - 현재 상태: 위 작업이 모두 commit·push됨
 - Phase 상태: **Phase 0 완료**, Phase 1 계약 고정 완료(요약 audience 연결 제외),
-  Phase 2 i18n 구조 기반 구현
+  Phase 2 i18n 구조 기반 + **제품 설정·브랜딩 완료**(아이콘·업데이트·서명 제외)
 
-세션 0(기준선)과 세션 A(보안 계약)는 끝났다. 다음은 세션 B다.
+세션 0(기준선), 세션 A(보안 계약), 세션 B(제품 설정과 브랜딩)는 끝났다.
+다음은 세션 C다.
 
 ### 구현되어 있는 것
 
@@ -47,12 +48,18 @@
   `buzz-core::audience` 정책 primitive
 - 템플릿 재적용 시 같은 persona 관리형 에이전트를 재사용하고 부분 실패를
   사용자에게 경고하는 기반
+- 제품 문자열과 프로토콜 식별자를 구분하는 제품 설정 계층(Rust·데스크톱
+  프론트엔드·웹 3벌)과 `tauri.conf.json` 일치 가드
+- SchoolX 번들 식별자·표시명, `schoolx://` 딥링크, 전용 nest 디렉터리,
+  전용 키체인 서비스
+- Buzz 데이터를 읽지도 지우지도 않는 초기화·마이그레이션 경로
+- SchoolX 전용 SQL 마이그레이션 예약 대역 `9001+`
 
 ### 아직 구현 또는 검증되지 않은 것
 
 - 변경 전 parent snapshot에서 같은 명령을 실행한 재현 가능한 기준선
 - 전체 도구 경로를 실제 relay로 검증한 open/private 접근 E2E matrix
-- 제품 설정 계층, SchoolX bundle ID, 데이터 디렉터리, 딥링크 호환성
+- SchoolX 아이콘 자산, 업데이트 서버 endpoint, 배포 서명 주체
 - 앱 셸, 로그인, 온보딩, 채널 목록, 메시지, 검색 등 핵심 화면 전체 번역
 - 아직 남은 화면의 하드코딩된 `en-US`와 영어 상대시간 제거
 - 한글 IME 조합, 멘션, 자동완성, 검색 회귀 테스트
@@ -173,7 +180,38 @@ relay에서 전부 통과). 실행은 `just test-e2e e2e_access_matrix`.
 
 </details>
 
-### 세션 B — 제품 설정과 브랜딩
+### 세션 B — 제품 설정과 브랜딩 · **완료 (2026-07-28)**
+
+산출물은 [`PRODUCT_IDENTITY.md`](PRODUCT_IDENTITY.md)와 세 벌의 제품 설정
+계층(`desktop/src-tauri/src/product.rs`,
+`desktop/src/shared/product/index.ts`, `web/src/shared/lib/product.ts`).
+
+확정된 값: 번들명 `SchoolX`(UI는 `스쿨엑스`), 식별자
+`io.github.schoolx520.app`, 딥링크 `schoolx://`, nest `~/.schoolx`,
+키체인 `schoolx-desktop`.
+
+세션 B에서 확인된 사실 중 다음 네 가지는 이후 세션이 전제해야 한다.
+
+1. **번들 식별자를 바꿔도 격리되지 않는 자원이 있다.** nest 디렉터리, Huddle
+   모델 캐시, OS 키체인 서비스명은 `$HOME` 경로이거나 상수라 식별자를 따르지
+   않는다. 특히 키체인은 Nostr 신원과 모든 관리형 에이전트 키를 담는다. 새로
+   추가하는 `$HOME` 경로나 서비스명 상수는 반드시 `product` 계층을 거친다.
+2. **제품 설정 계층은 세 벌이고 서로 강제되지 않는다.** 빌드가 모듈 그래프를
+   공유하지 않아서다. 웹 클라이언트는 데스크톱이 등록하는 스킴의 링크를
+   생성하므로, 웹만 안 바꾸면 초대·연결 버튼이 아무것도 열지 않는다.
+3. **`buzz://`는 OS 경계에서만 거부하고 앱 내부 링크 텍스트로는 읽는다.**
+   과거 메시지가 담고 있는 링크는 SchoolX 자신의 기록이며, 텍스트 파싱은 OS
+   라우팅이 아니다. 생성은 절대 하지 않는다.
+4. **SchoolX 전용 SQL 마이그레이션은 `9001+` 대역을 쓴다.** sqlx는 중복 버전을
+   컴파일 타임에 거부하지 않아 충돌이 조용히 마이그레이션 하나를 영구
+   무효화한다.
+
+**세션 B에서 넘긴 것:** 아이콘 자산, 업데이트 서버 endpoint, 배포 서명 주체.
+셋 다 코드가 아니라 디자인·계정 결정이라 세션 F(패키징)에서 처리한다.
+현재 배포본은 여전히 Buzz 아이콘을 달고 나온다.
+
+<details>
+<summary>원래 계획 (참고)</summary>
 
 새 고추론 세션으로 시작한다.
 
@@ -192,6 +230,8 @@ relay에서 전부 통과). 실행은 `just test-e2e e2e_access_matrix`.
 - Buzz와 SchoolX를 설치·업데이트·제거하는 순서별로 상대 제품 데이터를 쓰지 않는다.
 - 과거 메시지 링크의 처리 결과와 실패 UX가 테스트로 고정돼 있다.
 - 제품 문자열과 프로토콜 식별자를 구분한 설정 계층이 있다.
+
+</details>
 
 ### 세션 C — i18n foundation 보강과 핵심 화면 번역
 

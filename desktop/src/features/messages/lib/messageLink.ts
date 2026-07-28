@@ -1,11 +1,46 @@
 /**
- * `buzz://message` link encoding for "Copy link" / deep-link-to-message.
+ * `schoolx://message` link encoding for "Copy link" / deep-link-to-message.
  *
- * Format: `buzz://message?channel=<uuid>&id=<eventId>[&thread=<rootId>]`
+ * Format: `schoolx://message?channel=<uuid>&id=<eventId>[&thread=<rootId>]`
+ *
+ * ## Legacy `buzz://message` links
+ *
+ * Links written before the SchoolX rename — and links written by a Buzz user
+ * in a shared community — carry the `buzz:` scheme with an otherwise identical
+ * shape. Those messages are SchoolX's own history, so this module **reads**
+ * both schemes and **writes** only the current one.
+ *
+ * Reading a legacy link is not an isolation hole: it happens entirely inside
+ * this webview against text the app already fetched, with no OS routing
+ * involved. The coexistence boundary is which scheme the *OS* routes to this
+ * build, and SchoolX registers only `schoolx` (see `src-tauri/src/product.rs`).
+ * Rejecting legacy link text instead would rot old messages into dead strings
+ * and buy no separation from a co-installed Buzz.
  */
 
-const MESSAGE_LINK_SCHEME = "buzz:";
+// Explicit relative path + `.ts` extension: this module is imported both by
+// the Vite build (which resolves `@/`) and by `messageLink.test.mjs` running
+// under `node --test --experimental-strip-types`, which does not.
+import {
+  DEEP_LINK_PROTOCOL,
+  DEEP_LINK_URL_PREFIX,
+  LEGACY_DEEP_LINK_PROTOCOL,
+  LEGACY_DEEP_LINK_URL_PREFIX,
+} from "../../../shared/product/index.ts";
+
+const MESSAGE_LINK_SCHEME = DEEP_LINK_PROTOCOL;
 const MESSAGE_LINK_HOST = "message";
+
+/** Schemes accepted when parsing. Only `MESSAGE_LINK_SCHEME` is ever written. */
+const READABLE_MESSAGE_LINK_SCHEMES: readonly string[] = [
+  DEEP_LINK_PROTOCOL,
+  LEGACY_DEEP_LINK_PROTOCOL,
+];
+
+const READABLE_MESSAGE_LINK_PREFIXES: readonly string[] = [
+  DEEP_LINK_URL_PREFIX,
+  LEGACY_DEEP_LINK_URL_PREFIX,
+];
 
 export type MessageLinkInput = {
   channelId: string;
@@ -33,7 +68,7 @@ export type MessageLinkParseResult =
   | { ok: false; reason: string };
 
 /**
- * Build a `buzz://message` URL for a given channel + message.
+ * Build a `schoolx://message` URL for a given channel + message.
  *
  * Empty `threadRootId` is treated as "no thread" so callers can pass through
  * the result of `getThreadReference(tags).rootId` without extra null checks.
@@ -56,8 +91,9 @@ export function buildMessageLink(input: MessageLinkInput): string {
 }
 
 /**
- * Parse a `buzz://message?…` URL. Returns a discriminated result so callers can
- * render a fallback (e.g. a plain link) without throwing.
+ * Parse a `schoolx://message?…` URL — or a legacy `buzz://message?…` one, see
+ * the module comment. Returns a discriminated result so callers can render a
+ * fallback (e.g. a plain link) without throwing.
  */
 export function parseMessageLink(url: string): MessageLinkParseResult {
   let parsed: URL;
@@ -67,10 +103,10 @@ export function parseMessageLink(url: string): MessageLinkParseResult {
     return { ok: false, reason: "invalid-url" };
   }
 
-  if (parsed.protocol !== MESSAGE_LINK_SCHEME) {
+  if (!READABLE_MESSAGE_LINK_SCHEMES.includes(parsed.protocol)) {
     return { ok: false, reason: "wrong-scheme" };
   }
-  // `new URL("buzz://message?…")` puts "message" in `hostname`.
+  // `new URL("schoolx://message?…")` puts "message" in `hostname`.
   if (parsed.hostname !== MESSAGE_LINK_HOST) {
     return { ok: false, reason: "wrong-host" };
   }
@@ -100,7 +136,11 @@ export function parseMessageLink(url: string): MessageLinkParseResult {
  */
 export function isMessageLink(href: string | undefined | null): boolean {
   if (!href) return false;
-  return href.startsWith("buzz://message?") || href === "buzz://message";
+  return READABLE_MESSAGE_LINK_PREFIXES.some(
+    (prefix) =>
+      href.startsWith(`${prefix}${MESSAGE_LINK_HOST}?`) ||
+      href === `${prefix}${MESSAGE_LINK_HOST}`,
+  );
 }
 
 type MessageLinkRenderInput = {
@@ -115,7 +155,7 @@ export type MessageLinkRenderTarget =
 
 /**
  * Centralizes how markdown-rendered anchors map to message-link UI. Both
- * CommonMark autolinks (`<buzz://message?...>`) and explicitly labeled links
+ * CommonMark autolinks (`<schoolx://message?...>`) and explicitly labeled links
  * arrive as anchors; autolinks have label === href and should render as pills,
  * while intentionally labeled links keep their label.
  */

@@ -2,9 +2,10 @@ import { isMessageLink, parseMessageLink } from "./messageLink";
 import type { ParsedMessageLink } from "./messageLink";
 
 /**
- * Open a link the same way the rendered-message link path does:
- * `buzz://message?…` deep-links navigate in-app, everything else (http(s),
- * other buzz:// URLs) goes to the OS opener. Mirrors `markdown.tsx`'s `a`
+ * Open a link the same way the rendered-message link path does: message
+ * deep-links (`schoolx://message?…`, plus legacy `buzz://message?…` — see
+ * `messageLink.ts`) navigate in-app, and everything else (http(s), other
+ * custom-scheme URLs) goes to the OS opener. Mirrors `markdown.tsx`'s `a`
  * renderer so the composer popover and the rendered link behave identically.
  */
 export function openPopoverLink(

@@ -317,7 +317,7 @@ test("message links to visible root messages open the thread panel", async ({
   );
 
   const link =
-    "buzz://message?channel=9a1657ac-f7aa-5db0-b632-d8bbeb6dfb50&id=mock-general-welcome";
+    "schoolx://message?channel=9a1657ac-f7aa-5db0-b632-d8bbeb6dfb50&id=mock-general-welcome";
   await page.getByTestId("message-input").fill(`Root link repro ${link}`);
   await page.getByTestId("send-message").click();
 
@@ -329,6 +329,50 @@ test("message links to visible root messages open the thread panel", async ({
   await linkMessage
     .getByRole("button", { name: "Open message in general" })
     .click();
+
+  const threadPanel = page.getByTestId("message-thread-panel");
+  await expect(threadPanel).toBeVisible();
+  await expect(page).toHaveURL(/thread=mock-general-welcome/);
+  await expect(threadPanel.getByTestId("message-thread-head")).toContainText(
+    "Welcome to #general",
+  );
+});
+
+// Messages written before the SchoolX rename — and messages written by a Buzz
+// user in a shared community — carry `buzz://message` links. The app registers
+// only `schoolx` with the OS, but link text inside a message never goes through
+// OS routing, so these must keep rendering as clickable pills rather than
+// decaying into raw 100-character strings. Pins the decision recorded in
+// `desktop/src/shared/product/index.ts`: read the legacy scheme, never write it.
+test("legacy buzz:// message links still open the thread panel", async ({
+  page,
+}) => {
+  await page.goto("/");
+  await page.getByTestId("channel-general").click();
+  await expect(page.getByTestId("chat-title")).toHaveText("general");
+  await expect(page.getByTestId("message-timeline")).toContainText(
+    "Welcome to #general",
+  );
+
+  const legacyLink =
+    "buzz://message?channel=9a1657ac-f7aa-5db0-b632-d8bbeb6dfb50&id=mock-general-welcome";
+  await page
+    .getByTestId("message-input")
+    .fill(`Legacy link repro ${legacyLink}`);
+  await page.getByTestId("send-message").click();
+
+  const linkMessage = page
+    .getByTestId("message-row")
+    .filter({ hasText: "Legacy link repro" })
+    .last();
+  await expect(linkMessage).toBeVisible();
+
+  // Rendered as a pill, not as the raw URL text.
+  const pill = linkMessage.getByRole("button", {
+    name: "Open message in general",
+  });
+  await expect(pill).toBeVisible();
+  await pill.click();
 
   const threadPanel = page.getByTestId("message-thread-panel");
   await expect(threadPanel).toBeVisible();
@@ -356,7 +400,7 @@ test("message links reopen a closed thread when the same messageId is already in
   await expect(threadPanel).not.toBeVisible();
 
   const link =
-    "buzz://message?channel=9a1657ac-f7aa-5db0-b632-d8bbeb6dfb50&id=mock-general-welcome";
+    "schoolx://message?channel=9a1657ac-f7aa-5db0-b632-d8bbeb6dfb50&id=mock-general-welcome";
   await page
     .getByTestId("message-input")
     .fill(`Reopen same root link repro ${link}`);

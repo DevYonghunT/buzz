@@ -910,11 +910,24 @@ fn refresh_skill_overwrites_on_version_bump() {
 
 #[test]
 fn test_path_is_dev_nest_dev_path_returns_true() {
-    let path = std::path::Path::new("/Users/someone/.buzz-dev");
+    let path = std::path::Path::new("/Users/someone").join(crate::product::NEST_DIR_DEV);
     assert!(
-        path_is_dev_nest(path),
-        ".buzz-dev path must be identified as dev nest"
+        path_is_dev_nest(&path),
+        "{} path must be identified as dev nest",
+        crate::product::NEST_DIR_DEV,
     );
+}
+
+/// A co-installed Buzz's nest must never be mistaken for this build's dev nest
+/// — that would point dev-only migrations at Buzz's agent knowledge.
+#[test]
+fn test_path_is_dev_nest_rejects_buzz_nest() {
+    assert!(!path_is_dev_nest(std::path::Path::new(
+        "/Users/someone/.buzz-dev"
+    )));
+    assert!(!path_is_dev_nest(std::path::Path::new(
+        "/Users/someone/.buzz"
+    )));
 }
 
 #[test]

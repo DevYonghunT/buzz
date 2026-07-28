@@ -5,11 +5,11 @@ set -euo pipefail
 instance_id="${1:-}"
 keyring_service="${2:-}"
 
-if [[ "$instance_id" != "xyz.block.buzz.app.dev" && "$instance_id" != xyz.block.buzz.app.dev.* ]]; then
+if [[ "$instance_id" != "io.github.schoolx520.app.dev" && "$instance_id" != io.github.schoolx520.app.dev.* ]]; then
     echo "reset-desktop-standalone-state: refusing non-dev bundle identifier: $instance_id" >&2
     exit 1
 fi
-if [[ "$keyring_service" != "buzz-desktop-dev" && "$keyring_service" != buzz-desktop-dev.* ]]; then
+if [[ "$keyring_service" != "schoolx-desktop-dev" && "$keyring_service" != schoolx-desktop-dev.* ]]; then
     echo "reset-desktop-standalone-state: refusing non-dev keyring service: $keyring_service" >&2
     exit 1
 fi
