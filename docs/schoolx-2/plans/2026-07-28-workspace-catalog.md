@@ -2050,6 +2050,8 @@ git commit -m "feat(schoolx-2): 세션 D — catalog 적용 Tauri command"
       conflict: "Needs your decision",
       retired: "No longer offered",
       deleted: "Previously deleted",
+      adopted: "Existing room reused",
+      not_owned: "Owned by someone else",
     },
     outcome: {
       applied: "Applied",
@@ -2062,6 +2064,8 @@ git commit -m "feat(schoolx-2): 세션 D — catalog 적용 Tauri command"
         "You deleted this room before. Create it again?",
       resolve_conflict:
         "A room with this name already exists. SchoolX will not adopt it automatically.",
+      request_ownership:
+        "This room exists but you do not own it. Nothing was changed — ask an owner to apply it.",
     },
     renamed: "Renamed by a member",
   },
@@ -2087,6 +2091,8 @@ git commit -m "feat(schoolx-2): 세션 D — catalog 적용 Tauri command"
       conflict: "확인이 필요합니다",
       retired: "더는 제공하지 않습니다",
       deleted: "이전에 삭제됨",
+      adopted: "기존 방을 이어받습니다",
+      not_owned: "다른 사람의 방입니다",
     },
     outcome: {
       applied: "적용 완료",
@@ -2098,6 +2104,8 @@ git commit -m "feat(schoolx-2): 세션 D — catalog 적용 Tauri command"
       confirm_recreate: "이전에 삭제한 방입니다. 다시 만들까요?",
       resolve_conflict:
         "같은 이름의 방이 이미 있습니다. SchoolX가 임의로 채택하지 않습니다.",
+      request_ownership:
+        "방은 있지만 관리 권한이 없습니다. 아무것도 바꾸지 않았습니다 — 방 소유자에게 적용을 요청하세요.",
     },
     renamed: "멤버가 이름을 변경함",
   },
@@ -2123,23 +2131,35 @@ Expected: PASS — `en`/`ko` 키 구조가 일치
 ```ts
 import { invokeTauri } from "@/shared/api/tauri";
 
+/**
+ * 여덟 값이다. `preflight`는 앞의 다섯만 내고, `deleted`·`adopted`·`not_owned`는
+ * 적용 시점에 saga가 확정한다. Rust 쪽 `Decision`의 serde 철자와
+ * `ledger.rs`의 `*_DECISION` 상수가 같은 어휘를 이룬다.
+ */
 export type CatalogDecision =
   | "create_or_recreate"
   | "resume"
   | "no_change"
   | "conflict"
   | "retired"
-  | "deleted";
+  | "deleted"
+  | "adopted"
+  | "not_owned";
 
 export type CatalogOutcome = "applied" | "unchanged" | "partial" | "blocked";
 
-export type CatalogUserAction = "confirm_recreate" | "resolve_conflict";
+export type CatalogUserAction =
+  | "confirm_recreate"
+  | "resolve_conflict"
+  | "request_ownership";
 
 export type CatalogPreflightItem = {
   item_key: string;
   decision: CatalogDecision;
   channel_id: string | null;
+  channel_present: boolean;
   generation: number;
+  steps: CatalogStepStates;
   renamed: boolean;
 };
 
