@@ -735,6 +735,8 @@ pub fn run() {
             get_channels,
             create_channel,
             ensure_starter_channels,
+            preflight_workspace_catalog,
+            apply_workspace_catalog,
             open_dm,
             hide_dm,
             get_channel_details,
