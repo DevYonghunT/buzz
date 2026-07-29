@@ -45,6 +45,22 @@ pub async fn apply(
     })
 }
 
+/// 단계 1이 끝난 뒤, 이 방이 어디서 왔는가.
+///
+/// 아래 owner 게이트가 이 값 하나로 갈린다. **이번 실행이 직접 만든 방만**
+/// 게이트를 건너뛴다 — 만든 사람이 곧 owner이기 때문이다. 나머지는 전부
+/// 이번 실행 이전부터 있던 방이고, 그 방이 적용자의 방이라는 근거가 없다.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ChannelOrigin {
+    /// 이번 실행이 직접 만들었다.
+    CreatedHere,
+    /// provenance가 채널 단계를 완료로 적고 있어 생성을 건너뛰었다. 만든
+    /// 것은 **이전 실행**이고, 그게 이번 적용자였다는 보장은 없다.
+    CreateSkipped,
+    /// 생성이 `duplicate`로 거부됐는데 그 방에 접근이 된다.
+    CreateDuplicate,
+}
+
 async fn apply_item(
     catalog: &Catalog,
     effects: &dyn CatalogEffects,
@@ -114,6 +130,11 @@ async fn apply_item(
 
     let mut error: Option<String> = None;
 
+    // 단계 1이 이 방을 어떻게 얻었는가 — 아래 owner 게이트가 이 값으로
+    // 갈린다. 기본값이 `CreateSkipped`인 이유: provenance가 채널 단계를
+    // 완료로 적고 있으면 아래 블록이 통째로 실행되지 않는다.
+    let mut origin = ChannelOrigin::CreateSkipped;
+
     // 단계 1 — 채널 생성.
     if provenance.steps.channel != StepStatus::Done {
         match effects
@@ -126,7 +147,10 @@ async fn apply_item(
             })
             .await
         {
-            Ok(CreateOutcome::Created) => provenance.steps.channel = StepStatus::Done,
+            Ok(CreateOutcome::Created) => {
+                origin = ChannelOrigin::CreatedHere;
+                provenance.steps.channel = StepStatus::Done;
+            }
             // §7의 `deleted` 조건은 두 절이다: `duplicate` **그리고** 접근
             // 불가. `duplicate` 하나만으로는 두 상태를 구분할 수 없다.
             Ok(CreateOutcome::Duplicate) if !plan.channel_present => {
@@ -149,45 +173,74 @@ async fn apply_item(
                 // 클라이언트가 provenance를 쓰기 전에 죽은 경우다(§5가
                 // 결정론적 ID를 두는 이유가 정확히 이것이다).
                 //
-                // 그렇다고 **쓸 권한**이 생기지는 않는다. 증명서를 남기지
-                // 못한 것은 관리자 A인데 그 방의 멤버일 뿐인 관리자 B가
-                // 적용을 돌릴 수 있다. B에게는 방이 보이고 증명서는 안
-                // 보이므로 여기까지 그대로 온다. 그래서 owner 확인을
-                // **쓰기 전에** 한다 — 캔버스를 먼저 쓰고 나중에
-                // 확인하면, 확인이 실패한 시점에는 그 방에 있던 내용이
-                // 이미 사라진 뒤다.
-                match effects.is_owner(channel_id).await {
-                    Ok(true) => {
-                        // 이번 실행이 만든 방이 아니라 이미 있던 방을
-                        // 이어받는 것이다. ledger가 그 차이를 말하게 한다.
-                        decision = ADOPTED_DECISION.to_string();
-                        provenance.steps.channel = StepStatus::Done;
-                    }
-                    Ok(false) => {
-                        // 남의 방이다. 아무것도 쓰지 않고 사용자에게
-                        // 넘긴다 — `Conflict`와 같은 모양이다.
-                        return LedgerItem {
-                            item_key: plan.item_key.clone(),
-                            decision: NOT_OWNED_DECISION.to_string(),
-                            channel_id: Some(channel_id),
-                            generation: plan.generation,
-                            steps: provenance.steps,
-                            outcome: Outcome::Blocked,
-                            user_action: Some(UserAction::RequestOwnership),
-                            error: None,
-                        };
-                    }
-                    Err(e) => {
-                        // owner인지 모르는 채로는 채택도 차단도 확정할 수
-                        // 없다. 쓰지 않는 쪽이 안전한 실패다 — `error`가
-                        // 실리므로 캔버스 단계로 내려가지 않고, 채널 단계가
-                        // `Done`이 아니라 provenance도 발행되지 않는다.
-                        provenance.steps.channel = StepStatus::Failed;
-                        error = Some(e.0);
-                    }
-                }
+                // 그렇다고 **쓸 권한**이 생기지는 않는다. 판단은 아래 owner
+                // 게이트가 한다. 채널 단계를 여기서 완료로 적지 않는 이유도
+                // 그것이다 — 게이트가 막으면 ledger가 하지도 않은 완료를
+                // 보고하게 된다.
+                origin = ChannelOrigin::CreateDuplicate;
             }
             Err(e) => {
+                provenance.steps.channel = StepStatus::Failed;
+                error = Some(e.0);
+            }
+        }
+    }
+
+    // 권한 게이트 — **이번 실행이 만들지 않은 방은 첫 쓰기 전에 owner를
+    // 확인한다.**
+    //
+    // 규칙은 하나다. 만든 사람이 곧 owner이므로 `CreatedHere`만 건너뛰고,
+    // 나머지 둘은 이번 실행 이전부터 있던 방이라 확인이 필요하다. 그 둘이
+    // 각각 §7의 채택 경로와 재개 경로다.
+    //
+    // - 채택(`CreateDuplicate`): 증명서를 남기지 못한 것은 관리자 A인데,
+    //   그 방의 멤버일 뿐인 관리자 B가 적용을 돌릴 수 있다. B에게는 방이
+    //   보이고 증명서는 안 보이므로 판정이 여기까지 그대로 온다.
+    // - 재개(`CreateSkipped`): provenance는 **채널 스코프**라 owner가 아니라
+    //   **멤버**면 읽힌다. B가 미완료 증명서를 읽으면 preflight가 `Resume`을
+    //   내고, 그러면 단계 1이 통째로 건너뛰어져 게이트 없이 캔버스로 내려간다.
+    //
+    // 재개 쪽이 오히려 더 흔하다. 채택은 증명서가 아예 없고 방 이름까지
+    // 바뀌어야 도달하지만, 미완료 증명서는 부분 실패의 **정상적인 결과**다.
+    //
+    // 어느 쪽이든 캔버스를 먼저 쓰고 나중에 확인하면, 확인이 실패한 시점에는
+    // 팀이 그 방에 써 둔 내용이 이미 사라진 뒤다 — 되돌릴 수 없다.
+    if error.is_none() && origin != ChannelOrigin::CreatedHere {
+        match effects.is_owner(channel_id).await {
+            Ok(true) => {
+                if origin == ChannelOrigin::CreateDuplicate {
+                    // 이번 실행이 만든 방이 아니라 이미 있던 방을 이어받는
+                    // 것이다. ledger가 그 차이를 말하게 한다. 재개는 이미
+                    // 증명서가 있는 항목이라 판정이 `resume` 그대로다.
+                    decision = ADOPTED_DECISION.to_string();
+                    provenance.steps.channel = StepStatus::Done;
+                }
+            }
+            Ok(false) => {
+                // 남의 방이다. 아무것도 쓰지 않고 사용자에게 넘긴다 —
+                // `Conflict`와 같은 모양이다. 단계 상태는 preflight가 읽어 온
+                // 그대로 보고한다: 채택 경로에서는 전부 `Pending`이고, 재개
+                // 경로에서는 이전 실행이 남긴 실제 진행이다. 여기서 지어내면
+                // ledger가 이번 실행이 하지 않은 일을 보고한다.
+                return LedgerItem {
+                    item_key: plan.item_key.clone(),
+                    decision: NOT_OWNED_DECISION.to_string(),
+                    channel_id: Some(channel_id),
+                    generation: plan.generation,
+                    steps: provenance.steps,
+                    outcome: Outcome::Blocked,
+                    user_action: Some(UserAction::RequestOwnership),
+                    error: None,
+                };
+            }
+            Err(e) => {
+                // owner인지 모르는 채로는 채택도 차단도 확정할 수 없다.
+                // 쓰지 않는 쪽이 안전한 실패다 — `error`가 실리므로 캔버스
+                // 단계로 내려가지 않고, 채널 단계가 `Done`이 아니라
+                // provenance도 발행되지 않는다. 재개 경로에서는 이미 `Done`
+                // 이던 값을 `Failed`로 덮어써서 그 발행을 막는다. relay에
+                // 남아 있는 증명서는 건드리지 않았으므로 재시도가 다시 재개
+                // 판정을 받고 여기서 다시 묻는다.
                 provenance.steps.channel = StepStatus::Failed;
                 error = Some(e.0);
             }
@@ -207,11 +260,11 @@ async fn apply_item(
 
     // 단계 3 — owner 확인.
     //
-    // 채택 경로가 위에서 이미 한 번 물어봤지만 여기서 다시 묻는다. 위의
-    // 확인은 "써도 되는가"를 가르는 게이트고, 이 단계는 그 사실을 증명서에
-    // 남기는 것이다. 게이트를 통과했다고 단계를 완료로 지어내면, 채택이
-    // 아닌 경로(생성·재개)에서는 이 단계가 유일한 owner 검증인데 그 사실이
-    // 코드에서 보이지 않게 된다.
+    // 위 게이트가 이미 물어본 경로(채택·재개)에서도 여기서 다시 묻는다.
+    // 게이트는 "써도 되는가"를 가르는 것이고, 이 단계는 그 사실을 증명서에
+    // 남기는 것이다. 게이트를 통과했다고 이 단계를 완료로 지어내면, 게이트를
+    // 지나지 않는 생성 경로에서는 이 단계가 **유일한** owner 검증인데 그
+    // 사실이 코드에서 보이지 않게 된다.
     if error.is_none() && provenance.steps.membership != StepStatus::Done {
         match effects.is_owner(channel_id).await {
             Ok(true) => provenance.steps.membership = StepStatus::Done,
@@ -281,6 +334,25 @@ mod tests {
             .item(item_key)
             .expect("catalog item")
             .canvas
+    }
+
+    /// 팀이 그 방에 직접 써 넣은 내용 — 시작 캔버스가 덮어쓰면 되돌릴 수 없는
+    /// 바로 그 값이다.
+    const TEAM_CANVAS: &str = "팀이 직접 정리한 회의 규칙";
+
+    /// 팀이 이미 쓰고 있는 방으로 만든다.
+    ///
+    /// 캔버스가 비어 있는 상태를 `is_empty()`로 확인하는 채택 경로와 달리,
+    /// 재개 경로는 그 방에 **이미 내용이 있는 것**이 전제다(부분 실패 뒤 팀이
+    /// 방을 쓰기 시작했다). 값을 넣어 두어야 "덮어쓰지 않았다"를 관측할 수
+    /// 있다.
+    fn seed_team_canvas(fx: &FakeEffects, channel_id: Uuid) {
+        // catalog 값과 같으면 덮어써도 assert가 통과한다.
+        assert_ne!(TEAM_CANVAS, canvas_of("meeting"));
+        fx.canvases
+            .lock()
+            .expect("lock")
+            .insert(channel_id, TEAM_CANVAS.to_string());
     }
 
     /// 이미 적용됐거나 적용 중이던 항목을 세대 1로 시드한다.
@@ -532,50 +604,79 @@ mod tests {
         );
     }
 
-    /// "owner가 아니다"라는 **성공 응답**은 단계 성공이 아니다.
+    /// 재개 경로도 **이번 실행이 만들지 않은 방**이므로 쓰기 전에 owner를
+    /// 확인한다. 아니면 **아무것도 쓰지 않고** 막는다.
     ///
-    /// `Ok(false)`를 완료로 적으면 증명서가 "owner 확인 완료"라고 거짓말하고,
-    /// 다음 실행은 이 항목을 `no_change`로 건너뛴다 — 아무도 owner가 아닌 채
-    /// 영원히.
+    /// 도달 경로 — 채택보다 오히려 흔하다. 관리자 A가 방을 만들었는데 캔버스
+    /// 단계가 일시적으로 실패해 증명서가 `channel: done, canvas: failed`로
+    /// 남았다(§8이 말하는 부분 실패의 정상적인 결과다). 팀이 그 방을 쓰기
+    /// 시작해 자기 캔버스를 채워 넣는다. 그 방의 **멤버**일 뿐인 B가 적용을
+    /// 돌린다 — provenance는 채널 스코프라 owner가 아니라 멤버면 읽히므로
+    /// preflight가 `Resume`을 내고, 단계 1은 `channel == done`이라 통째로
+    /// 건너뛴다.
+    ///
+    /// 캔버스를 먼저 쓰고 나중에 owner를 확인하는 saga는 이 시점에 팀이 써
+    /// 둔 캔버스를 이미 지운 뒤다 — 되돌릴 수 없다. 채택 경로의
+    /// `duplicate_channel_we_do_not_own_blocks_without_writing_anything`과
+    /// 같은 규칙이고, 도달 조건만 다르다: 채택은 증명서가 아예 없고 방 이름
+    /// 까지 바뀌어야 하지만 여기는 미완료 증명서 하나면 된다.
     #[tokio::test]
-    async fn non_owner_membership_is_failed_and_completes_after_ownership_is_granted() {
+    async fn resume_by_non_owner_blocks_without_writing_anything() {
         let fx = FakeEffects::new();
-        let channel_id = seed_applied(
-            &fx,
-            "meeting",
-            "메인 회의방",
-            StepStates {
-                channel: StepStatus::Done,
-                canvas: StepStatus::Done,
-                membership: StepStatus::Pending,
-            },
-        );
-        // 방은 있고 접근도 되지만 적용자는 이 방의 owner가 아니다.
+        let steps = StepStates {
+            channel: StepStatus::Done,
+            canvas: StepStatus::Failed,
+            membership: StepStatus::Pending,
+        };
+        let channel_id = seed_applied(&fx, "meeting", "메인 회의방", steps);
+        // 방은 있고 증명서도 읽히지만 적용자는 이 방의 owner가 아니다.
         fx.owned.lock().expect("lock").remove(&channel_id);
+        // 팀이 그 사이 자기 내용을 써 넣었다. 이게 지켜져야 하는 값이다.
+        seed_team_canvas(&fx, channel_id);
 
-        let first = apply(crate::builtin(), &fx, &["meeting".to_string()])
+        let ledger = apply(crate::builtin(), &fx, &["meeting".to_string()])
             .await
-            .expect("first");
-        let entry = item(&first, "meeting");
-        assert_eq!(entry.decision, "resume");
-        assert_eq!(entry.outcome, Outcome::Partial);
-        assert_eq!(entry.steps.membership, StepStatus::Failed);
-        // `Ok(false)`와 `Err`는 사용자에게 다른 사유다. 문장을 고정한다 —
-        // `is_some()`만 보면 둘이 뒤바뀌어도 통과한다.
-        assert_eq!(
-            entry.error.as_deref(),
-            Some("적용자가 채널 owner가 아닙니다")
-        );
+            .expect("apply");
 
-        // owner 권한을 받고 재시도한다.
+        // 그 방에 아무것도 쓰지 않았다. 이게 이 테스트의 핵심이라 먼저
+        // 확인한다 — `outcome`만 보면 캔버스를 쓴 **뒤에** 막힌 saga도
+        // 통과하고, 그때 이미 팀이 써 둔 내용은 사라진 뒤다.
+        assert_eq!(
+            fx.canvases.lock().expect("lock").get(&channel_id),
+            Some(&TEAM_CANVAS.to_string()),
+            "owner가 아닌 방의 캔버스를 덮어썼다"
+        );
+        assert!(
+            fx.published.lock().expect("lock").is_empty(),
+            "owner가 아닌 방에 provenance를 발행했다"
+        );
+        assert_eq!(fx.channels.lock().expect("lock").len(), 1);
+
+        let entry = item(&ledger, "meeting");
+        assert_eq!(entry.outcome, Outcome::Blocked);
+        assert_eq!(entry.user_action, Some(UserAction::RequestOwnership));
+        assert_eq!(entry.decision, "not_owned");
+        assert_eq!(entry.channel_id, Some(channel_id));
+        // 단계를 완료로 지어내지도, 이전 실행이 남긴 진행을 지우지도 않았다.
+        assert_eq!(entry.steps, steps);
+
+        // owner 권한을 받고 재시도하면 그때 비로소 이어서 끝난다.
         fx.owned.lock().expect("lock").insert(channel_id);
         let second = apply(crate::builtin(), &fx, &["meeting".to_string()])
             .await
             .expect("retry");
         let entry = item(&second, "meeting");
+        // 채택이 아니다 — 증명서가 이미 있는 항목이라 판정은 `resume` 그대로다.
+        assert_eq!(entry.decision, "resume");
         assert_eq!(entry.outcome, Outcome::Applied);
         assert_eq!(entry.steps.membership, StepStatus::Done);
         assert_eq!(entry.error, None);
+        // 미완료였던 캔버스 단계를 **실제로** 이어서 했다.
+        assert_eq!(
+            fx.canvases.lock().expect("lock").get(&channel_id),
+            Some(&canvas_of("meeting").to_string()),
+            "재시도가 시작 캔버스를 쓰지 않았다"
+        );
         // 아무것도 새로 만들지 않았다.
         assert_eq!(fx.channels.lock().expect("lock").len(), 1);
         assert!(
@@ -588,6 +689,67 @@ mod tests {
             stored[0].1.is_complete(),
             "증명서가 desired state로 갱신되지 않았다"
         );
+    }
+
+    /// 재개 경로에서도 owner인지 **모르는** 채로는 쓰지 않는다.
+    ///
+    /// `Ok(false)`만 막고 `Err`를 흘려보내면, relay가 잠깐 느린 것만으로 팀의
+    /// 캔버스가 사라진다. 채택 경로의
+    /// `adoption_ownership_check_error_writes_nothing`과 같은 규칙이다.
+    #[tokio::test]
+    async fn resume_ownership_check_error_writes_nothing() {
+        let fx = FakeEffects::new();
+        let steps = StepStates {
+            channel: StepStatus::Done,
+            canvas: StepStatus::Failed,
+            membership: StepStatus::Pending,
+        };
+        // 적용자는 실제로 owner다(`seed_applied`가 그렇게 시드한다) — 막히는
+        // 이유는 권한이 없어서가 아니라 **확인 자체가 실패**해서다.
+        let channel_id = seed_applied(&fx, "meeting", "메인 회의방", steps);
+        seed_team_canvas(&fx, channel_id);
+        fx.fail_next("is_owner");
+
+        let ledger = apply(crate::builtin(), &fx, &["meeting".to_string()])
+            .await
+            .expect("apply");
+
+        assert_eq!(
+            fx.canvases.lock().expect("lock").get(&channel_id),
+            Some(&TEAM_CANVAS.to_string()),
+            "owner 여부를 모르는 방의 캔버스를 덮어썼다"
+        );
+        assert!(
+            fx.published.lock().expect("lock").is_empty(),
+            "확인이 끝나지 않았는데 provenance를 발행했다"
+        );
+
+        let entry = item(&ledger, "meeting");
+        assert_eq!(entry.outcome, Outcome::Partial);
+        // 채택 경로와 같은 모양이다: 채널 단계를 `failed`로 적고 멈춘다.
+        // 별도 판정을 만들지 않으므로 `decision`은 `resume` 그대로다.
+        assert_eq!(entry.decision, "resume");
+        assert_eq!(entry.steps.channel, StepStatus::Failed);
+        assert!(entry.error.is_some(), "확인 실패 사유가 실려야 한다");
+        // relay에 남아 있는 증명서는 건드리지 않았다 — 재시도가 다시 재개한다.
+        {
+            let stored = fx.provenance.lock().expect("lock");
+            assert_eq!(stored.len(), 1);
+            assert_eq!(stored[0].1.steps, steps);
+        }
+
+        // relay가 돌아오면 재시도가 이어서 끝난다.
+        let retry = apply(crate::builtin(), &fx, &["meeting".to_string()])
+            .await
+            .expect("retry");
+        let entry = item(&retry, "meeting");
+        assert_eq!(entry.decision, "resume");
+        assert_eq!(entry.outcome, Outcome::Applied);
+        assert_eq!(
+            fx.canvases.lock().expect("lock").get(&channel_id),
+            Some(&canvas_of("meeting").to_string())
+        );
+        assert_eq!(fx.channels.lock().expect("lock").len(), 1);
     }
 
     #[tokio::test]
