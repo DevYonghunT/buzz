@@ -945,6 +945,12 @@ git commit -m "feat(schoolx-2): 세션 D — catalog effects 경계와 fake"
 
 ## Task 6: preflight 판정
 
+> **⚠️ 이 아래 코드는 구현 후 바뀌었다. 코드가 기준이다.**
+> Task 7 리뷰가 saga에서 Critical 2건을 찾았고, 그 수정이 `PreflightItem`에
+> `steps: StepStates`와 `channel_present: bool`을 더했다(커밋 `200c88b0`).
+> `f4aaf6c8`은 테스트 3개와 `seed_applied_with_generation` 헬퍼를 더했다.
+> 이 절을 다시 실행하지 말고 `crates/schoolx-catalog/src/preflight.rs`를 읽어라.
+
 **Files:**
 - Create: `crates/schoolx-catalog/src/preflight.rs`
 - Modify: `crates/schoolx-catalog/src/lib.rs`
@@ -1253,6 +1259,21 @@ git commit -m "feat(schoolx-2): 세션 D — catalog preflight 판정"
 ---
 
 ## Task 7: saga 실행기와 result ledger
+
+> **⚠️ 이 아래 코드에는 Critical 버그 2건이 있다. 그대로 쓰지 마라.**
+> 리뷰가 찾아 커밋 `200c88b0`에서 고쳤다. 두 가지 모두 계획서를 쓸 때 들어간
+> 설계 오류이지 구현 실수가 아니다.
+>
+> 1. `Resume` 경로의 두 번째 `fetch_provenance` 에러를 `if let Ok(...)`으로
+>    삼켜, 네트워크 오류 한 번이면 살아 있는 방을 "삭제됨"으로 오판하고
+>    사용자가 확인하면 방을 하나 더 만든다. 수정은 두 번째 읽기를 없애고
+>    `PreflightItem`이 `steps`를 실어 나르게 한 것이다.
+> 2. `publish_provenance` 실패가 `Applied`로 보고된다. `error`가 채워진 채
+>    "성공"이 나간다. 수정은 `is_complete() && error.is_none()`이다.
+>
+> 그 밖에 `Duplicate` 판정에 §7이 요구한 접근성 확인이 빠져 있었고, `Retired`가
+> 단계 상태를 지어내고 있었다. 코드가 기준이다 —
+> `crates/schoolx-catalog/src/{saga.rs,ledger.rs}`를 읽어라.
 
 **Files:**
 - Create: `crates/schoolx-catalog/src/ledger.rs`
