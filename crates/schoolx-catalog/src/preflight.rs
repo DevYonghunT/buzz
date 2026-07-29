@@ -5,7 +5,7 @@
 use crate::catalog::Catalog;
 use crate::channel_id::derive_channel_id;
 use crate::effects::{CatalogEffects, EffectError};
-use crate::provenance::Provenance;
+use crate::provenance::{Provenance, StepStates};
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -37,8 +37,21 @@ pub struct PreflightItem {
     pub decision: Decision,
     /// 알려진 채널 ID. `CreateOrRecreate`면 앞으로 쓸 ID다.
     pub channel_id: Option<Uuid>,
+    /// `channel_id`가 지금 접근 가능 목록에 있는가.
+    ///
+    /// saga는 이 값으로 §7의 `deleted` 조건 두 절 중 두 번째 —
+    /// "접근 불가" — 를 판정한다. `duplicate`만으로는 "예전에 만들었다가
+    /// 삭제됨"과 "만들어졌는데 provenance를 쓰기 전에 죽음"을 구분할 수
+    /// 없다. `channel_id`가 `None`인 `Retired`에서는 항상 `false`다.
+    pub channel_present: bool,
     /// 채널 ID 도출에 쓸 세대.
     pub generation: u32,
+    /// provenance에 기록된 단계별 상태. provenance가 없으면 전부 `Pending`.
+    ///
+    /// saga는 이 값을 그대로 이어받는다. saga가 provenance를 다시 읽지
+    /// 않게 하려고 여기에 싣는다 — 두 번째 읽기가 실패하면 멀쩡한 채널이
+    /// "삭제됨"으로 오판되기 때문이다.
+    pub steps: StepStates,
     /// 사용자가 이름을 바꿨는가. 판정과 무관한 표시용 플래그다.
     pub renamed: bool,
 }
@@ -74,7 +87,9 @@ pub async fn preflight(
                         Decision::Resume
                     },
                     channel_id: Some(channel_id),
+                    channel_present: live.is_some(),
                     generation: p.generation,
+                    steps: p.steps,
                     renamed: live.is_some_and(|c| c.name != item.name),
                 });
             }
@@ -90,7 +105,13 @@ pub async fn preflight(
                         Decision::CreateOrRecreate
                     },
                     channel_id: Some(channel_id),
+                    // provenance는 없지만 ID는 살아 있을 수 있다 — relay가
+                    // 채널을 만든 직후 클라이언트가 provenance를 쓰기 전에
+                    // 죽은 경우다. saga가 `duplicate`를 받았을 때 이 값으로
+                    // 그 경우와 "삭제됨"을 가른다.
+                    channel_present: channels.iter().any(|c| c.id == channel_id),
                     generation: 1,
+                    steps: StepStates::default(),
                     renamed: false,
                 });
             }
@@ -104,7 +125,11 @@ pub async fn preflight(
                 item_key: p.item_key.clone(),
                 decision: Decision::Retired,
                 channel_id: None,
+                channel_present: false,
                 generation: p.generation,
+                // 실제 상태를 그대로 싣는다. 미완료인 채로 catalog에서 빠질
+                // 수 있으므로 여기서 완료를 지어내면 ledger가 거짓말을 한다.
+                steps: p.steps,
                 renamed: false,
             });
         }
@@ -195,6 +220,10 @@ mod tests {
         for item in &items {
             assert_eq!(item.decision, Decision::CreateOrRecreate);
             assert_eq!(item.generation, 1);
+            // provenance가 없으면 단계는 전부 미실행이고, 도출된 ID를 쓰는
+            // 채널도 아직 없다.
+            assert_eq!(item.steps, StepStates::default());
+            assert!(!item.channel_present);
         }
     }
 
@@ -214,19 +243,20 @@ mod tests {
     #[tokio::test]
     async fn partial_item_resumes() {
         let fx = FakeEffects::new();
-        seed_applied(
-            &fx,
-            "meeting",
-            "메인 회의방",
-            StepStates {
-                channel: StepStatus::Done,
-                canvas: StepStatus::Failed,
-                membership: StepStatus::Pending,
-            },
-        );
+        let steps = StepStates {
+            channel: StepStatus::Done,
+            canvas: StepStatus::Failed,
+            membership: StepStatus::Pending,
+        };
+        seed_applied(&fx, "meeting", "메인 회의방", steps);
 
         let items = preflight(crate::builtin(), &fx).await.expect("preflight");
-        assert_eq!(find(&items, "meeting").decision, Decision::Resume);
+        let meeting = find(&items, "meeting");
+        assert_eq!(meeting.decision, Decision::Resume);
+        // saga는 provenance를 다시 읽지 않고 이 값을 그대로 쓴다. 여기서
+        // 실제 상태가 실려 나가지 않으면 saga가 완료된 단계를 다시 실행한다.
+        assert_eq!(meeting.steps, steps);
+        assert!(meeting.channel_present);
     }
 
     #[tokio::test]
@@ -238,7 +268,11 @@ mod tests {
         });
 
         let items = preflight(crate::builtin(), &fx).await.expect("preflight");
-        assert_eq!(find(&items, "planning").decision, Decision::Conflict);
+        let planning = find(&items, "planning");
+        assert_eq!(planning.decision, Decision::Conflict);
+        // 동명 채널은 우리가 도출한 ID가 아니다 — 이름이 같다고 우리 것으로
+        // 세지 않는다.
+        assert!(!planning.channel_present);
         assert_eq!(find(&items, "meeting").decision, Decision::CreateOrRecreate);
     }
 
@@ -296,19 +330,19 @@ mod tests {
         // catalog에 없는 항목이고, 게다가 적용이 끝나기도 전에 catalog에서
         // 빠졌다. 설계 문서의 Retired 조건에는 완료 절이 없으므로 이래도
         // Retired다 — 완료를 요구하는 좁은 규칙과 여기서 갈린다.
-        seed_applied(
-            &fx,
-            "finance",
-            "재무",
-            StepStates {
-                channel: StepStatus::Done,
-                canvas: StepStatus::Failed,
-                membership: StepStatus::Pending,
-            },
-        );
+        let steps = StepStates {
+            channel: StepStatus::Done,
+            canvas: StepStatus::Failed,
+            membership: StepStatus::Pending,
+        };
+        seed_applied(&fx, "finance", "재무", steps);
 
         let items = preflight(crate::builtin(), &fx).await.expect("preflight");
-        assert_eq!(find(&items, "finance").decision, Decision::Retired);
+        let finance = find(&items, "finance");
+        assert_eq!(finance.decision, Decision::Retired);
+        // Retired가 곧 완료를 뜻하지는 않는다. 실제 단계 상태가 그대로
+        // 실려야 ledger가 완료를 지어내지 않는다.
+        assert_eq!(finance.steps, steps);
     }
 
     #[tokio::test]

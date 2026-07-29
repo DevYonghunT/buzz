@@ -113,8 +113,27 @@ pub(crate) mod fake {
         /// 이미 점유된 채널 UUID — soft delete된 것 포함.
         pub burned_ids: Mutex<HashSet<Uuid>>,
         pub canvases: Mutex<HashMap<Uuid, String>>,
+        /// 성공한 `create_channel` 호출의 append-only 로그 — 요청받은
+        /// `ChannelSpec` 전체를 그대로 담는다.
+        ///
+        /// `channels`는 `ChannelRef`(id + 이름)만 담아서 `visibility`,
+        /// `description`, `channel_type`이 사라진다. 그러면 "내장 방은
+        /// private으로 만들어진다"는 수용 기준을 어떤 테스트도 검증할 수
+        /// 없다. 사용자가 지운 상태를 만들려고 `channels`를 비우는 테스트가
+        /// 있으므로 이 로그는 일부러 분리해 둔다 — 여기 남은 기록은
+        /// "이 실행이 무엇을 relay에 보냈는가"이지 "지금 무엇이 있는가"가
+        /// 아니다.
+        pub created: Mutex<Vec<ChannelSpec>>,
         /// 이 이름의 연산을 한 번 실패시킨다.
         pub fail_once: Mutex<HashSet<String>>,
+        /// `(op, nth)` — 그 op의 nth번째(1-based) 호출을 실패시킨다.
+        ///
+        /// `fail_once`로는 "첫 호출은 되고 두 번째만 실패"를 표현할 수
+        /// 없다. saga가 같은 연산을 몇 번 부르는지가 곧 회귀 대상인
+        /// 경우(중복 `fetch_provenance`)에 필요하다.
+        pub fail_at: Mutex<HashSet<(String, u32)>>,
+        /// op 이름별 호출 횟수.
+        pub calls: Mutex<HashMap<String, u32>>,
         /// 모든 `publish_provenance` 호출의 append-only 로그.
         ///
         /// `provenance`와 달리 절대 걸러내거나 지우지 않는다 — 몇 번
@@ -142,7 +161,40 @@ pub(crate) mod fake {
             self.fail_once.lock().expect("lock").insert(op.to_string());
         }
 
+        /// `op`의 `nth`번째(1-based) 호출을 실패시킨다. 그 앞뒤 호출은
+        /// 정상으로 둔다.
+        pub(crate) fn fail_nth(&self, op: &str, nth: u32) {
+            self.fail_at
+                .lock()
+                .expect("lock")
+                .insert((op.to_string(), nth));
+        }
+
+        /// 지금까지 `op`가 호출된 횟수.
+        pub(crate) fn call_count(&self, op: &str) -> u32 {
+            self.calls
+                .lock()
+                .expect("lock")
+                .get(op)
+                .copied()
+                .unwrap_or(0)
+        }
+
         fn take_failure(&self, op: &str) -> Result<(), EffectError> {
+            let nth = {
+                let mut calls = self.calls.lock().expect("lock");
+                let count = calls.entry(op.to_string()).or_insert(0);
+                *count += 1;
+                *count
+            };
+            if self
+                .fail_at
+                .lock()
+                .expect("lock")
+                .remove(&(op.to_string(), nth))
+            {
+                return Err(EffectError(format!("injected failure: {op} (call #{nth})")));
+            }
             let mut guard = self.fail_once.lock().expect("lock");
             if guard.remove(op) {
                 return Err(EffectError(format!("injected failure: {op}")));
@@ -195,9 +247,10 @@ pub(crate) mod fake {
             }
             self.channels.lock().expect("lock").push(ChannelRef {
                 id: spec.id,
-                name: spec.name,
+                name: spec.name.clone(),
             });
             self.owned.lock().expect("lock").insert(spec.id);
+            self.created.lock().expect("lock").push(spec);
             Ok(CreateOutcome::Created)
         }
 
