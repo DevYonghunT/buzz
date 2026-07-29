@@ -126,9 +126,15 @@ UUIDv5(SCHOOLX_CATALOG_NAMESPACE,
 |---|---|
 | 성공 | 정말 처음이다 |
 | `duplicate: channel already exists` + 접근 가능 목록에 없음 | 예전에 만들었고 지금은 삭제됐다 |
+| `duplicate: channel already exists` + 접근 가능 목록에 있음 | 삭제된 게 아니다. relay는 생성을 커밋했는데 증명서를 쓰기 전에 클라이언트가 죽었다 |
 
-미리보기 단계에서는 이 둘을 구분할 수 없다. 미리보기는
-`create_or_recreate`로 표시하고, 적용 시 거부가 나오면 **그 항목만 멈추고**
+세 번째 줄이 §5가 결정론적 ID를 두는 이유 그 자체다. 증명서가 없다고 방이
+없는 것은 아니므로, `duplicate` 한 절만으로 "삭제됨"을 확정하면 살아 있는
+방을 두고 세대를 올려 방을 하나 더 만든다.
+
+미리보기 단계에서는 이 셋을 구분할 수 없다. 미리보기는 `create_or_recreate`로
+표시하고, 적용 시 거부가 나오면 접근 가능 여부와 owner 여부로 §7의
+`deleted`·`not_owned`·`adopted`를 가른다. 앞의 둘이면 **그 항목만 멈추고**
 나머지 항목은 계속 진행한다. 사용자가 "다시 만들기"를 선택하면 `generation`을
 올려 새 ID로 만들고 증명서에 세대를 기록한다.
 
@@ -136,10 +142,12 @@ UUIDv5(SCHOOLX_CATALOG_NAMESPACE,
 
 | 판정 | 조건 | 동작 |
 |---|---|---|
-| `create_or_recreate` | 증명서 없음 + 동명 채널 없음 | 생성 시도. 거부되면 `deleted`로 확정 |
+| `create_or_recreate` | 증명서 없음 + 동명 채널 없음 | 생성 시도. 거부되면 아래 세 줄(`deleted`·`adopted`·`not_owned`) 중 하나로 확정 |
 | `resume` | 증명서 있음 + 일부 단계 미완료 | 미완료 단계만 실행 |
 | `no_change` | 증명서 있음 + 전 단계 완료 | 아무것도 하지 않음 |
 | `deleted` | 생성이 `duplicate`로 거부됨 + 접근 불가 | 자동 재생성 없음. 명시적 선택만 |
+| `adopted` | 생성이 `duplicate`로 거부됨 + 접근 가능 + 적용자가 owner | 이미 만들어진 방으로 보고 채널 단계를 완료 처리. 캔버스부터 이어서 진행 |
+| `not_owned` | 생성이 `duplicate`로 거부됨 + 접근 가능 + 적용자가 owner 아님 | 채택 없음. **아무것도 쓰지 않고** 사용자 해결 요청 |
 | `conflict` | 증명서 없음 + 동명 채널 있음 | 자동 채택 없음. 사용자 해결 요청 |
 | `retired` | 증명서 있음 + catalog에 항목 없음 | 목록에서 숨김. **기존 채널은 유지** |
 
@@ -149,6 +157,39 @@ UUIDv5(SCHOOLX_CATALOG_NAMESPACE,
 단계가 미완료면 `resume`, 완료면 `no_change`로 판정된다. 플래그는 미리보기와
 ledger에 표시만 하고, **이름을 catalog 값으로 되돌리지 않는다.** 판정과
 분리해야 "이름을 바꿨고 캔버스도 실패한" 항목이 재시도에서 누락되지 않는다.
+
+### `adopted`의 owner 게이트
+
+`adopted`는 §6 표의 세 번째 줄 — relay가 생성을 커밋한 뒤 증명서를 쓰기 전에
+클라이언트가 죽은 상태 — 를 흡수한다. ID가 도출값이라 그 방이 이 catalog의
+방이라는 것은 확실하다.
+
+**그렇다고 쓸 권한이 생기지는 않는다.** 증명서를 남기지 못한 것은 관리자 A인데
+그 방의 멤버일 뿐인 관리자 B가 적용을 돌릴 수 있다. B에게는 방이 보이고
+증명서는 안 보이므로 판정이 그대로 여기까지 온다. 그래서 **owner 확인을
+캔버스를 쓰기 전에** 한다. 캔버스를 먼저 쓰고 나중에 확인하면, 확인이 실패한
+시점에는 팀이 그 방에 써 둔 내용이 이미 사라진 뒤다 — 되돌릴 수 없다.
+
+- owner 확인이 `false`면 `not_owned`다. **캔버스도 증명서도 쓰지 않는다.**
+- owner 확인 자체가 실패하면(relay 오류) 채택도 차단도 확정하지 않는다.
+  채널 단계를 `failed`로 적고 멈춘다 — 모르는 채로 쓰지 않는 쪽이 안전한
+  실패다. 재시도가 다시 묻는다.
+
+ledger가 보고하는 값은 이렇다.
+
+| 판정 | `outcome` | `user_action` |
+|---|---|---|
+| `adopted` | `applied` (남은 단계가 다 끝나면) | `null` |
+| `not_owned` | `blocked` | `request_ownership` |
+
+`adopted`를 `create_or_recreate`로 보고하지 않는다. 둘 다 `applied`로 끝나므로
+같은 값으로 적으면 사용자가 "새로 만든 방"과 "이미 있던 방을 넘겨받았다"를
+구별할 방법이 없다.
+
+**도달 조건.** 방 이름이 catalog 값 그대로면 preflight가 먼저 `conflict`로
+막으므로 생성 시도 자체를 하지 않는다. 즉 `adopted`·`not_owned`는 그 방의
+이름이 바뀐 경우에만 나온다 — 위 `renamed` 플래그가 판정에 끼어들지 않기
+때문에 그 항목이 계속 적용 대상으로 남는다.
 
 ## 8. saga 단계와 보상 규칙
 
@@ -204,7 +245,13 @@ catalog의 두 항목은 모두 `private`이 기본이다. 관리자가 `open`�
 ```
 
 `outcome` ∈ `applied` · `unchanged` · `partial` · `blocked`.
-`user_action` ∈ `null` · `confirm_recreate` · `resolve_conflict`.
+`user_action` ∈ `null` · `confirm_recreate` · `resolve_conflict` ·
+`request_ownership`.
+`decision`은 §7 판정표의 여덟 값이다.
+
+`request_ownership`은 `resolve_conflict`와 조치가 다르다. 이름 충돌은 사용자가
+자기 채널 이름을 바꾸거나 항목을 건너뛰면 풀리지만, `not_owned`는 owner에게
+적용을 맡기거나 owner 권한을 받아야만 풀린다.
 
 계획서 Phase 3의 "성공, 실패, 건너뜀, 사용자 조치 필요"가 각각
 `outcome`과 `user_action`에 대응한다.
@@ -213,8 +260,9 @@ catalog의 두 항목은 모두 `private`이 기본이다. 관리자가 `open`�
 
 | 검증 | 명령 | 확인 대상 |
 |---|---|---|
-| 판정표 단위 테스트 | `cargo test -p schoolx-catalog` | 7개 판정 전부 |
-| fault injection | `cargo test -p schoolx-catalog` | 단계별 실패 후 재시도가 desired state 도달 |
+| 판정표 단위 테스트 | `cargo test -p schoolx-catalog` | §7의 여덟 판정과 `renamed` 플래그 |
+| fault injection | `cargo test -p schoolx-catalog` | 세 단계 각각의 실패(커밋 전·커밋 후 포함) 후 재시도가 desired state 도달 |
+| 권한 게이트 | `cargo test -p schoolx-catalog` | `not_owned`에서 캔버스·증명서 둘 다 쓰지 않음 |
 | 재적용 | `cargo test -p schoolx-catalog` | 두 번째 적용이 `no_change`이고 채널 수 동일 |
 | catalog snapshot | `cargo test -p schoolx-catalog` | 항목 키·이름·공개 범위 고정 |
 | relay kind 수용 | `just test-e2e` | 39500 발행·조회, 비멤버 차단 |

@@ -9,7 +9,10 @@
 use crate::catalog::Catalog;
 use crate::channel_id::derive_channel_id;
 use crate::effects::{CatalogEffects, ChannelSpec, CreateOutcome, EffectError};
-use crate::ledger::{decision_label, Ledger, LedgerItem, Outcome, UserAction, DELETED_DECISION};
+use crate::ledger::{
+    decision_label, Ledger, LedgerItem, Outcome, UserAction, ADOPTED_DECISION, DELETED_DECISION,
+    NOT_OWNED_DECISION,
+};
 use crate::preflight::{preflight, Decision, PreflightItem};
 use crate::provenance::{Provenance, StepStates, StepStatus};
 
@@ -49,7 +52,8 @@ async fn apply_item(
     now: &str,
     plan: PreflightItem,
 ) -> LedgerItem {
-    let decision = decision_label(plan.decision).to_string();
+    // 채택 경로에서만 바뀐다 — 아래 `Duplicate` 분기 참고.
+    let mut decision = decision_label(plan.decision).to_string();
 
     let blocked = |action: UserAction| LedgerItem {
         item_key: plan.item_key.clone(),
@@ -140,12 +144,48 @@ async fn apply_item(
                 };
             }
             Ok(CreateOutcome::Duplicate) => {
-                // ID가 점유돼 있는데 접근도 된다. 결정론적 ID라 이건 우리가
-                // 만든 방이다 — relay는 생성을 커밋했는데 클라이언트가
-                // provenance를 쓰기 전에 죽은 경우다(§5가 결정론적 ID를 두는
-                // 이유가 정확히 이것이다). 생성은 이미 끝났으므로 다음
-                // 단계로 넘어간다.
-                provenance.steps.channel = StepStatus::Done;
+                // ID가 점유돼 있는데 접근도 된다. 결정론적 ID라 이건 우리
+                // catalog가 만든 방이다 — relay는 생성을 커밋했는데
+                // 클라이언트가 provenance를 쓰기 전에 죽은 경우다(§5가
+                // 결정론적 ID를 두는 이유가 정확히 이것이다).
+                //
+                // 그렇다고 **쓸 권한**이 생기지는 않는다. 증명서를 남기지
+                // 못한 것은 관리자 A인데 그 방의 멤버일 뿐인 관리자 B가
+                // 적용을 돌릴 수 있다. B에게는 방이 보이고 증명서는 안
+                // 보이므로 여기까지 그대로 온다. 그래서 owner 확인을
+                // **쓰기 전에** 한다 — 캔버스를 먼저 쓰고 나중에
+                // 확인하면, 확인이 실패한 시점에는 그 방에 있던 내용이
+                // 이미 사라진 뒤다.
+                match effects.is_owner(channel_id).await {
+                    Ok(true) => {
+                        // 이번 실행이 만든 방이 아니라 이미 있던 방을
+                        // 이어받는 것이다. ledger가 그 차이를 말하게 한다.
+                        decision = ADOPTED_DECISION.to_string();
+                        provenance.steps.channel = StepStatus::Done;
+                    }
+                    Ok(false) => {
+                        // 남의 방이다. 아무것도 쓰지 않고 사용자에게
+                        // 넘긴다 — `Conflict`와 같은 모양이다.
+                        return LedgerItem {
+                            item_key: plan.item_key.clone(),
+                            decision: NOT_OWNED_DECISION.to_string(),
+                            channel_id: Some(channel_id),
+                            generation: plan.generation,
+                            steps: provenance.steps,
+                            outcome: Outcome::Blocked,
+                            user_action: Some(UserAction::RequestOwnership),
+                            error: None,
+                        };
+                    }
+                    Err(e) => {
+                        // owner인지 모르는 채로는 채택도 차단도 확정할 수
+                        // 없다. 쓰지 않는 쪽이 안전한 실패다 — `error`가
+                        // 실리므로 캔버스 단계로 내려가지 않고, 채널 단계가
+                        // `Done`이 아니라 provenance도 발행되지 않는다.
+                        provenance.steps.channel = StepStatus::Failed;
+                        error = Some(e.0);
+                    }
+                }
             }
             Err(e) => {
                 provenance.steps.channel = StepStatus::Failed;
@@ -166,6 +206,12 @@ async fn apply_item(
     }
 
     // 단계 3 — owner 확인.
+    //
+    // 채택 경로가 위에서 이미 한 번 물어봤지만 여기서 다시 묻는다. 위의
+    // 확인은 "써도 되는가"를 가르는 게이트고, 이 단계는 그 사실을 증명서에
+    // 남기는 것이다. 게이트를 통과했다고 단계를 완료로 지어내면, 채택이
+    // 아닌 경로(생성·재개)에서는 이 단계가 유일한 owner 검증인데 그 사실이
+    // 코드에서 보이지 않게 된다.
     if error.is_none() && provenance.steps.membership != StepStatus::Done {
         match effects.is_owner(channel_id).await {
             Ok(true) => provenance.steps.membership = StepStatus::Done,
@@ -274,8 +320,21 @@ mod tests {
         assert_eq!(ledger.items.len(), 2);
         for entry in &ledger.items {
             assert_eq!(entry.outcome, Outcome::Applied, "{}", entry.item_key);
+            // 세 단계 전부가 desired state다. `Applied`만 보면 owner 확인을
+            // 아예 하지 않는 saga도 통과한다 — `outcome`은 `is_complete()`와
+            // `error`에서만 나오고, 단계를 건너뛰면 그 둘 다 조용히 통과한다.
+            assert_eq!(entry.steps.channel, StepStatus::Done, "{}", entry.item_key);
+            assert_eq!(entry.steps.canvas, StepStatus::Done, "{}", entry.item_key);
+            assert_eq!(
+                entry.steps.membership,
+                StepStatus::Done,
+                "{} owner 확인이 끝나지 않았다",
+                entry.item_key
+            );
         }
         assert_eq!(fx.channels.lock().expect("lock").len(), 2);
+        // owner 확인을 항목마다 실제로 relay에 물었다.
+        assert_eq!(fx.call_count("is_owner"), 2);
     }
 
     #[tokio::test]
@@ -340,22 +399,195 @@ mod tests {
         );
     }
 
+    /// 요청이 relay에 닿지도 못한 생성 실패.
+    ///
+    /// 이 경우 relay에는 아무 흔적도 없다 — ID도 타지 않았다. 그러므로
+    /// "중복이 안 생겼다"는 여기서 검증할 수 있는 성질이 **아니다**(만들어진
+    /// 첫 방이 애초에 없다). 이 테스트가 검증하는 것은 두 가지다: 실패가
+    /// ledger에 실제로 실리는가(`Failed` + `error`), 그리고 재시도가 깨끗한
+    /// 첫 시도로서 방을 만드는가. 커밋된 뒤의 실패는 아래
+    /// `channel_create_that_commits_then_fails_is_adopted_on_retry`가 맡는다.
     #[tokio::test]
-    async fn channel_failure_retries_from_the_start_without_duplicates() {
+    async fn channel_failure_before_commit_is_reported_and_retry_creates_the_room() {
         let fx = FakeEffects::new();
         fx.fail_next("create_channel");
 
         let first = apply(crate::builtin(), &fx, &["meeting".to_string()])
             .await
             .expect("first");
-        assert_eq!(item(&first, "meeting").outcome, Outcome::Partial);
+        let entry = item(&first, "meeting");
+        assert_eq!(entry.outcome, Outcome::Partial);
+        // 실패를 실패로 적었다. `Partial`만 보면 단계 상태를 지어내는 saga도
+        // 통과한다.
+        assert_eq!(entry.steps.channel, StepStatus::Failed);
+        assert!(entry.error.is_some(), "생성 실패 사유가 실려야 한다");
+        assert_eq!(entry.steps.canvas, StepStatus::Pending);
+        assert_eq!(entry.steps.membership, StepStatus::Pending);
+        // 뒤 단계로 넘어가지 않았다.
+        assert!(fx.canvases.lock().expect("lock").is_empty());
+        // 채널 단계가 완료가 아니므로 provenance도 발행하지 않는다.
+        assert!(fx.published.lock().expect("lock").is_empty());
         assert_eq!(fx.channels.lock().expect("lock").len(), 0);
+        // relay에 닿지 못한 실패라 ID도 타지 않았다 — 재시도는 진짜 첫
+        // 시도다. 이 사실이 위 doc comment가 말하는 전제다.
+        assert!(fx.burned_ids.lock().expect("lock").is_empty());
 
         let second = apply(crate::builtin(), &fx, &["meeting".to_string()])
             .await
             .expect("retry");
-        assert_eq!(item(&second, "meeting").outcome, Outcome::Applied);
+        let entry = item(&second, "meeting");
+        assert_eq!(entry.decision, "create_or_recreate");
+        assert_eq!(entry.outcome, Outcome::Applied);
+        assert_eq!(entry.steps.membership, StepStatus::Done);
         assert_eq!(fx.channels.lock().expect("lock").len(), 1);
+        assert_eq!(fx.created.lock().expect("lock").len(), 1);
+    }
+
+    /// relay가 생성을 커밋한 **뒤에** 실패한 경우 — 응답 유실이나 앱 종료다.
+    ///
+    /// 여기서만 "중복 없음"이 의미를 갖는다. 첫 시도가 방을 실제로 만들고 ID를
+    /// 태웠으므로, 재시도가 `Duplicate`를 어떻게 처리하느냐에 따라 방이 두 개가
+    /// 되거나 남의 방으로 오인될 수 있다. 손으로 시드하지 않고 실제 생성 경로로
+    /// 그 상태를 만든다.
+    #[tokio::test]
+    async fn channel_create_that_commits_then_fails_is_adopted_on_retry() {
+        let fx = FakeEffects::new();
+        fx.fail_next_after_commit("create_channel");
+
+        let first = apply(crate::builtin(), &fx, &["meeting".to_string()])
+            .await
+            .expect("first");
+        let entry = item(&first, "meeting");
+        assert_eq!(entry.outcome, Outcome::Partial);
+        assert_eq!(entry.steps.channel, StepStatus::Failed);
+        assert!(entry.error.is_some());
+        // relay 쪽에는 방이 남았다 — 클라이언트만 실패로 봤다.
+        assert_eq!(fx.channels.lock().expect("lock").len(), 1);
+        // 그런데 증명서는 없다. 다음 실행에는 "적용한 적 없음"으로 보인다.
+        assert!(fx.published.lock().expect("lock").is_empty());
+
+        // 팀이 방 이름을 바꿨다 (§7의 `renamed`는 판정이 아니라 플래그다).
+        // 이 한 줄이 채택 분기의 도달 조건이다: 이름이 catalog 값 그대로면
+        // preflight가 "증명서 없음 + 동명 채널 있음"을 보고 `conflict`로
+        // 막아서 생성 시도 자체를 하지 않는다.
+        fx.channels.lock().expect("lock")[0].name = "2026 전체회의".into();
+
+        let second = apply(crate::builtin(), &fx, &["meeting".to_string()])
+            .await
+            .expect("retry");
+        let entry = item(&second, "meeting");
+        assert_eq!(entry.decision, "adopted");
+        assert_eq!(entry.outcome, Outcome::Applied);
+        // 방이 두 개가 되지 않았다. 첫 시도가 진짜로 하나 만들었으므로 이
+        // assert가 처음으로 의미를 갖는다.
+        assert_eq!(fx.channels.lock().expect("lock").len(), 1);
+        assert_eq!(fx.created.lock().expect("lock").len(), 1);
+        let channel_id = entry.channel_id.expect("channel id");
+        assert_eq!(
+            fx.canvases.lock().expect("lock").get(&channel_id),
+            Some(&canvas_of("meeting").to_string())
+        );
+    }
+
+    /// owner 확인이 relay 오류로 실패하면 `applied`가 아니다. 재시도가 그
+    /// 단계만 이어서 하고, 그때 비로소 desired state에 닿는다.
+    #[tokio::test]
+    async fn membership_check_error_is_partial_and_retry_confirms_ownership() {
+        let fx = FakeEffects::new();
+        fx.fail_next("is_owner");
+
+        let first = apply(crate::builtin(), &fx, &["meeting".to_string()])
+            .await
+            .expect("first");
+        let entry = item(&first, "meeting");
+        assert_eq!(entry.outcome, Outcome::Partial);
+        assert_eq!(entry.steps.channel, StepStatus::Done);
+        assert_eq!(entry.steps.canvas, StepStatus::Done);
+        assert_eq!(entry.steps.membership, StepStatus::Failed);
+        assert!(entry.error.is_some(), "owner 확인 실패 사유가 실려야 한다");
+        // 보상하지 않는다 — 방도 캔버스도 그대로다.
+        assert_eq!(fx.channels.lock().expect("lock").len(), 1);
+        {
+            // 여기까지의 진행이 durable하게 남아야 재시도가 처음부터 하지 않는다.
+            let stored = fx.provenance.lock().expect("lock");
+            assert_eq!(stored.len(), 1);
+            assert_eq!(stored[0].1.steps.membership, StepStatus::Failed);
+        }
+
+        let second = apply(crate::builtin(), &fx, &["meeting".to_string()])
+            .await
+            .expect("retry");
+        let entry = item(&second, "meeting");
+        assert_eq!(entry.decision, "resume");
+        assert_eq!(entry.outcome, Outcome::Applied);
+        assert_eq!(entry.steps.membership, StepStatus::Done);
+        // 재시도가 중복을 만들지 않았다.
+        assert_eq!(fx.channels.lock().expect("lock").len(), 1);
+        assert_eq!(fx.created.lock().expect("lock").len(), 1);
+        let stored = fx.provenance.lock().expect("lock");
+        assert_eq!(stored.len(), 1, "NIP-33 LWW — 항목당 정확히 하나다");
+        assert!(
+            stored[0].1.is_complete(),
+            "증명서가 desired state로 갱신되지 않았다"
+        );
+    }
+
+    /// "owner가 아니다"라는 **성공 응답**은 단계 성공이 아니다.
+    ///
+    /// `Ok(false)`를 완료로 적으면 증명서가 "owner 확인 완료"라고 거짓말하고,
+    /// 다음 실행은 이 항목을 `no_change`로 건너뛴다 — 아무도 owner가 아닌 채
+    /// 영원히.
+    #[tokio::test]
+    async fn non_owner_membership_is_failed_and_completes_after_ownership_is_granted() {
+        let fx = FakeEffects::new();
+        let channel_id = seed_applied(
+            &fx,
+            "meeting",
+            "메인 회의방",
+            StepStates {
+                channel: StepStatus::Done,
+                canvas: StepStatus::Done,
+                membership: StepStatus::Pending,
+            },
+        );
+        // 방은 있고 접근도 되지만 적용자는 이 방의 owner가 아니다.
+        fx.owned.lock().expect("lock").remove(&channel_id);
+
+        let first = apply(crate::builtin(), &fx, &["meeting".to_string()])
+            .await
+            .expect("first");
+        let entry = item(&first, "meeting");
+        assert_eq!(entry.decision, "resume");
+        assert_eq!(entry.outcome, Outcome::Partial);
+        assert_eq!(entry.steps.membership, StepStatus::Failed);
+        // `Ok(false)`와 `Err`는 사용자에게 다른 사유다. 문장을 고정한다 —
+        // `is_some()`만 보면 둘이 뒤바뀌어도 통과한다.
+        assert_eq!(
+            entry.error.as_deref(),
+            Some("적용자가 채널 owner가 아닙니다")
+        );
+
+        // owner 권한을 받고 재시도한다.
+        fx.owned.lock().expect("lock").insert(channel_id);
+        let second = apply(crate::builtin(), &fx, &["meeting".to_string()])
+            .await
+            .expect("retry");
+        let entry = item(&second, "meeting");
+        assert_eq!(entry.outcome, Outcome::Applied);
+        assert_eq!(entry.steps.membership, StepStatus::Done);
+        assert_eq!(entry.error, None);
+        // 아무것도 새로 만들지 않았다.
+        assert_eq!(fx.channels.lock().expect("lock").len(), 1);
+        assert!(
+            fx.created.lock().expect("lock").is_empty(),
+            "이미 있는 방에 생성 요청을 보냈다"
+        );
+        let stored = fx.provenance.lock().expect("lock");
+        assert_eq!(stored.len(), 1, "NIP-33 LWW — 항목당 정확히 하나다");
+        assert!(
+            stored[0].1.is_complete(),
+            "증명서가 desired state로 갱신되지 않았다"
+        );
     }
 
     #[tokio::test]
@@ -474,26 +706,37 @@ mod tests {
         assert_eq!(fx.channels.lock().expect("lock").len(), 1);
     }
 
-    /// 생성이 `duplicate`인데 그 채널에 접근이 되면 "삭제됨"이 아니다.
+    /// 도출된 ID의 방이 이미 있고 접근도 되는 상태를 만든다. provenance는
+    /// 없다 — relay가 생성을 커밋한 뒤 증명서를 쓰기 전에 클라이언트가
+    /// 죽은 상태다.
+    ///
+    /// 이름은 catalog 값과 다르게 둔다 — 이름이 판정에 끼어 있으면 (§7이
+    /// 금지한다) 이 케이스가 `Conflict`로 새어 나가 채택 분기에 아예 도달하지
+    /// 못한다. `owned`는 호출자가 정한다: 채택은 owner일 때만 허용된다.
+    fn seed_orphaned_channel(fx: &FakeEffects, item_key: &str, owned: bool) -> Uuid {
+        let channel_id = derive_channel_id("wss://relay.test", "schoolx.default", item_key, 1);
+        fx.channels.lock().expect("lock").push(ChannelRef {
+            id: channel_id,
+            name: "2026 전체회의".into(),
+        });
+        fx.burned_ids.lock().expect("lock").insert(channel_id);
+        if owned {
+            fx.owned.lock().expect("lock").insert(channel_id);
+        }
+        channel_id
+    }
+
+    /// 생성이 `duplicate`인데 그 채널에 접근이 되고 적용자가 owner면
+    /// "삭제됨"이 아니다 — 이미 있는 방을 이어받는다.
     ///
     /// relay가 생성을 커밋한 뒤 provenance를 쓰기 전에 클라이언트가 죽으면
     /// 이 상태가 된다 — §5가 결정론적 ID를 두는 이유가 정확히 이 경우를
     /// 흡수하기 위해서다. §7의 `deleted`는 `duplicate` **그리고** 접근
     /// 불가일 때만 성립한다.
     #[tokio::test]
-    async fn duplicate_but_accessible_channel_continues_instead_of_blocking() {
+    async fn duplicate_but_owned_channel_is_adopted_and_finished() {
         let fx = FakeEffects::new();
-        let channel_id = derive_channel_id("wss://relay.test", "schoolx.default", "meeting", 1);
-        // 채널은 만들어졌고 접근도 된다. provenance만 없다.
-        // 이름은 catalog 값과 다르게 둔다 — 이름이 판정에 끼어 있으면
-        // (§7이 금지한다) 이 케이스가 `Conflict`로 새어 나가 이 테스트가
-        // 검증하려는 경로에 아예 도달하지 못한다.
-        fx.channels.lock().expect("lock").push(ChannelRef {
-            id: channel_id,
-            name: "2026 전체회의".into(),
-        });
-        fx.burned_ids.lock().expect("lock").insert(channel_id);
-        fx.owned.lock().expect("lock").insert(channel_id);
+        let channel_id = seed_orphaned_channel(&fx, "meeting", true);
 
         let ledger = apply(crate::builtin(), &fx, &["meeting".to_string()])
             .await
@@ -501,8 +744,11 @@ mod tests {
         let entry = item(&ledger, "meeting");
         assert_eq!(entry.outcome, Outcome::Applied);
         assert_eq!(entry.user_action, None);
-        assert_eq!(entry.decision, "create_or_recreate");
+        // 새로 만든 방과 구별된다. `create_or_recreate`로 보고하면 사용자는
+        // 이미 있던 방을 넘겨받았다는 사실을 읽을 방법이 없다.
+        assert_eq!(entry.decision, "adopted");
         assert_eq!(entry.steps.channel, StepStatus::Done);
+        assert_eq!(entry.steps.membership, StepStatus::Done);
         // 방을 하나 더 만들지 않았다.
         assert_eq!(fx.channels.lock().expect("lock").len(), 1);
         // 막히지 않고 캔버스 단계까지 이어서 끝냈다.
@@ -510,6 +756,81 @@ mod tests {
             fx.canvases.lock().expect("lock").get(&channel_id),
             Some(&canvas_of("meeting").to_string())
         );
+    }
+
+    /// 채택은 owner일 때만 한다. 아니면 **아무것도 쓰지 않고** 막는다.
+    ///
+    /// 도달 경로: 관리자 A가 방을 만들었는데 증명서 발행이 실패했다
+    /// (`Partial`). 그 방의 멤버지만 owner는 아닌 관리자 B가 적용을 돌린다.
+    /// B에게는 방이 보이고 증명서는 안 보이므로 채택 분기까지 그대로 온다.
+    /// 캔버스를 먼저 쓰고 나중에 owner를 확인하는 saga는 이 시점에 팀이
+    /// 써 둔 캔버스를 이미 지운 뒤다 — 되돌릴 수 없다.
+    #[tokio::test]
+    async fn duplicate_channel_we_do_not_own_blocks_without_writing_anything() {
+        let fx = FakeEffects::new();
+        let channel_id = seed_orphaned_channel(&fx, "meeting", false);
+
+        let ledger = apply(crate::builtin(), &fx, &["meeting".to_string()])
+            .await
+            .expect("apply");
+
+        // 그 방에 아무것도 쓰지 않았다. 이게 이 테스트의 핵심이라 먼저
+        // 확인한다 — `outcome`만 보면 캔버스를 쓴 **뒤에** 막힌 saga도
+        // 통과하고, 그때 이미 팀이 써 둔 내용은 사라진 뒤다.
+        assert!(
+            fx.canvases.lock().expect("lock").is_empty(),
+            "owner가 아닌 방의 캔버스를 덮어썼다"
+        );
+        assert!(
+            fx.published.lock().expect("lock").is_empty(),
+            "owner가 아닌 방에 provenance를 발행했다"
+        );
+        assert_eq!(fx.channels.lock().expect("lock").len(), 1);
+
+        let entry = item(&ledger, "meeting");
+        assert_eq!(entry.outcome, Outcome::Blocked);
+        assert_eq!(entry.user_action, Some(UserAction::RequestOwnership));
+        assert_eq!(entry.decision, "not_owned");
+        assert_eq!(entry.channel_id, Some(channel_id));
+        // 단계를 하나도 완료로 지어내지 않았다.
+        assert_eq!(entry.steps, StepStates::default());
+    }
+
+    /// owner인지 **모르는** 채로는 채택하지도 막지도 않는다. 쓰지 않는 쪽이
+    /// 안전한 실패다.
+    ///
+    /// `Ok(false)`만 막고 `Err`를 채택으로 흘려보내면, relay가 잠깐 느린
+    /// 것만으로 남의 방 캔버스가 사라진다.
+    #[tokio::test]
+    async fn adoption_ownership_check_error_writes_nothing() {
+        let fx = FakeEffects::new();
+        seed_orphaned_channel(&fx, "meeting", true);
+        fx.fail_next("is_owner");
+
+        let ledger = apply(crate::builtin(), &fx, &["meeting".to_string()])
+            .await
+            .expect("apply");
+        let entry = item(&ledger, "meeting");
+        assert_eq!(entry.outcome, Outcome::Partial);
+        assert_eq!(entry.steps.channel, StepStatus::Failed);
+        assert!(entry.error.is_some(), "확인 실패 사유가 실려야 한다");
+        assert!(
+            fx.canvases.lock().expect("lock").is_empty(),
+            "owner 여부를 모르는 방의 캔버스를 덮어썼다"
+        );
+        assert!(
+            fx.published.lock().expect("lock").is_empty(),
+            "채널 단계가 완료가 아닌데 provenance를 발행했다"
+        );
+
+        // relay가 돌아오면 재시도가 채택으로 끝난다.
+        let retry = apply(crate::builtin(), &fx, &["meeting".to_string()])
+            .await
+            .expect("retry");
+        let entry = item(&retry, "meeting");
+        assert_eq!(entry.decision, "adopted");
+        assert_eq!(entry.outcome, Outcome::Applied);
+        assert_eq!(fx.channels.lock().expect("lock").len(), 1);
     }
 
     /// provenance 발행이 실패하면 `applied`가 아니다.
@@ -614,7 +935,8 @@ mod tests {
         let json = serde_json::to_string(&produced).expect("serialize");
         assert!(json.contains("\"outcome\":\"applied\""));
 
-        // (2) 네 `outcome`과 두 `user_action`을 바이트 단위로 고정한다.
+        // (2) 네 `outcome`과 세 `user_action`, 그리고 saga만 만들어 내는
+        //     `decision` 값들을 바이트 단위로 고정한다.
         let ledger = Ledger {
             catalog_id: "schoolx.default".into(),
             catalog_version: 1,
@@ -681,6 +1003,30 @@ mod tests {
                     user_action: None,
                     error: None,
                 },
+                LedgerItem {
+                    item_key: "ops".into(),
+                    decision: "adopted".into(),
+                    channel_id: Some(Uuid::nil()),
+                    generation: 1,
+                    steps: StepStates {
+                        channel: StepStatus::Done,
+                        canvas: StepStatus::Done,
+                        membership: StepStatus::Done,
+                    },
+                    outcome: Outcome::Applied,
+                    user_action: None,
+                    error: None,
+                },
+                LedgerItem {
+                    item_key: "library".into(),
+                    decision: "not_owned".into(),
+                    channel_id: Some(Uuid::nil()),
+                    generation: 1,
+                    steps: StepStates::default(),
+                    outcome: Outcome::Blocked,
+                    user_action: Some(UserAction::RequestOwnership),
+                    error: None,
+                },
             ],
         };
 
@@ -737,6 +1083,26 @@ mod tests {
                     "steps": { "channel": "done", "canvas": "done", "membership": "done" },
                     "outcome": "unchanged",
                     "user_action": null,
+                    "error": null
+                },
+                {
+                    "item_key": "ops",
+                    "decision": "adopted",
+                    "channel_id": "00000000-0000-0000-0000-000000000000",
+                    "generation": 1,
+                    "steps": { "channel": "done", "canvas": "done", "membership": "done" },
+                    "outcome": "applied",
+                    "user_action": null,
+                    "error": null
+                },
+                {
+                    "item_key": "library",
+                    "decision": "not_owned",
+                    "channel_id": "00000000-0000-0000-0000-000000000000",
+                    "generation": 1,
+                    "steps": { "channel": "pending", "canvas": "pending", "membership": "pending" },
+                    "outcome": "blocked",
+                    "user_action": "request_ownership",
                     "error": null
                 }
             ]

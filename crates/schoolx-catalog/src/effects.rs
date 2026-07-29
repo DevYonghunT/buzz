@@ -124,8 +124,18 @@ pub(crate) mod fake {
         /// "이 실행이 무엇을 relay에 보냈는가"이지 "지금 무엇이 있는가"가
         /// 아니다.
         pub created: Mutex<Vec<ChannelSpec>>,
-        /// 이 이름의 연산을 한 번 실패시킨다.
+        /// 이 이름의 연산을 한 번 실패시킨다. 부작용이 일어나기 **전에**
+        /// 걸린다 — 요청이 relay에 닿지도 못한 경우다.
         pub fail_once: Mutex<HashSet<String>>,
+        /// 이 이름의 연산을 부작용이 커밋된 **뒤에** 한 번 실패시킨다.
+        ///
+        /// `fail_once`로는 "relay는 커밋했는데 클라이언트는 실패로 봤다"를
+        /// 표현할 수 없다. 그런데 그게 바로 `duplicate` + 접근 가능 상태가
+        /// 실제로 만들어지는 경로다 — 응답이 유실되거나 앱이 죽으면 ID는
+        /// 탔는데 provenance는 없는 상태로 남는다. 이 상태를 손으로 시드하지
+        /// 않고 실제 생성 경로를 통해 만들 수 있어야, 채택 분기가 진짜
+        /// 시퀀스에서 검증된다.
+        pub fail_after_commit: Mutex<HashSet<String>>,
         /// `(op, nth)` — 그 op의 nth번째(1-based) 호출을 실패시킨다.
         ///
         /// `fail_once`로는 "첫 호출은 되고 두 번째만 실패"를 표현할 수
@@ -159,6 +169,14 @@ pub(crate) mod fake {
         /// 다음 `op` 호출을 한 번 실패시킨다.
         pub(crate) fn fail_next(&self, op: &str) {
             self.fail_once.lock().expect("lock").insert(op.to_string());
+        }
+
+        /// 다음 `op` 호출을 부작용이 커밋된 **뒤에** 한 번 실패시킨다.
+        pub(crate) fn fail_next_after_commit(&self, op: &str) {
+            self.fail_after_commit
+                .lock()
+                .expect("lock")
+                .insert(op.to_string());
         }
 
         /// `op`의 `nth`번째(1-based) 호출을 실패시킨다. 그 앞뒤 호출은
@@ -198,6 +216,15 @@ pub(crate) mod fake {
             let mut guard = self.fail_once.lock().expect("lock");
             if guard.remove(op) {
                 return Err(EffectError(format!("injected failure: {op}")));
+            }
+            Ok(())
+        }
+
+        /// 부작용을 이미 적용한 뒤에 호출한다. 호출 횟수는 `take_failure`가
+        /// 이미 셌으므로 여기서 다시 세지 않는다.
+        fn take_post_commit_failure(&self, op: &str) -> Result<(), EffectError> {
+            if self.fail_after_commit.lock().expect("lock").remove(op) {
+                return Err(EffectError(format!("injected failure after commit: {op}")));
             }
             Ok(())
         }
@@ -251,6 +278,9 @@ pub(crate) mod fake {
             });
             self.owned.lock().expect("lock").insert(spec.id);
             self.created.lock().expect("lock").push(spec);
+            // relay는 커밋했는데 호출자는 오류를 본다. ID는 탄 채로 남고
+            // 채널도 남는다 — 재시도가 `Duplicate` + 접근 가능을 만난다.
+            self.take_post_commit_failure("create_channel")?;
             Ok(CreateOutcome::Created)
         }
 
