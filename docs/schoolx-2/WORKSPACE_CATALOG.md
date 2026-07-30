@@ -72,8 +72,9 @@ content JSON (아래)
   먼저 나가야 한다.** 학교 한 곳에 관리자가 여럿이고 앱 버전이 서로 다른 것이
   정상이므로, 새 값을 쓰기 시작하면 그 값을 모르는 빌드가 그 레코드를 만난다.
   그 빌드가 파싱에 실패하면 실패는 **조용하다** — 데스크톱 어댑터가 파싱
-  실패한 이벤트를 버리므로(`workspace_catalog.rs`의 `fetch_provenance`,
-  `.filter_map(...ok())`) 그 항목은 "적용한 적 없음"으로 보이고 saga가
+  실패한 이벤트를 버리므로(`workspace_catalog.rs`의
+  `provenance_records_from_events`, `.filter_map(...ok())`) 그 항목은
+  "적용한 적 없음"으로 보이고 saga가
   `create_or_recreate` → `duplicate` → `adopted` → 캔버스 단계로 곧장 내려가
   팀이 써 둔 내용을 덮어쓴다. 순서는 이렇다.
   1. 모르는 값을 관용하는 **리더**를 먼저 릴리스한다 — 모르는 값은
@@ -124,6 +125,10 @@ UUIDv5(SCHOOLX_CATALOG_NAMESPACE,
 증명서를 남기기 직전에 앱이 죽어도 같은 ID의 두 번째 생성이 relay에서
 거부되므로 방이 두 개 생기지 않는다.
 
+**그 증명서의 권위 자체가 이 도출식에 묶여 있다.** 증명서는 도출식이 예측하는
+채널에 실려 있을 때만 판정 근거가 된다 — 다른 채널에 실린 것은 버린다. 이유와
+버리는 규칙은 §7 「증명서 있음」의 정의에 있다.
+
 ## 6. 삭제된 항목: 왜 증명서로 감지할 수 없는가
 
 **확인된 사실 — 구현자가 되돌리면 안 된다.**
@@ -173,6 +178,40 @@ UUIDv5(SCHOOLX_CATALOG_NAMESPACE,
 
 판정 근거는 이름이 아니라 증명서다. 이름은 `conflict` 감지에만 쓴다.
 
+### 「증명서 있음」은 「**도출된 채널에 실린** 증명서가 있음」이다
+
+위 표의 「증명서 있음/없음」은 relay가 읽어 준 kind 39500 이벤트의 유무가
+아니다. relay의 읽기 ACL은 "이 사용자가 접근할 수 있는 채널의 이벤트"까지만
+좁히는데, 그 집합에는 커뮤니티의 **모든 `open` 채널**이 들어간다. 인증된
+사용자라면 누구나 open 채널을 만들어 자기 채널에 kind 39500을 발행할 수 있고
+— 자기 채널이므로 그 쓰기는 relay가 정당하게 승인한다 — 학교에서는 학생
+아무나가 그 사용자다. 레코드의 `d` 태그도 `item_key`도 `generation`도 `steps`도
+전부 발행자가 정하는 값이라, 어느 것도 그 레코드의 출처를 증명하지 않는다.
+
+위조할 수 없는 결합은 하나뿐이다: 그 레코드가 실려 있는 채널(`h` 태그)이
+§5의 `derive_channel_id(relay_scope, catalog_id, item_key, generation)`이
+예측하는 채널과 같은가. preflight는 이 검사를 통과하지 못한 레코드를 **없었던
+것처럼 버린다** (`crates/schoolx-catalog/src/preflight.rs`의
+`record_sits_in_its_derived_channel`). 오류로 올리지 않는 이유는, 그러면 아무나
+발행할 수 있는 이벤트 하나로 관리자의 preflight 전체를 영구히 막을 수 있기
+때문이다. 버리면 그 항목은 `create_or_recreate`로 떨어져 정상 경로를 그대로
+탄다.
+
+검사가 없으면 학생 하나가 `d = "schoolx.default:meeting"`에 `steps` 전부
+완료인 레코드를 자기 채널에 발행하는 것만으로 그 항목이 영원히 `no_change`가
+되고 체크박스가 잠긴다. 관리자에게 우회로가 없다 — 그 이벤트는 남의 채널에
+있어 지울 수 없고, NIP-33 LWW는 `(kind, pubkey, d)`별이라 덮어쓸 수도 없다.
+`generation`까지 위조하면 채널 ID 도출 입력이 통째로 공격자 손에 들어간다
+(다른 무엇도 그 필드를 흔들지 않는다). 그래서 이 검사는 어댑터가 relay 응답
+에서 `h` 태그를 **잃지 않고** 넘기는 데까지 함께 걸린다
+(`CatalogEffects::fetch_provenance`가 `(채널, 레코드)` 쌍을 돌려주는 이유).
+
+**한 `item_key`는 한 줄이다.** kind 39500은 `(kind, pubkey, d)`별로
+addressable이라 NIP-33 LWW가 신원 안에서만 적용된다 — 한 항목을 적용한 신원
+수만큼 레코드가 남는다(§4). `retired` 줄은 레코드가 아니라 `item_key` 기준으로
+중복을 제거한다. 관리자 둘이 적용했던 항목이 catalog에서 빠졌다고 화면에 같은
+방이 두 번 나오면 안 된다.
+
 `renamed`는 판정이 아니라 **별도 플래그**다. 사용자가 이름을 바꾼 항목도
 단계가 미완료면 `resume`, 완료면 `no_change`로 판정된다. 플래그는 표시만 하고
 **이름을 catalog 값으로 되돌리지 않는다.** 판정과 분리해야 "이름을 바꿨고
@@ -193,8 +232,36 @@ UUIDv5(SCHOOLX_CATALOG_NAMESPACE,
 ### `adopted`의 owner 게이트
 
 `adopted`는 §6 표의 세 번째 줄 — relay가 생성을 커밋한 뒤 증명서를 쓰기 전에
-클라이언트가 죽은 상태 — 를 흡수한다. ID가 도출값이라 그 방이 이 catalog의
-방이라는 것은 확실하다.
+클라이언트가 죽은 상태 — 를 흡수한다.
+
+**도출된 ID의 방이라는 사실은 그 방이 이 catalog의 방이라는 증거가 아니다.**
+이 문서의 예전 판은 "ID가 도출값이라 그 방이 이 catalog의 방이라는 것은
+확실하다"라고 적었다 — 틀렸다. 도출식의 입력은 전부 공개다: 네임스페이스는
+오픈소스 코드의 리터럴이고(`crates/schoolx-catalog/src/channel_id.rs`),
+`item_key`는 CLI가 그대로 출력하며(`buzz catalog list`), relay 범위는 그 학교의
+주소다. 즉 아무나 그 UUID를 계산해 **미리 그 ID로 채널을 만들어 둘 수 있다.**
+`duplicate` + 접근 가능이 말해 주는 것은 "이 ID는 이미 점유돼 있고 나는 그
+방을 볼 수 있다"까지다.
+
+**도출된 ID가 실제로 보장하는 것은 방의 출처가 아니라 증명서와 채널의
+결합이다.** provenance 레코드는 도출식이 예측하는 채널에 실려 있을 때만 판정
+근거가 된다(위 「증명서 있음」의 정의). 그 채널에 발행하려면 그 채널의 쓰기
+권한이 필요하므로, 남의 채널에 레코드를 아무리 쌓아도 판정은 움직이지 않는다.
+
+방 자체를 지키는 것은 그 다음 장치인 owner 게이트다. 공격자가 도출된 ID로
+채널을 선점해 두었다면 적용은 `duplicate` + 접근 가능 + owner 아님으로
+떨어져 `not_owned`가 되고, **아무것도 쓰지 않은 채** 사용자 해결로 넘어간다.
+
+**남는 구멍 — 결합 검사가 막지 못하는 것.** 채널 ID는 클라이언트가 정하는
+값이므로, 도출된 ID로 채널을 선점한 공격자는 **자기 채널 안에서** 결합 검사를
+통과하는 레코드를 만들 수 있다. 그러면 그 항목은 다시 `no_change`로 잠긴다.
+이벤트 하나를 발행하면 되는 일과는 값이 다르다 — 항목마다 그 ID를 영구히
+태워야 하고(§6), 잠긴 항목은 그 ID 하나에 한정된다. 다만 설계상의 복구
+경로인 §6의 「세대를 올려 새 ID로 만든다」는 **아직 구현돼 있지 않다**
+(`generation`을 올리는 코드 경로가 없다). 이 구멍을 완전히 닫으려면 레코드의
+**서명자**가 그 채널의 owner/admin인지까지 확인해야 하는데, kind 39500
+content에는 서명자가 없고 `CatalogEffects`는 이벤트가 아니라 레코드를 본다 —
+§4의 wire format 변경이나 새 effect가 필요한 별도 작업이다.
 
 **그렇다고 쓸 권한이 생기지는 않는다.** 증명서를 남기지 못한 것은 관리자 A인데
 그 방의 멤버일 뿐인 관리자 B가 적용을 돌릴 수 있다. B에게는 방이 보이고
@@ -402,6 +469,8 @@ provenance와 **같은 타입**(`StepStates`)을 그대로 싣는다 — 단계 
 | 검증 | 명령 | 확인 대상 |
 |---|---|---|
 | 판정표 단위 테스트 | `cargo test -p schoolx-catalog` | §7의 여덟 판정과 `renamed` 플래그 |
+| 증명서–채널 결합 | `cargo test -p schoolx-catalog` | 도출된 채널이 아닌 곳에 실린 증명서는 버려진다(§7 「증명서 있음」). `retired`는 `item_key`당 한 줄 |
+| `h` 태그 보존 | `cargo test --manifest-path desktop/src-tauri/Cargo.toml` | 어댑터가 relay 응답의 `h` 태그를 잃지 않고 넘기고, 없거나 파싱되지 않으면 그 이벤트를 버린다 |
 | fault injection | `cargo test -p schoolx-catalog` | 세 단계 각각의 실패(커밋 전·커밋 후 포함) 후 재시도가 desired state 도달 |
 | 권한 게이트 | `cargo test -p schoolx-catalog` | `not_owned`에서 캔버스·증명서 둘 다 쓰지 않음 |
 | 덮어쓰기 금지 | `cargo test -p schoolx-catalog` | 내용이 있는 캔버스는 그대로 두고 `skipped`로 보고, 빈 방에는 시작 캔버스를 씀, 읽기 실패는 쓰지 않고 `failed` |
@@ -438,6 +507,15 @@ Phase 3 완료 기준 #7의 UI 절이 여기서 막힌다 — 자세한 것은
 `just ci`는 이 저장소 환경에서 명령 하나당 10분 제한을 넘긴다(cold clippy
 빌드만 9분 44초). 구성 레시피 8개를 순서대로 따로 돌려 전부 통과를 확인했다.
 기록은 [`BASELINE.md`](BASELINE.md).
+
+### 브랜치 리뷰 수정 (2026-07-31)
+
+위 표는 그날 돈 그대로의 기록이다. 이후 브랜치 전체 리뷰에서 증명서–채널
+결합이 강제되지 않는 결함이 나와 §5·§7을 고치고 위 검증 계획에 두 행을
+더했다. 그 수정 뒤 `cargo test -p schoolx-catalog`는 71 passed / 0 failed,
+`cargo test --manifest-path desktop/src-tauri/Cargo.toml`은 1,837 passed /
+0 failed / 14 ignored, `pnpm --dir desktop typecheck`는 통과다. 무엇이
+왜 바뀌었는지는 §5·§7과 그 코드 주석에 그대로 있다.
 
 ## 12. 코드 경로
 

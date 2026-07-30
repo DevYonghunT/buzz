@@ -7,6 +7,7 @@ use crate::channel_id::derive_channel_id;
 use crate::effects::{CatalogEffects, EffectError};
 use crate::provenance::{Provenance, StepStates};
 use serde::Serialize;
+use std::collections::HashSet;
 use uuid::Uuid;
 
 /// 항목 하나에 대한 판정.
@@ -72,6 +73,26 @@ pub struct PreflightItem {
     pub renamed: bool,
 }
 
+/// 이 레코드가 §5의 도출식이 예측하는 바로 그 채널에 실려 있는가.
+///
+/// 이 함수가 이 크레이트의 신뢰 경계다. `channel_id`는 relay가 알려 준 사실
+/// (그 이벤트의 `h` 태그)이고, 오른쪽은 우리가 계산한 값이다. 둘이 같아야만
+/// 그 레코드가 이 catalog가 남긴 것이다.
+fn record_sits_in_its_derived_channel(
+    relay_scope: &str,
+    catalog_id: &str,
+    channel_id: Uuid,
+    provenance: &Provenance,
+) -> bool {
+    channel_id
+        == derive_channel_id(
+            relay_scope,
+            catalog_id,
+            &provenance.item_key,
+            provenance.generation,
+        )
+}
+
 /// catalog 전체를 판정한다.
 pub async fn preflight(
     catalog: &Catalog,
@@ -79,7 +100,47 @@ pub async fn preflight(
 ) -> Result<Vec<PreflightItem>, EffectError> {
     let relay_scope = effects.relay_scope().await;
     let channels = effects.list_channels().await?;
-    let provenance = effects.fetch_provenance(&catalog.catalog_id).await?;
+    let fetched = effects.fetch_provenance(&catalog.catalog_id).await?;
+
+    // **도출된 채널에 실려 있지 않은 레코드는 버린다.**
+    //
+    // relay의 읽기 ACL은 "이 사용자가 접근할 수 있는 채널의 이벤트"까지만
+    // 좁히고, 그 집합에는 커뮤니티의 모든 `open` 채널이 들어간다. 인증된
+    // 사용자라면 누구나 open 채널을 만들어 거기에 kind 39500을 발행할 수
+    // 있다 — 자기 채널이라 쓰기도 정당하게 승인된다. 학교라면 학생 아무나가
+    // 그 사용자다. 그러므로 레코드가 **읽혔다**는 사실도, 레코드가 스스로
+    // 적어 둔 `item_key`·`generation`도 그 레코드의 출처를 조금도 증명하지
+    // 않는다.
+    //
+    // 위조할 수 없는 결합은 하나뿐이다: 그 레코드가 실려 있는 채널이 §5의
+    // 도출식 `derive_channel_id(relay_scope, catalog_id, item_key,
+    // generation)`이 예측하는 채널과 같아야 한다. 그 채널에 발행하려면 그
+    // 채널의 쓰기 권한이 필요하므로, 남의 채널에 레코드를 아무리 쌓아도
+    // 판정은 움직이지 않는다.
+    //
+    // **이 검사가 막지 못하는 것도 적어 둔다.** 채널 ID는 클라이언트가 정하는
+    // 값이라, 도출식을 계산해 그 ID로 **채널을 먼저 만들어 버린** 공격자는
+    // 자기 채널 안에서 이 검사를 통과하는 레코드를 만들 수 있다(§7
+    // 「`adopted`의 owner 게이트」의 「남는 구멍」). 이벤트 하나를 발행하는
+    // 것과는 값이 다르다 — 항목마다 그 ID를 영구히 태워야 한다. 그 경로까지
+    // 닫으려면 레코드의 **서명자**가 그 채널의 owner인지 확인해야 하는데,
+    // `Provenance`에는 서명자 필드가 없고 이 크레이트는 이벤트가 아니라
+    // 레코드만 본다.
+    //
+    // 검사에 걸린 레코드는 "우리와 무관한 레코드"가 아니라 **위조이거나
+    // 버그**다. 그런데도 오류로 올리지 않고 애초에 없었던 것처럼 버리는
+    // 이유는, 오류로 올리면 아무나 발행할 수 있는 이벤트 하나로 관리자의
+    // preflight 전체를 영구히 막을 수 있기 때문이다. 없는 것으로 보면 그
+    // 항목은 `create_or_recreate`로 떨어져 정상 경로를 그대로 탄다 — 그
+    // ID의 채널이 이미 선점돼 있다면 saga의 owner 게이트(§8)가 그 방에 쓰는
+    // 것을 막고 `not_owned`로 사용자에게 넘긴다.
+    let provenance: Vec<Provenance> = fetched
+        .into_iter()
+        .filter(|(channel_id, p)| {
+            record_sits_in_its_derived_channel(&relay_scope, &catalog.catalog_id, *channel_id, p)
+        })
+        .map(|(_, p)| p)
+        .collect();
 
     let mut out = Vec::with_capacity(catalog.items.len());
 
@@ -137,8 +198,21 @@ pub async fn preflight(
     }
 
     // catalog에서 빠졌는데 provenance가 남은 항목.
+    //
+    // **`item_key`당 한 줄이다.** kind 39500은 `(kind, pubkey, d 태그)`별로
+    // addressable이라 NIP-33 LWW는 신원 안에서만 적용된다 — 한 항목을 적용한
+    // 신원 수만큼 레코드가 쌓인다. 관리자 둘이 같은 항목을 적용했고 그 항목이
+    // 나중에 catalog에서 빠지면 레코드가 둘이고, 그대로 밀면 `item_key`가 같은
+    // 줄이 두 개 나간다. 위 catalog 항목 루프는 `find`로 첫 레코드만 쓰므로
+    // 이 문제가 없고, 여기만 레코드를 그대로 훑는다.
+    //
+    // 첫 레코드를 쓴다. 이 줄은 정보 표시용이고(`Retired`는 아무것도 하지
+    // 않는다) 레코드마다 다를 수 있는 값은 `steps`·`generation`뿐이라 어느
+    // 것을 고르든 동작은 같다 — 지어내지 않고 실재하는 레코드 하나를 그대로
+    // 싣는다는 것만이 중요하다.
+    let mut retired_keys: HashSet<&str> = HashSet::new();
     for p in &provenance {
-        if catalog.item(&p.item_key).is_none() {
+        if catalog.item(&p.item_key).is_none() && retired_keys.insert(p.item_key.as_str()) {
             out.push(PreflightItem {
                 item_key: p.item_key.clone(),
                 // 이 분기의 정의가 곧 "catalog에 이 항목이 없다"이므로 이름을
@@ -196,6 +270,22 @@ mod tests {
             .iter()
             .find(|i| i.item_key == key)
             .expect("item present")
+    }
+
+    /// 그 키로 나온 줄의 개수. `find`는 첫 줄만 보므로 "정확히 한 줄"을
+    /// 확인하려면 이쪽이 필요하다.
+    fn count(items: &[PreflightItem], key: &str) -> usize {
+        items.iter().filter(|i| i.item_key == key).count()
+    }
+
+    /// 공격자가 직접 만든 `open` 채널의 ID.
+    ///
+    /// 학교 워크스페이스의 아무 인증 사용자나(= 학생 누구나) 이런 채널을 만들
+    /// 수 있고, 자기 채널이므로 거기에 kind 39500을 발행하는 것도 relay가
+    /// 정당하게 승인한다. relay의 읽기 ACL은 `open` 채널을 모두 통과시키므로
+    /// 그 레코드는 모든 관리자의 preflight에 그대로 도착한다.
+    fn attacker_channel() -> Uuid {
+        Uuid::parse_str("11111111-2222-4333-8444-555555555555").expect("고정 UUID")
     }
 
     /// 이미 적용된 항목을 세대 1로 시드한다.
@@ -384,6 +474,148 @@ mod tests {
         // Retired가 곧 완료를 뜻하지는 않는다. 실제 단계 상태가 그대로
         // 실려야 ledger가 완료를 지어내지 않는다.
         assert_eq!(finance.steps, steps);
+    }
+
+    /// **도출된 채널에 실려 있지 않은 provenance는 없는 것으로 본다.**
+    ///
+    /// 도달 경로는 예외적인 상황이 아니다. relay의 읽기 ACL은 커뮤니티의 모든
+    /// `open` 채널을 통과시키고, 인증된 사용자라면 누구나 open 채널을 만들어
+    /// 자기 채널에 kind 39500을 발행할 수 있다 — 학교에서는 학생 아무나가 그
+    /// 사용자다. `d` 태그도 `content`도 발행자가 정하므로 `item_key`를
+    /// `meeting`으로, `steps`를 전부 완료로 적는 데 아무 권한도 필요 없다.
+    ///
+    /// 그 레코드를 권위로 읽으면 `meeting`은 영원히 `no_change`가 되어
+    /// 체크박스가 잠기고, 학교의 표준 방은 만들어질 수 없다. 관리자에게는
+    /// 우회로가 없다: 그 이벤트는 공격자의 채널에 있어 지울 수 없고, NIP-33
+    /// LWW는 `(kind, pubkey, d)`별이라 덮어쓸 수도 없다.
+    #[tokio::test]
+    async fn provenance_published_in_another_channel_is_ignored() {
+        let fx = FakeEffects::new();
+        let derived = derive_channel_id("wss://relay.test", "schoolx.default", "meeting", 1);
+        assert_ne!(
+            attacker_channel(),
+            derived,
+            "공격자 채널이 도출된 채널과 같으면 이 테스트는 아무것도 검증하지 않는다"
+        );
+        // 공격자가 자기 open 채널에 `meeting` 완료 증명서를 발행했다.
+        fx.seed_provenance_in_channel(
+            attacker_channel(),
+            "학생회 잡담방",
+            provenance_with_generation("meeting", 1, done()),
+        );
+
+        let items = preflight(crate::builtin(), &fx).await.expect("preflight");
+        let meeting = find(&items, "meeting");
+
+        // 채택되지 않았다 — "이미 적용됨"이 아니라 "적용한 적 없음"이다.
+        assert_eq!(
+            meeting.decision,
+            Decision::CreateOrRecreate,
+            "남의 채널에 실린 증명서가 판정을 결정했다"
+        );
+        // 공격자가 적어 둔 단계 상태를 한 글자도 물려받지 않았다. `decision`만
+        // 보면 상태만 오염시키는 구현도 통과한다 — saga는 이 `steps`를 그대로
+        // 이어받아 완료된 단계를 건너뛴다.
+        assert_eq!(meeting.steps, StepStates::default());
+        assert_eq!(meeting.generation, 1);
+        assert_eq!(meeting.channel_id, Some(derived));
+        // 공격자 채널은 도출된 ID가 아니므로 우리 방으로 세지 않는다.
+        assert!(!meeting.channel_present);
+    }
+
+    /// 진짜 증명서가 **함께 있어도** 위조본이 이기지 않는다.
+    ///
+    /// 위 테스트는 위조본 하나뿐이라, 레코드를 훑는 순서만 바꾼 구현
+    /// (예: "도출된 채널의 레코드를 우선한다")도 통과한다. 여기서는 위조본을
+    /// **먼저** 넣는다 — 예전 코드의 `find`는 첫 일치를 그대로 쓰므로 이
+    /// 순서에서 위조본이 이긴다. 진짜 증명서는 미완료라 판정이 갈린다:
+    /// 위조본이 이기면 `no_change`, 버려지면 `resume`이다.
+    #[tokio::test]
+    async fn a_forged_record_does_not_outrank_the_real_one() {
+        let fx = FakeEffects::new();
+        let real_steps = StepStates {
+            channel: StepStatus::Done,
+            canvas: StepStatus::Failed,
+            membership: StepStatus::Pending,
+        };
+        // 공격자 레코드를 먼저 심는다. 세대까지 위조해 두었다 — 세대는 채널
+        // ID 도출 입력이고 이 값 말고는 아무것도 그 필드를 흔들지 않으므로,
+        // 채택되면 관리자는 존재하지 않는 방을 가리키게 된다.
+        fx.seed_provenance_in_channel(
+            attacker_channel(),
+            "학생회 잡담방",
+            provenance_with_generation("meeting", 9, done()),
+        );
+        let real_channel = seed_applied(&fx, "meeting", "메인 회의방", real_steps);
+
+        let items = preflight(crate::builtin(), &fx).await.expect("preflight");
+        let meeting = find(&items, "meeting");
+
+        assert_eq!(meeting.decision, Decision::Resume);
+        assert_eq!(meeting.steps, real_steps);
+        assert_eq!(meeting.generation, 1, "위조된 세대가 채택됐다");
+        assert_eq!(meeting.channel_id, Some(real_channel));
+        assert!(meeting.channel_present);
+    }
+
+    /// 위조본은 `Retired` 줄도 만들어 내지 못한다.
+    ///
+    /// `Retired`는 catalog에 없는 `item_key`로 성립하므로, 공격자가 아무
+    /// 문자열이나 `d` 태그에 적으면 모든 관리자의 화면에 유령 항목이 하나씩
+    /// 늘어난다. 이 루프는 catalog 항목 루프와 달리 레코드를 그대로 훑기
+    /// 때문에 결합 검사를 따로 통과해야 한다.
+    #[tokio::test]
+    async fn a_foreign_channel_record_does_not_create_a_retired_row() {
+        let fx = FakeEffects::new();
+        fx.seed_provenance_in_channel(
+            attacker_channel(),
+            "학생회 잡담방",
+            provenance_with_generation("존재하지-않는-항목", 1, done()),
+        );
+
+        let items = preflight(crate::builtin(), &fx).await.expect("preflight");
+        assert_eq!(
+            count(&items, "존재하지-않는-항목"),
+            0,
+            "남의 채널에 실린 증명서가 유령 항목을 만들었다"
+        );
+        assert_eq!(items.len(), crate::builtin().items.len());
+    }
+
+    /// 같은 항목을 적용한 신원이 둘이어도 `retired` 줄은 하나다.
+    ///
+    /// kind 39500은 `(kind, pubkey, d 태그)`별로 addressable이라 NIP-33 LWW는
+    /// 신원 안에서만 적용된다 — 관리자 A와 B가 같은 항목을 적용하면 같은
+    /// 채널에 레코드가 두 개 남는다(§4). 그 항목이 나중에 catalog에서 빠지면
+    /// 이 루프가 레코드마다 한 줄씩 밀어 `item_key`가 같은 줄이 두 개 나가고,
+    /// UI에는 같은 방이 두 번 보인다.
+    #[tokio::test]
+    async fn a_retired_item_applied_by_two_identities_is_one_row() {
+        let fx = FakeEffects::new();
+        // 관리자 A의 레코드 — 채널도 이 헬퍼가 함께 만든다.
+        let channel_id = seed_applied(&fx, "finance", "재무", done());
+        // 관리자 B의 레코드. 같은 `d` 태그이지만 서명자가 달라 relay에서
+        // 지워지지 않고 나란히 남는다. `Provenance`에는 서명자 필드가 없으므로
+        // (신원은 이벤트에만 있다) 두 레코드의 차이는 `applied_at`뿐이다.
+        fx.provenance.lock().expect("lock").push((
+            channel_id,
+            Provenance {
+                applied_at: "2026-07-29T11:00:00Z".into(),
+                ..provenance_with_generation("finance", 1, done())
+            },
+        ));
+
+        let items = preflight(crate::builtin(), &fx).await.expect("preflight");
+        assert_eq!(
+            count(&items, "finance"),
+            1,
+            "신원마다 한 줄씩 나갔다 — UI에 같은 방이 두 번 보인다"
+        );
+        let finance = find(&items, "finance");
+        assert_eq!(finance.decision, Decision::Retired);
+        // 실재하는 레코드를 그대로 실었다 — 두 레코드를 합치거나 지어내지 않았다.
+        assert_eq!(finance.steps, done());
+        assert_eq!(finance.generation, 1);
     }
 
     #[tokio::test]

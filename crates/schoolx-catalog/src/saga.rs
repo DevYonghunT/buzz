@@ -1449,6 +1449,81 @@ mod tests {
         );
     }
 
+    /// 남의 채널에 실린 증명서는 적용을 **막지 못한다.**
+    ///
+    /// preflight의 `provenance_published_in_another_channel_is_ignored`가 판정을
+    /// 보고, 여기서는 그 판정의 결과 — 방이 실제로 만들어지는가 — 를 본다.
+    /// 이 defect가 아프게 나타나는 자리가 정확히 여기다. 학생 하나가 자기
+    /// open 채널에 `steps` 전부 완료인 kind 39500을 발행해 두면, 그 레코드를
+    /// 권위로 읽는 saga는 `no_change`/`unchanged`를 보고하고 학교의 표준 방을
+    /// **영원히** 만들지 않는다 — 관리자에게는 우회로가 없다. 그 이벤트는
+    /// 공격자의 채널에 있어 지울 수 없고, NIP-33 LWW는 `(kind, pubkey, d)`별
+    /// 이라 덮어쓸 수도 없다.
+    #[tokio::test]
+    async fn a_foreign_channel_provenance_does_not_block_the_apply() {
+        let fx = FakeEffects::new();
+        // 공격자가 자기 open 채널에 발행한 `meeting` 완료 증명서. relay의
+        // 읽기 ACL은 open 채널을 통과시키므로 관리자에게 그대로 읽힌다.
+        let attacker_channel =
+            Uuid::parse_str("11111111-2222-4333-8444-555555555555").expect("고정 UUID");
+        fx.seed_provenance_in_channel(
+            attacker_channel,
+            "학생회 잡담방",
+            Provenance {
+                catalog_id: "schoolx.default".into(),
+                catalog_version: 1,
+                item_key: "meeting".into(),
+                generation: 1,
+                steps: StepStates {
+                    channel: StepStatus::Done,
+                    canvas: StepStatus::Done,
+                    membership: StepStatus::Done,
+                },
+                applied_at: "2026-07-28T09:00:00Z".into(),
+            },
+        );
+
+        let ledger = apply(crate::builtin(), &fx, &["meeting".to_string()])
+            .await
+            .expect("apply");
+
+        let entry = item(&ledger, "meeting");
+        assert_eq!(
+            entry.outcome,
+            Outcome::Applied,
+            "남의 채널에 실린 증명서가 적용을 막았다"
+        );
+        assert_eq!(entry.decision, "create_or_recreate");
+        let channel_id = entry.channel_id.expect("channel id");
+        assert_eq!(
+            channel_id,
+            derive_channel_id("wss://relay.test", "schoolx.default", "meeting", 1)
+        );
+        // 방이 진짜로 만들어졌다. `outcome`만 보면 아무것도 하지 않고 완료를
+        // 보고하는 구현도 통과한다.
+        assert_eq!(fx.created.lock().expect("lock").len(), 1);
+        assert_eq!(
+            fx.canvases.lock().expect("lock").get(&channel_id),
+            Some(&canvas_of("meeting").to_string())
+        );
+        // 공격자 채널에는 아무것도 쓰지 않았다.
+        assert!(
+            !fx.canvases
+                .lock()
+                .expect("lock")
+                .contains_key(&attacker_channel),
+            "공격자 채널에 캔버스를 썼다"
+        );
+        assert!(
+            fx.published
+                .lock()
+                .expect("lock")
+                .iter()
+                .all(|(id, _)| *id == channel_id),
+            "공격자 채널에 provenance를 발행했다"
+        );
+    }
+
     /// catalog에서 빠진 항목은 provenance에 적힌 실제 단계 상태를 보고한다.
     ///
     /// `Retired`가 완료를 뜻하지는 않는다 — 적용이 끝나기 전에 catalog에서

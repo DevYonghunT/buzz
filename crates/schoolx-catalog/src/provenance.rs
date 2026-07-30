@@ -33,7 +33,8 @@ pub const KIND_WORKSPACE_PROVENANCE: u32 = 39500;
 ///
 /// 순서를 뒤집으면 구버전 리더는 그 레코드의 파싱에 실패한다. 실패는 조용하다
 /// — 데스크톱 어댑터(`desktop/src-tauri/src/commands/workspace_catalog.rs`의
-/// `fetch_provenance`)가 파싱 실패한 이벤트를 `.filter_map(...ok())`으로
+/// `provenance_records_from_events`)가 파싱 실패한 이벤트를
+/// `.filter_map(...ok())`으로
 /// 버리므로, 그 항목은 "적용한 적 없음"으로 보이고 saga가 `CreateOrRecreate`
 /// → `duplicate` → `adopted` 경로로 곧장 들어가 캔버스를 덮어쓴다. 지키려던
 /// 사용자 내용이 사라지는 자리가 정확히 거기다.

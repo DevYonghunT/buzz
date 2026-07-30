@@ -55,11 +55,33 @@ pub trait CatalogEffects: Send + Sync {
     /// 현재 사용자가 접근할 수 있는 채널. 삭제된 채널은 포함되지 않는다.
     async fn list_channels(&self) -> Result<Vec<ChannelRef>, EffectError>;
 
-    /// 읽을 수 있는 이 catalog의 provenance 이벤트 전부.
+    /// 읽을 수 있는 이 catalog의 provenance 이벤트 전부 —
+    /// **`(그 이벤트가 실려 있는 채널, 레코드)` 쌍으로** 돌려준다.
     ///
     /// 채널 스코프라 비멤버인 항목은 결과에 나타나지 않는다. 이건 버그가
     /// 아니라 보안 계약이다.
-    async fn fetch_provenance(&self, catalog_id: &str) -> Result<Vec<Provenance>, EffectError>;
+    ///
+    /// # 채널을 같이 나르는 이유
+    ///
+    /// relay의 읽기 ACL은 "이 사용자가 접근할 수 있는 채널의 이벤트"까지만
+    /// 좁힌다. 그런데 그 집합에는 커뮤니티의 **모든 `open` 채널**이 들어가고,
+    /// 인증된 사용자라면 누구나 open 채널을 만들어 자기 채널에 kind 39500을
+    /// 발행할 수 있다 — 자기 채널이므로 쓰기도 정당하게 승인된다. 즉 "읽혔다"는
+    /// 것은 "이 catalog가 쓴 레코드다"를 조금도 뜻하지 않는다.
+    ///
+    /// 레코드 본문(`d` 태그, `item_key`, `generation`)은 전부 발행자가 정한
+    /// 값이라 어느 것도 근거가 되지 못한다. 위조할 수 없는 결합은 하나뿐이다:
+    /// 그 레코드가 실려 있는 **채널**이 §5의 도출식이 예측하는 채널과 같은가.
+    /// 그래서 이 메서드는 채널을 버리지 않는다 — 버리는 순간 [`preflight`]가
+    /// 그 검사를 할 수 없고, 아무 학생이나 만든 레코드가 관리자의 판정을
+    /// 대신 결정한다. 검사는 [`preflight`]가 하고, 그 검사가 **막지 못하는
+    /// 것**(도출된 ID를 선점한 공격자)도 거기 주석에 적혀 있다.
+    ///
+    /// [`preflight`]: crate::preflight::preflight
+    async fn fetch_provenance(
+        &self,
+        catalog_id: &str,
+    ) -> Result<Vec<(Uuid, Provenance)>, EffectError>;
 
     /// 채널을 만든다. 이미 점유된 ID면 `Duplicate`.
     async fn create_channel(&self, spec: ChannelSpec) -> Result<CreateOutcome, EffectError>;
@@ -214,6 +236,34 @@ pub(crate) mod fake {
                 .insert(channel_id, content.to_string());
         }
 
+        /// provenance 레코드가 **호출자가 지정한 채널**에 실려 있는 상태를
+        /// 만든다. 그 채널도 함께 접근 가능 목록에 넣는다 —
+        /// `fetch_provenance`는 살아 있는 채널의 레코드만 돌려주므로 둘을
+        /// 따로 심으면 아무 일도 일어나지 않는다.
+        ///
+        /// 각 테스트 모듈의 `seed_applied*` 헬퍼는 채널 ID를 항상
+        /// `derive_channel_id`로 계산해 레코드와 **올바르게** 짝지어 준다.
+        /// 그래서 그 헬퍼만으로는 "도출식이 예측하는 채널이 **아닌** 곳에
+        /// 실려 있는 레코드"를 표현할 수 없다 — 그런데 그 상태는 실제 relay
+        /// 에서 아무 인증 사용자나 만들 수 있다(자기 open 채널을 만들고 거기에
+        /// kind 39500을 발행하면 된다). 표현할 수 없는 상태는 테스트되지
+        /// 않으므로, 짝을 어긋나게 놓을 수 있는 통로를 여기 하나 둔다.
+        pub(crate) fn seed_provenance_in_channel(
+            &self,
+            channel_id: Uuid,
+            channel_name: &str,
+            provenance: Provenance,
+        ) {
+            self.channels.lock().expect("lock").push(ChannelRef {
+                id: channel_id,
+                name: channel_name.to_string(),
+            });
+            self.provenance
+                .lock()
+                .expect("lock")
+                .push((channel_id, provenance));
+        }
+
         /// 지금까지 `op`가 호출된 횟수.
         pub(crate) fn call_count(&self, op: &str) -> u32 {
             self.calls
@@ -272,7 +322,10 @@ pub(crate) mod fake {
         // (soft delete) provenance도 자동으로 읽을 수 없게 되어야 한다.
         // 이건 최적화가 아니라 의도된 동작이다 — 실제 relay에서 채널 스코프
         // 이벤트는 채널이 삭제되면 함께 조회 불가능해진다.
-        async fn fetch_provenance(&self, catalog_id: &str) -> Result<Vec<Provenance>, EffectError> {
+        async fn fetch_provenance(
+            &self,
+            catalog_id: &str,
+        ) -> Result<Vec<(Uuid, Provenance)>, EffectError> {
             self.take_failure("fetch_provenance")?;
             let live_channels: HashSet<Uuid> = self
                 .channels
@@ -281,6 +334,11 @@ pub(crate) mod fake {
                 .iter()
                 .map(|c| c.id)
                 .collect();
+            // 여기서 채널을 **버리지 않는다.** 예전에는 `(_, p)`로 벗겨서
+            // 레코드만 돌려줬는데, 그러면 이 fake만 채널 결합을 알고 실제
+            // 어댑터는 알 수 없는 상태가 된다 — 실제로 그렇게 벌어졌고,
+            // 그 틈이 곧 남의 채널에 발행한 레코드가 판정을 가로채는 경로였다.
+            // 어느 쌍이 유효한가는 `preflight`가 도출식으로 판정한다.
             Ok(self
                 .provenance
                 .lock()
@@ -289,7 +347,7 @@ pub(crate) mod fake {
                 .filter(|(channel_id, p)| {
                     p.catalog_id == catalog_id && live_channels.contains(channel_id)
                 })
-                .map(|(_, p)| p.clone())
+                .cloned()
                 .collect())
         }
 
