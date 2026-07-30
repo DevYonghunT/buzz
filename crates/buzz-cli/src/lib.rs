@@ -233,6 +233,9 @@ enum Cmd {
     /// Persona pack operations (local, no relay connection needed)
     #[command(subcommand)]
     Pack(PackCmd),
+    /// Read the built-in SchoolX workspace catalog (local, no relay connection needed)
+    #[command(subcommand)]
+    Catalog(CatalogCommand),
     /// Community moderation — reports queue, bans, timeouts, audit trail
     #[command(subcommand)]
     Moderation(ModerationCmd),
@@ -1634,6 +1637,18 @@ pub enum PackCmd {
     },
 }
 
+/// Subcommands for `buzz catalog`.
+///
+/// Read-only: prints the compiled-in SchoolX workspace catalog
+/// (`schoolx_catalog::builtin()`). Applying a catalog item to a real channel
+/// is desktop-only; this command exists to prove the CLI and the desktop app
+/// read the same shared definition rather than two copies that can drift.
+#[derive(Subcommand)]
+pub enum CatalogCommand {
+    /// Print the built-in catalog as a JSON array
+    List,
+}
+
 /// Community moderation commands.
 ///
 /// The community (tenant) is selected by the relay host in `--relay` /
@@ -1741,6 +1756,14 @@ async fn run(cli: Cli) -> Result<(), CliError> {
         };
     }
 
+    // Catalog commands are local-only too — they read the compiled-in
+    // schoolx-catalog definition, never the relay.
+    if let Cmd::Catalog(ref sub) = cli.command {
+        return match sub {
+            CatalogCommand::List => commands::workspace_catalog::list(&cli.format),
+        };
+    }
+
     // Auth: private key is required for all relay operations.
     // The keypair IS the identity — no tokens, no other auth.
     let private_key_str = cli.private_key.ok_or_else(|| {
@@ -1789,6 +1812,7 @@ async fn run(cli: Cli) -> Result<(), CliError> {
         Cmd::Mem(sub) => commands::mem::dispatch(sub, &client).await,
         Cmd::Moderation(sub) => commands::moderation::dispatch(sub, &client, &cli.format).await,
         Cmd::Pack(_) => unreachable!("handled above"),
+        Cmd::Catalog(_) => unreachable!("handled above"),
     }
 }
 
@@ -1808,6 +1832,7 @@ mod tests {
         let expected_groups: Vec<&str> = vec![
             "agents",
             "canvas",
+            "catalog",
             "channels",
             "dms",
             "emoji",
@@ -1977,6 +2002,7 @@ mod tests {
         assert_eq!(names(&cmd, "media"), vec!["get"]);
         assert_eq!(names(&cmd, "upload"), vec!["file"]);
         assert_eq!(names(&cmd, "pack"), vec!["inspect", "validate"]);
+        assert_eq!(names(&cmd, "catalog"), vec!["list"]);
         assert_eq!(
             names(&cmd, "moderation"),
             vec![
@@ -1997,6 +2023,7 @@ mod tests {
         let expected: Vec<(&str, usize)> = vec![
             ("agents", 5),
             ("canvas", 2),
+            ("catalog", 1),
             ("channels", 16),
             ("dms", 4),
             ("emoji", 5),
