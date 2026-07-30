@@ -22,10 +22,12 @@
 - 마지막 upstream 동기화: `925a9a7b` (2026-07-28, merge, 85커밋)
 - 현재 상태: 위 작업이 모두 commit·push됨
 - Phase 상태: **Phase 0 완료**, Phase 1 계약 고정 완료(요약 audience 연결 제외),
-  Phase 2 i18n 구조 기반 + **제품 설정·브랜딩 완료**(아이콘·업데이트·서명 제외)
+  Phase 2 i18n 구조 기반 + **제품 설정·브랜딩 완료**(아이콘·업데이트·서명 제외),
+  **Phase 3 미완료** — 완료 기준 7개 중 4개만 증거가 있다 (아래 세션 D)
 
 세션 0(기준선), 세션 A(보안 계약), 세션 B(제품 설정과 브랜딩)는 끝났다.
-다음은 세션 C다.
+세션 C는 진행 중이고, 세션 D(워크스페이스 catalog)는 구현과 게이트를 마쳤으나
+Phase 3을 완료로 표시하지 못했다.
 
 ### 구현되어 있는 것
 
@@ -54,6 +56,23 @@
   전용 키체인 서비스
 - Buzz 데이터를 읽지도 지우지도 않는 초기화·마이그레이션 경로
 - SchoolX 전용 SQL 마이그레이션 예약 대역 `9001+`
+- 공유 크레이트 `schoolx-catalog`에 컴파일 내장된 읽기 전용 업무방 catalog
+  (`meeting`·`planning` 두 항목, 둘 다 `private`)와 `catalog_id`·
+  `catalog_version`·안정 `item_key`
+- `catalog_version`을 **제외한** 입력으로 도출하는 결정론적 채널 ID
+  (catalog 버전이 올라가도 `meeting`은 같은 방이다)
+- relay에 등록된 kind 39500 provenance — 예약 대역 `39500–39599`, 채널 스코프
+  (`h` 태그) 저장, NIP-33 LWW
+- preflight 판정 8종(`create_or_recreate`·`resume`·`no_change`·`deleted`·
+  `adopted`·`not_owned`·`conflict`·`retired`)과 판정과 분리된 `renamed` 플래그
+- 채널 생성 → owner 게이트 → 시작 캔버스 → owner 확인의 idempotent saga.
+  실패해도 보상하지 않고 재시도가 이어서 한다
+- 내용이 있는 캔버스를 덮어쓰지 않고 `skipped`로 기록하는 규칙, 그리고
+  읽기 자체가 실패하면 쓰지 않는 규칙
+- machine-readable result ledger(`outcome` 4종 · `user_action` 3종 ·
+  `decision` 8종 · 단계 상태)와 그 wire format을 바이트 단위로 고정하는 golden
+- 미리보기·적용·결과·재시도를 하는 설정 화면 카드와 Tauri command 2개
+- 내장 catalog를 그대로 출력하는 읽기 전용 `buzz catalog list`
 
 ### 아직 구현 또는 검증되지 않은 것
 
@@ -64,8 +83,17 @@
 - 남은 24개 호출부의 하드코딩된 `en-US`와 OS locale 추종 제거
   (`desktop/scripts/check-i18n-formatters.mjs`의 `PENDING_CONVERSION`이 목록)
 - 한글 IME 조합, 멘션, 자동완성, 검색 회귀 테스트
-- versioned workspace catalog, provenance, idempotent saga
-- SchoolX persona, 관리형 에이전트, coordinator
+- 나머지 8개 업무방의 이름·설명·시작 canvas·운영 규칙 (낮은 추론 가능)
+- 워크스페이스 catalog 설정 카드의 **실행 증거** — 카드를 렌더하는 단위
+  테스트도 Playwright 스펙도 하나도 없다. 소스와 `tsc`까지만 확인됐다
+- 실제 `catalog_version` upgrade 경로 — 버전은 기록만 되고 어디서도 읽히지
+  않는다. v2를 v1 위에 돌리는 테스트가 없다
+- `renamed` 플래그의 ledger 노출 — preflight에만 있다
+- catalog 적용의 CLI 경로 (`buzz catalog list`는 내장 정의만 출력한다)
+- `open` 공개 범위 경고의 도달 경로 — 문구와 자리는 있으나 게이트가 상수
+  `false`다
+- SchoolX persona, 관리형 에이전트, coordinator, agent provisioning의
+  saga·ledger 편입
 - audience 정책 primitive를 실제 요약 생성·게시 seam에 연결하고 게시 직전
   membership을 다시 읽는 end-to-end enforcement
 - AI draft→verified canvas 운영 흐름
@@ -95,6 +123,10 @@
 8. WF-08은 현재 미구현이며 approval step에 도달한 workflow는 실패한다.
 9. 현재 Huddle은 음성 기능이며 카메라 영상과 화면 공유는 없다.
 10. Blossom media가 채널 ACL과 결합됐다고 가정하지 않는다.
+11. workspace provenance(kind 39500)는 **채널 스코프**(`h` 태그)로 저장되어
+    private 채널 ACL을 그대로 받는다. 전역 스코프로 바꾸면 비멤버가 private
+    채널의 존재를 알게 되므로 1·2와 함께 깨진다. 자동 채택 대신 사용자
+    해결을 요구하는 쪽이 안전한 실패다.
 
 현재 작업트리 기준 근거 경로:
 
@@ -111,6 +143,10 @@
 - source audience primitive: `crates/buzz-core/src/audience.rs`
 - approval 미구현 실패 처리: `crates/buzz-workflow/src/lib.rs`와 `executor.rs`
 - audio-only capture/relay: `desktop/src/features/huddle/HuddleContext.tsx`, `crates/buzz-relay/src/audio/mod.rs`
+- kind 39500 채널 스코프 강제: `crates/buzz-relay/src/handlers/ingest.rs`의
+  `requires_h_channel_scope`, 비멤버 차단 증거는
+  `crates/buzz-test-client/tests/e2e_workspace_catalog.rs`의
+  `non_member_cannot_read_provenance`
 
 이 사실을 바꾸려면 일반 Buzz에도 유효한 별도 설계, 서버 강제, 보안 테스트가
 필요하다. 현재 서버 기반도 실제 Postgres·Redis를 사용한 transport matrix가
@@ -302,7 +338,113 @@ foundation 구조 보강은 현재 작업트리에 구현됐다.
 각 작업은 한 기능 디렉터리만 수정하며 비즈니스 로직, test ID,
 Nostr/CLI/protocol 값은 바꾸지 않는다.
 
-### 세션 D — versioned workspace catalog
+### 세션 D — versioned workspace catalog · **구현 완료, Phase 3은 미완료 (2026-07-30)**
+
+설계는 [`WORKSPACE_CATALOG.md`](WORKSPACE_CATALOG.md), 구현은 새 공유 크레이트
+`crates/schoolx-catalog`와 relay kind 39500 등록 3곳, Tauri command 2개,
+설정 카드, 읽기 전용 CLI다. 코드 경로 전체는 `WORKSPACE_CATALOG.md` §12.
+
+게이트는 모두 이 트리에서 직접 돌렸다. `just ci` 구성 레시피 8개 전부 통과,
+`just test-e2e e2e_access_matrix` 17 passed, `just test-e2e
+e2e_workspace_catalog` 4 passed, `just schoolx-upstream-check` 3/3 통과.
+실행 기록은 [`BASELINE.md`](BASELINE.md).
+
+**Phase 3은 완료로 표시하지 않는다.** 계획서 Phase 3의 완료 기준 7개 중
+4개만 증거가 있다.
+
+| # | 완료 기준 | 판정 | 증거 / 부족한 것 |
+|---:|---|---|---|
+| 1 | 선택한 private 업무방만 생성 | **충족** | `only_selected_items_are_applied` + `builtin_rooms_are_created_private`(fake의 생성 요청 로그를 읽어 항목별 `visibility`·`description`·`channel_type`을 고정) |
+| 2 | 두 번째 적용은 변경 없음 | **충족** | `second_apply_changes_nothing` — 전 항목 `unchanged` + 채널 수 동일 + **발행 횟수 동일** |
+| 3 | 이름을 바꿔도 추적 | **부분** | 추적 자체는 `rename_is_a_flag_not_a_decision`·`renamed_complete_item_is_no_change`로 증명됐다. 그러나 `LedgerItem`에 `renamed`가 없어 §7이 요구한 "ledger에도 표시"가 성립하지 않는다 |
+| 4 | provenance 없는 동명 채널 자동 채택 금지 | **충족** | `name_conflict_blocks_without_touching_anything` — 채널 수뿐 아니라 `created`·`canvases`·`published` 세 로그가 모두 비었음을 단언한다 |
+| 5 | 단계 실패 후 재시도 | **충족** | 세 단계 모두 fault injection. 채널 커밋 **전**·**후** 실패, 캔버스 쓰기·읽기 실패, owner 확인 실패, 증명서 발행 실패까지 6종 |
+| 6 | upgrade가 사용자 수정본을 덮어쓰지 않음 | **부분** | 되돌릴 수 없는 사고(팀이 쓴 캔버스 덮어쓰기)는 재개·채택 양쪽에서 막히고 테스트가 있다. 그러나 **실제 `catalog_version` upgrade 경로가 없다** |
+| 7 | 상태가 UI와 machine-readable 결과에 표시 | **부분** | machine-readable 절은 `ledger_serializes_for_ui_and_cli`가 어휘 전체를 바이트 단위로 고정해 충족. **UI 절은 실행 증거가 없다** |
+
+각 부족분을 닫는 방법은 아래 「세션 D에서 넘긴 것」에 적었다.
+
+세션 D에서 확인된 사실 중 다음 여섯 가지는 이후 세션이 반드시 전제해야 한다.
+
+1. **relay는 kind 39000을 DB 컬럼에서만 재구성한다.** 채널 생성
+   이벤트(kind 9007)에 실은 임의 태그는 **어디에도 보존되지 않는다**
+   (`crates/buzz-relay/src/handlers/side_effects.rs`의
+   `emit_group_discovery_events`). 나가는 태그는 `name`, `about`,
+   `visibility`, `t`, `topic`, `purpose`, `archived`, `ttl`뿐이다. 채널에
+   메타데이터를 붙이려면 **별도 이벤트여야 한다.** provenance가 kind 39500인
+   이유가 이것이고, 채널 생성 이벤트에 태그를 실어 해결하려는 시도는 조용히
+   아무것도 하지 않는다.
+2. **채널 삭제는 soft delete이고 삭제된 채널의 provenance는 읽을 수 없다.**
+   `soft_delete_discovery_events`는 kind 39000/39001/39002만 지우므로 39500
+   행은 살아남지만, 채널 조회가 전부 `deleted_at IS NULL`로 걸러지기 때문에
+   (`crates/buzz-db/src/channel.rs`) 살아남은 증명서에 닿을 수 없다. 따라서
+   "증명서는 완료인데 방이 없다"는 대조가 **불가능하고**, 앱 눈에는 "적용한
+   적 없음"과 구별되지 않는다. 대신 쓰는 사실은 채널 생성이
+   `INSERT ... ON CONFLICT (community_id, id) DO NOTHING`이라 **한 번 쓴 채널
+   번호가 영구히 탄다**는 것이다. 삭제 감지는 `duplicate` 거부 + 접근 가능
+   목록에 없음의 조합이며, live relay E2E `deleted_channel_id_is_burned`가
+   거부 메시지 문자열까지 고정한다.
+3. **SchoolX 전용 Nostr kind는 예약 대역 `39500–39599`를 쓴다.** 이유는 SQL
+   마이그레이션 `9001+`와 같다 — upstream이 같은 번호를 쓰면 조용히 충돌하고
+   충돌은 컴파일 타임에 잡히지 않는다. 39500은 addressable 대역(30000–39999)
+   안이라 NIP-33 LWW가 적용되고, 그래서 재시도가 이벤트를 쌓지 않는다.
+4. **이번 실행이 직접 만들지 않은 방은 첫 쓰기 전에 소유권을 확인한다.**
+   만든 사람이 곧 owner이므로 **직접 만든** 방만 이 게이트를 건너뛴다.
+   증명서는 채널 스코프라 owner가 아니라 **멤버**면 읽히므로, 관리자 A가 만든
+   방의 미완료 증명서를 보고 멤버일 뿐인 B가 재개를 돌리는 것이 정상 경로다.
+   확인이 `false`면 아무것도 쓰지 않고 `not_owned`로 막고, 확인 **자체**가
+   실패하면 채택도 차단도 확정하지 않고 채널 단계를 `failed`로 적고 멈춘다.
+   순서가 핵심이다 — 캔버스를 먼저 쓰고 나중에 확인하면 확인이 실패한 시점에
+   팀의 내용은 이미 사라진 뒤다.
+5. **provenance는 채널 스코프라 private 채널의 증명서는 그 채널 멤버만
+   읽는다.** 의도한 트레이드오프다. 다른 관리자가 preflight를 돌리면 자기가
+   멤버가 아닌 항목은 "이미 적용됨"을 볼 수 없고 `conflict`로 떨어진다.
+   전역 스코프로 바꾸면 비멤버가 private 채널의 존재를 알게 되어
+   [`SECURITY_CONTRACT.md`](SECURITY_CONTRACT.md)가 깨진다. E2E
+   `non_member_cannot_read_provenance`가 이것을 고정한다.
+6. **`steps`에 값을 더하는 것은 읽기 쪽 breaking change이고, 실패가
+   조용하다.** 데스크톱 어댑터가 파싱 실패한 증명서를 버리므로 그 항목은
+   "적용한 적 없음"으로 보이고 saga가 캔버스 단계까지 내려가 팀이 써 둔
+   내용을 덮어쓴다. 그래서 **모르는 값을 관용하는 리더를 먼저 릴리스하고**
+   (`StepStatus::Unrecognized`), 그 리더가 퍼진 **뒤에** 새 값을 쓰는 라이터를
+   낸다. 모르는 값은 **끝난 것**으로 센다 — 미완료로 세면 그 단계를 다시
+   실행한다는 뜻이고 캔버스 단계의 재실행이 바로 그 덮어쓰기다.
+
+**세션 D에서 넘긴 것.** 앞의 셋은 Phase 3을 닫기 위해 필요하고, 뒤의 셋은
+다음 세션의 범위다.
+
+1. **설정 카드의 실행 증거** (완료 기준 #7). 카드는 `outcome` 4종,
+   `user_action` 3종, `decision` 8종, 캔버스 `skipped`/`unrecognized`를 모두
+   구별해 그리지만 이를 렌더하는 테스트가 **하나도 없다**. 데스크톱 단위
+   테스트 3,756개 중에도, Playwright 스펙에도 없다. 카드의
+   `data-testid`(`settings-workspace-catalog`, `catalog-apply`,
+   `catalog-canvas-note-*`, `catalog-user-action-*`, `catalog-error-*`)는
+   이미 붙어 있으므로 스펙 하나로 닫힌다.
+2. **`catalog_version` upgrade 경로** (완료 기준 #6). 버전은
+   `Provenance`와 `Ledger`에 **기록만 되고 어디서도 읽히지 않는다.**
+   preflight는 `item_key` 존재와 단계 완료도로만 판정하므로 v2를 v1 위에
+   돌려도 v1을 다시 돌리는 것과 동작이 같다. 그 동작이 옳다는 판단은 서 있지만
+   **그것을 확인하는 테스트가 없다.** 사용자 template copy
+   (`desktop/src-tauri/src/templates/storage.rs`)를 건드리지 않는다는 것도
+   구조로만 보장된다 — `CatalogEffects` trait에 파일시스템 능력이 없어서다.
+   닫는 방법: catalog v2 fixture로 "이미 적용된 v1 방에 v2를 돌리면 캔버스가
+   그대로다"를 고정한다.
+3. **`renamed`의 ledger 노출** (완료 기준 #3). `PreflightItem`에만 있고
+   `LedgerItem`에는 없다. ledger만 읽는 소비자는 `LedgerItem::name`이 그 방의
+   현재 이름이 아닐 수 있다는 사실을 알 방법이 없다. 이름이 바뀐 방은
+   `adopted`로 끝나므로 실제로 도달하는 상태다.
+4. **나머지 8개 업무방 콘텐츠** — 이름, 설명, 시작 canvas, 운영 규칙,
+   snapshot test. 스키마와 적용 API가 고정됐으므로 **낮은 추론**으로 나눌 수
+   있다. `open` 항목을 넣으려면 `visibility`를 `PreflightItem` →
+   `CatalogPreflightItem`까지 실어 보내는 작업이 먼저다 (§9 참조).
+5. **에이전트 provisioning** — 세션 E. ledger 스키마에 자리만 두고
+   `not_implemented`로 표시하기로 한 부분이다.
+6. **CLI 적용 경로.** 이번 CLI는 `buzz catalog list`뿐이고 preflight도 ledger도
+   읽지 않는다. `ledger_serializes_for_ui_and_cli`가 고정한 wire format은 그
+   경로가 붙을 때를 위한 것이다.
+
+<details>
+<summary>원래 계획 (참고)</summary>
 
 새 고추론 세션으로 시작하고, 먼저 agent 없는 메인 회의방과 기획방만
 구현한다.
@@ -325,6 +467,8 @@ Nostr/CLI/protocol 값은 바꾸지 않는다.
 
 스키마와 적용 API가 확정된 뒤 10개 업무방의 이름, 설명, 시작 canvas,
 운영 규칙, snapshot test만 낮은 추론으로 확장할 수 있다.
+
+</details>
 
 ### 세션 E — 에이전트와 지식 승격 운영
 

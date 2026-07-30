@@ -16,7 +16,7 @@
 | catalog 항목 | `meeting`(메인 회의방), `planning`(기획방) — 둘 다 `private` |
 | saga 단계 | 채널 생성 → 시작 캔버스 → owner 확인 |
 | 적용 화면 | 설정 화면의 새 카드 (미리보기 · 적용 · 결과 · 재시도) |
-| CLI | 읽기 전용 — catalog 목록과 preflight 판정까지 |
+| CLI | 읽기 전용 — **구현된 것은 catalog 목록(`buzz catalog list`)까지다.** preflight 판정은 데스크톱에만 있다 |
 | relay | kind 39500 등록 3곳 |
 
 **범위 밖 (Phase 4 이후):** 에이전트·persona provisioning, workflow, 나머지
@@ -174,9 +174,21 @@ UUIDv5(SCHOOLX_CATALOG_NAMESPACE,
 판정 근거는 이름이 아니라 증명서다. 이름은 `conflict` 감지에만 쓴다.
 
 `renamed`는 판정이 아니라 **별도 플래그**다. 사용자가 이름을 바꾼 항목도
-단계가 미완료면 `resume`, 완료면 `no_change`로 판정된다. 플래그는 미리보기와
-ledger에 표시만 하고, **이름을 catalog 값으로 되돌리지 않는다.** 판정과
-분리해야 "이름을 바꿨고 캔버스도 실패한" 항목이 재시도에서 누락되지 않는다.
+단계가 미완료면 `resume`, 완료면 `no_change`로 판정된다. 플래그는 표시만 하고
+**이름을 catalog 값으로 되돌리지 않는다.** 판정과 분리해야 "이름을 바꿨고
+캔버스도 실패한" 항목이 재시도에서 누락되지 않는다.
+
+> **구현 상태 (세션 D 종료 시점) — 미리보기까지만이다.** `renamed`는
+> `PreflightItem`에만 있고(`crates/schoolx-catalog/src/preflight.rs`),
+> `LedgerItem`에는 **없다**(`crates/schoolx-catalog/src/ledger.rs`). 위 문장이
+> 원래 요구한 "미리보기와 ledger 둘 다"는 아직 성립하지 않는다.
+>
+> 결과가 있는 defect다. `LedgerItem::name`은 catalog가 정한 이름이지 그 방의
+> **현재** 이름이 아닌데, ledger만 읽는 소비자에게는 그 사실을 알릴 플래그가
+> 없다. 이름이 바뀐 방은 §7 「도달 조건」에 따라 `adopted`로 끝나므로 실제로
+> 도달하는 상태다. 닫는 방법: `LedgerItem`에 `renamed: bool`을 더하고
+> `PreflightItem`에서 그대로 나른 뒤 `ledger_serializes_for_ui_and_cli`의
+> golden에 넣는다. 이것은 wire format 변경이므로 §4의 리더-우선 순서를 따른다.
 
 ### `adopted`의 owner 게이트
 
@@ -307,9 +319,20 @@ catalog의 두 항목은 모두 `private`이 기본이다. 관리자가 `open`�
 두 번째 문장은 세션 A에서 서버로 강제한 사실이고, 사람이 반대로 오해하기
 쉬운 지점이다.
 
+> **구현 상태 (세션 D 종료 시점) — 문구는 있고 경로는 없다.** 두 문장은
+> `catalog.openWarningScope`·`catalog.openWarningAgents`로 번역까지 들어가
+> 있고 카드가 렌더할 자리도 있지만, 게이트인
+> `isOpenVisibility()`(`WorkspaceCatalogSettingsCard.tsx`)가 **무조건
+> `false`를 돌려준다.** `visibility`가 Rust `CatalogItem`에만 있고
+> `PreflightItem` → Tauri command → `CatalogPreflightItem`으로 실려 나오지
+> 않기 때문이다. 지금은 내장 항목 둘 다 `private`이라 도달할 수 없는 상태가
+> 맞지만, **`open` 항목을 추가하는 작업은 이 필드를 먼저 실어 보내야 한다.**
+> 그러지 않으면 open 방이 화면에서 private처럼 보인다. 코드에도 같은 경고가
+> 함수 doc comment로 붙어 있다.
+
 ## 10. result ledger
 
-적용 실행이 반환하는 machine-readable 결과다. UI와 CLI가 같은 것을 읽는다.
+적용 실행이 반환하는 machine-readable 결과다.
 
 ```json
 {
@@ -322,17 +345,23 @@ catalog의 두 항목은 모두 `private`이 기본이다. 관리자가 `open`�
       "decision": "create_or_recreate",
       "channel_id": "…",
       "generation": 1,
-      "steps": [
-        { "step": "channel", "status": "done" },
-        { "step": "canvas", "status": "failed", "error": "…" },
-        { "step": "membership", "status": "pending" }
-      ],
+      "steps": { "channel": "done", "canvas": "failed", "membership": "pending" },
       "outcome": "partial",
-      "user_action": null
+      "user_action": null,
+      "error": "캔버스 적용 실패"
     }
   ]
 }
 ```
+
+**`steps`는 배열이 아니라 객체다.** 이 문서의 초안은
+`[{ "step": "channel", "status": "done" }, …]` 형태를 적었지만 구현은 §4의
+provenance와 **같은 타입**(`StepStates`)을 그대로 싣는다 — 단계 이름이
+컴파일 타임에 고정된 3필드 레코드다(`provenance.rs`). 두 곳이 같은 타입을
+쓰기 때문에 증명서와 ledger의 단계 어휘가 어긋날 수 없고, 단계를 추가하는
+것은 타입 변경이라 조용히 지나갈 수 없다. 배열 형태였다면 둘이 따로 놀았을
+것이다. 단계별 `error`는 단계마다가 아니라 항목 하나에 **`error` 필드 하나**로
+싣는다.
 
 `outcome` ∈ `applied` · `unchanged` · `partial` · `blocked`.
 `user_action` ∈ `null` · `confirm_recreate` · `resolve_conflict` ·
@@ -356,7 +385,17 @@ catalog의 두 항목은 모두 `private`이 기본이다. 관리자가 `open`�
 적용을 맡기거나 owner 권한을 받아야만 풀린다.
 
 계획서 Phase 3의 "성공, 실패, 건너뜀, 사용자 조치 필요"가 각각
-`outcome`과 `user_action`에 대응한다.
+`outcome`과 `user_action`에 대응한다. "건너뜀"은 `outcome`이 아니라
+`steps.canvas == "skipped"`가 말한다 — §8의 「내용이 있는 캔버스는 덮어쓰지
+않는다」가 만들어 내는 상태이고, 그 항목의 `outcome`은 `applied`다.
+
+> **소비자 현황 (세션 D 종료 시점).** 이 ledger를 읽는 것은 데스크톱 설정
+> 카드뿐이다. 이번 세션의 CLI(`buzz catalog list`)는 **내장 catalog 항목만**
+> 출력하는 읽기 전용 명령이라 preflight도 ledger도 읽지 않는다
+> (`crates/buzz-cli/src/commands/workspace_catalog.rs`). 단위 테스트
+> `ledger_serializes_for_ui_and_cli`가 고정하는 것은 "지금 두 소비자가 읽고
+> 있다"가 아니라 **wire format 그 자체**이며, CLI 적용 경로가 붙을 때 그
+> 형식이 이미 고정돼 있게 하는 것이 목적이다.
 
 ## 11. 검증 계획
 
@@ -378,7 +417,52 @@ effect trait로 relay I/O를 주입하므로 fault injection은 live relay 없�
 완료로 적지 않는다 ([`IMPLEMENTATION_HANDOFF.md`](IMPLEMENTATION_HANDOFF.md)
 기본 원칙).
 
-## 12. 근거가 된 코드 경로
+### 실제로 돈 결과 (2026-07-30)
+
+| 계획한 검증 | 결과 |
+|---|---|
+| `cargo test -p schoolx-catalog` (`just test-unit` 경유) | 66 passed / 0 failed |
+| `just test-e2e e2e_workspace_catalog` | 4 passed / 0 failed |
+| `just test-e2e e2e_access_matrix` (세션 A 계약) | 17 passed / 0 failed |
+| `pnpm --dir desktop test` (`just desktop-test`) | 3,756 passed / 0 failed |
+
+**계획한 검증 중 하나가 실제로는 서지 않았다.** 위 표의 "데스크톱 —
+`pnpm --dir desktop test` — 설정 카드 렌더와 결과 표시" 행은 통과했지만, 그
+3,756개 중 `WorkspaceCatalogSettingsCard.tsx`를 렌더하는 테스트는 **하나도
+없다.** Playwright 스펙도 이 카드의 `data-testid`를 참조하지 않는다. 카드가
+`outcome`·`user_action`·`skipped`로 분기한다는 것은 소스를 읽어서만 확인했고,
+`tsc`가 `catalog.*` 번역 키의 존재를 보장하는 데까지다. 실행 증거는 없다.
+Phase 3 완료 기준 #7의 UI 절이 여기서 막힌다 — 자세한 것은
+[`IMPLEMENTATION_HANDOFF.md`](IMPLEMENTATION_HANDOFF.md) 세션 D를 본다.
+
+`just ci`는 이 저장소 환경에서 명령 하나당 10분 제한을 넘긴다(cold clippy
+빌드만 9분 44초). 구성 레시피 8개를 순서대로 따로 돌려 전부 통과를 확인했다.
+기록은 [`BASELINE.md`](BASELINE.md).
+
+## 12. 코드 경로
+
+### 이번 세션이 만든 것
+
+| 역할 | 경로 |
+|---|---|
+| 내장 catalog 데이터 (`include_str!`) | `crates/schoolx-catalog/catalog.json` |
+| catalog 타입과 `builtin()` | `crates/schoolx-catalog/src/{lib,catalog}.rs` |
+| 결정론적 채널 ID (§5) | `crates/schoolx-catalog/src/channel_id.rs` |
+| kind 39500 wire 타입과 `StepStatus` (§4) | `crates/schoolx-catalog/src/provenance.rs` |
+| relay I/O 주입 trait과 fault-injection fake | `crates/schoolx-catalog/src/effects.rs` |
+| preflight 판정표 (§7) | `crates/schoolx-catalog/src/preflight.rs` |
+| idempotent saga, owner 게이트, 캔버스 보호 (§8) | `crates/schoolx-catalog/src/saga.rs` |
+| result ledger (§10) | `crates/schoolx-catalog/src/ledger.rs` |
+| kind 39500 상수와 예약 대역 | `crates/buzz-core/src/kind.rs` |
+| kind 39500 수용과 `h` 스코프 강제 | `crates/buzz-relay/src/handlers/ingest.rs` |
+| relay 어댑터와 Tauri command | `desktop/src-tauri/src/commands/workspace_catalog.rs` |
+| 설정 카드 (§9·§10 표시) | `desktop/src/features/settings/ui/WorkspaceCatalogSettingsCard.tsx` |
+| react-query 훅 | `desktop/src/features/workspace-catalog/hooks.ts` |
+| TS wire 타입과 invoke 래퍼 | `desktop/src/shared/api/tauriWorkspaceCatalog.ts` |
+| 읽기 전용 CLI (`buzz catalog list`) | `crates/buzz-cli/src/commands/workspace_catalog.rs` |
+| live relay E2E | `crates/buzz-test-client/tests/e2e_workspace_catalog.rs` |
+
+### 근거가 된 기존 코드 경로
 
 | 사실 | 경로 |
 |---|---|

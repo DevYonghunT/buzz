@@ -94,6 +94,61 @@ desktop 단위 테스트 수 차이(3,401 → 3,420)는 SchoolX가 추가한 19�
 cold, 현재 checkout이 warm인 상태에서 측정했으므로 성능 비교에 쓰지
 않는다.
 
+### 세션 D (2026-07-30, 워크스페이스 catalog 최종 게이트)
+
+측정 대상은 `3b0859d6`이고 실행 직전 `git status --short`는 비어 있었다.
+시각은 UTC이며 cargo 캐시는 첫 명령에서 cold, 이후 warm이다.
+
+| command | 시작(UTC) | exit | passed | failed | 소요 | 분류 |
+|---|---|---:|---:|---:|---:|---|
+| `just ci` | 17:21:13 | **143** | - | - | 10m(중단) | infra — 아래 참조 |
+| `just fmt-check clippy` | 17:32:12 | 0 | - | - | 9s | 통과 |
+| `just desktop-check desktop-tauri-fmt-check` | 17:32:28 | 0 | - | - | 20s | 통과 |
+| `just desktop-tauri-clippy` | 17:32:54 | 0 | - | - | 28s | 통과 |
+| `just web-check mobile-check` | 17:33:28 | 0 | - | - | 23s | 통과 |
+| `just test-unit` | 17:33:58 | 0 | 6 suites | 0 | 13s | 통과 — `schoolx-catalog` 66/0 |
+| `just desktop-test` | 17:34:27 | 0 | 3,756 | 0 | 95s | 통과 (58 suites, skipped 0) |
+| `just desktop-build` | 17:36:08 | 0 | - | - | 49s | 통과 (`tsc && vite build`) |
+| `just desktop-tauri-check` | 17:37:05 | 0 | - | - | 60s | 통과 |
+| `just desktop-tauri-test` | 17:38:14 | 0 | 1,834 | 0 | 143s | 통과 (14 ignored) |
+| `just web-build mobile-test` | 17:40:46 | 0 | 824 | 0 | 147s | 통과 (mobile 1 skipped) |
+| `just test-e2e e2e_access_matrix` | 17:44:09 | 0 | **17** | 0 | 101s | 통과 — 세션 A 계약 유지 |
+| `just test-e2e e2e_workspace_catalog` | 17:46:00 | 0 | **4** | 0 | 32s | 통과 |
+| `just schoolx-upstream-check` | 17:46:38 | 0 | 3/3 | 0 | 1s | 통과 |
+
+로그는 세션 로컬 scratchpad에 있었고 repo에 보존하지 않았다. 위 명령을 그대로
+재실행하면 같은 값을 얻는다.
+
+#### `just ci`가 한 명령으로는 완주하지 못한다
+
+이 세션의 도구 실행 한도가 명령 하나당 10분이다. `just ci`는 cold 캐시에서
+`cargo clippy --workspace --all-targets` 한 단계에만 **9분 44초**를 쓰므로
+한 번의 호출로 끝나지 않는다 (exit 143 = 하네스가 SIGTERM). 제품 실패가
+아니다.
+
+`just ci`는 정의상 `check test-unit desktop-test desktop-build
+desktop-tauri-check desktop-tauri-test web-build mobile-test`이고,
+`check`는 다시 `fmt-check clippy desktop-check desktop-tauri-fmt-check
+desktop-tauri-clippy web-check mobile-check`다. 위 표의 2–11행이 이 목록
+전체를 원래 순서대로 나눠 돌린 것이며 전부 exit 0이다. 캐시가 warm이면
+합계는 약 587초로, 10분 한도에 아슬아슬하게 걸린다.
+
+**CI에서는 이 분해가 필요 없다.** 사람이나 에이전트가 이 환경에서 돌릴 때만
+해당한다.
+
+#### `just schoolx-upstream-check`의 검사 3이 새 크레이트를 훑지 않는다
+
+검사 3(제품 식별자)의 대상 디렉터리는 `desktop/src-tauri/src`, `desktop/src`,
+`crates/buzz-cli/src`, `web/src` 넷으로 고정돼 있다(`justfile`의 `roots`).
+세션 D가 추가한 `crates/schoolx-catalog/src`와
+`crates/buzz-test-client/tests/`는 여기에 들지 않는다. 이번 실행이 훑은 29개
+파일에 세션 D의 데스크톱·CLI 파일은 모두 들어 있었고, 범위 밖 경로는 같은
+grep을 손으로 돌려 확인했다 — 식별자 리터럴 없음.
+
+**앞으로 SchoolX가 저 넷 밖에 크레이트를 추가하면 검사 3이 그것을 보지
+못한다.** `roots` 확장 여부는 세션 소유자가 결정할 사항이라 이번에는 고치지
+않았다.
+
 ### 검증되지 않은 첫 실행과 그 원인
 
 첫 실행에서 `cargo test --manifest-path desktop/src-tauri/Cargo.toml`이
