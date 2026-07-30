@@ -11,6 +11,7 @@ import {
   Download,
   FlaskConical,
   Keyboard,
+  LayoutGrid,
   LayoutTemplate,
   MessagesSquare,
   MonitorCog,
@@ -73,6 +74,7 @@ import type { TranslationKey } from "@/shared/i18n";
 import { APP_LOCALES, type AppLocale } from "@/shared/i18n/locale";
 import { useAppLocale } from "@/shared/i18n/useAppLocale";
 import { ChannelTemplatesSettingsCard } from "./ChannelTemplatesSettingsCard";
+import { WorkspaceCatalogSettingsCard } from "./WorkspaceCatalogSettingsCard";
 import { HarnessesSettingsPanel } from "./HarnessesSettingsPanel";
 import { ExperimentalFeaturesCard } from "./ExperimentalFeaturesCard";
 import { KeyboardShortcutsCard } from "./KeyboardShortcutsCard";
@@ -95,6 +97,7 @@ export type SettingsSection =
   | "experimental"
   | "agents"
   | "channel-templates"
+  | "workspace-catalog"
   | "compute"
   | "appearance"
   | "shortcuts"
@@ -114,6 +117,7 @@ const SETTINGS_SECTION_VALUES: readonly SettingsSection[] = [
   "experimental",
   "agents",
   "channel-templates",
+  "workspace-catalog",
   "compute",
   "appearance",
   "shortcuts",
@@ -188,6 +192,11 @@ export const settingsSections: SettingsSectionDescriptor[] = [
     label: "settings.sections.channelTemplates",
     icon: LayoutTemplate,
     featureGate: "channel-templates",
+  },
+  {
+    value: "workspace-catalog",
+    label: "settings.sections.workspaceCatalog",
+    icon: LayoutGrid,
   },
   {
     value: "compute",
@@ -929,6 +938,8 @@ export function renderSettingsSection(
       );
     case "channel-templates":
       return <ChannelTemplatesSettingsCard />;
+    case "workspace-catalog":
+      return <WorkspaceCatalogSettingsCard />;
     case "compute":
       return <MeshComputeSettingsCard />;
     case "appearance":

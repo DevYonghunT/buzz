@@ -34,6 +34,7 @@ export const en = {
       experimental: "Experiments",
       agents: "Agents",
       channelTemplates: "Templates",
+      workspaceCatalog: "SchoolX workspace",
       compute: "Compute",
       shortcuts: "Shortcuts",
       hostedCommunities: "Hosted communities",
@@ -85,5 +86,40 @@ export const en = {
       ko: "Korean",
       en: "English",
     },
+  },
+  catalog: {
+    title: "SchoolX default workspace",
+    description:
+      "Create the standard SchoolX rooms. Nothing is created until you apply.",
+    apply: "Apply selected",
+    applying: "Applying…",
+    openWarningScope:
+      "Every signed-in user can read and write without being a member.",
+    openWarningAgents:
+      "Managed agents still need to be added explicitly before they can join.",
+    decision: {
+      create_or_recreate: "Will be created",
+      resume: "Will resume",
+      no_change: "Already applied",
+      conflict: "Needs your decision",
+      retired: "No longer offered",
+      deleted: "Previously deleted",
+      adopted: "Existing room reused",
+      not_owned: "Owned by someone else",
+    },
+    outcome: {
+      applied: "Applied",
+      unchanged: "Unchanged",
+      partial: "Partly applied",
+      blocked: "Needs your decision",
+    },
+    userAction: {
+      confirm_recreate: "You deleted this room before. Create it again?",
+      resolve_conflict:
+        "A room with this name already exists. SchoolX will not adopt it automatically.",
+      request_ownership:
+        "This room exists but you do not own it. Nothing was changed — ask an owner to apply it.",
+    },
+    renamed: "Renamed by a member",
   },
 } as const;

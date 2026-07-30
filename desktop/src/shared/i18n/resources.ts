@@ -11,6 +11,7 @@ export const APP_I18N_NAMESPACES = [
   "settings",
   "time",
   "appearance",
+  "catalog",
 ] as const satisfies readonly (keyof typeof en)[];
 
 export type AppI18nNamespace = (typeof APP_I18N_NAMESPACES)[number];

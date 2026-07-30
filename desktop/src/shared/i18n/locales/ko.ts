@@ -31,6 +31,7 @@ export const ko = {
       experimental: "실험 기능",
       agents: "에이전트",
       channelTemplates: "템플릿",
+      workspaceCatalog: "SchoolX 워크스페이스",
       compute: "컴퓨팅",
       shortcuts: "단축키",
       hostedCommunities: "호스팅 커뮤니티",
@@ -75,5 +76,40 @@ export const ko = {
       ko: "한국어",
       en: "영어",
     },
+  },
+  catalog: {
+    title: "SchoolX 기본 워크스페이스",
+    description:
+      "SchoolX 표준 업무방을 만듭니다. 적용을 누르기 전에는 아무것도 생성되지 않습니다.",
+    apply: "선택 항목 적용",
+    applying: "적용하는 중…",
+    openWarningScope:
+      "모든 로그인 사용자가 멤버가 아니어도 읽고 쓸 수 있습니다.",
+    openWarningAgents:
+      "관리형 에이전트는 명시적으로 추가된 경우에만 접근합니다.",
+    decision: {
+      create_or_recreate: "새로 만듭니다",
+      resume: "이어서 진행합니다",
+      no_change: "이미 적용됨",
+      conflict: "확인이 필요합니다",
+      retired: "더는 제공하지 않습니다",
+      deleted: "이전에 삭제됨",
+      adopted: "기존 방을 이어받습니다",
+      not_owned: "다른 사람의 방입니다",
+    },
+    outcome: {
+      applied: "적용 완료",
+      unchanged: "변경 없음",
+      partial: "일부만 적용",
+      blocked: "확인이 필요합니다",
+    },
+    userAction: {
+      confirm_recreate: "이전에 삭제한 방입니다. 다시 만들까요?",
+      resolve_conflict:
+        "같은 이름의 방이 이미 있습니다. SchoolX가 임의로 채택하지 않습니다.",
+      request_ownership:
+        "방은 있지만 관리 권한이 없습니다. 아무것도 바꾸지 않았습니다 — 방 소유자에게 적용을 요청하세요.",
+    },
+    renamed: "멤버가 이름을 변경함",
   },
 } as const satisfies TranslationShape<typeof en>;

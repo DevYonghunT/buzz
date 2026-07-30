@@ -67,7 +67,12 @@ const settingsNavGroups: Array<{
   },
   {
     labelKey: "settings.sidebar.groups.communities",
-    sections: ["hosted-communities", "channel-templates", "community-members"],
+    sections: [
+      "hosted-communities",
+      "channel-templates",
+      "workspace-catalog",
+      "community-members",
+    ],
   },
   {
     labelKey: "settings.sidebar.groups.app",
