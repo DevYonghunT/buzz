@@ -103,12 +103,25 @@ relay 변경은 세 곳뿐이다.
 ### 의도적 트레이드오프
 
 채널 스코프 저장이라 **private 채널의 provenance는 그 채널 멤버만 읽는다.**
-다른 관리자가 preflight를 돌리면 자기가 멤버가 아닌 항목은 "이미 적용됨"을
-볼 수 없고 `conflict`로 떨어진다.
+비멤버 관리자가 preflight를 돌리면 그 항목의 provenance도 동명 채널도 보이지
+않는다 — `conflict`는 비멤버 자신의 접근 가능 채널 목록에 동명 채널이 **보일**
+때만 성립하는데, private 채널은 애초에 그 목록에 없다. 그래서 판정은
+`conflict`가 아니라 `create_or_recreate`로 나온다.
 
-전역 스코프로 바꾸면 비멤버가 private 채널의 존재를 알게 되어
-[`SECURITY_CONTRACT.md`](SECURITY_CONTRACT.md)가 깨진다. 자동 채택 대신
-사용자 해결을 요구하는 쪽이 안전한 실패다.
+`create_or_recreate`를 따라 생성을 시도하면 결정론적 ID(§5)가 이미 점유돼
+있어 거부되고(`duplicate`), 그 채널은 여전히 비멤버의 접근 가능 목록에 없다.
+saga는 이 조합 — §7 `deleted`의 조건인 `duplicate` + 접근 불가 — 을 "예전에
+만들었다가 삭제됨"으로 읽어 `user_action: confirm_recreate`를 보고한다.
+실제로는 지운 적 없고 지금도 존재하는 방을 두고서다.
+
+이것도 오판이지 오작동은 아니다 — 같은 트레이드오프가 낳은 결과다. 비멤버가
+정확한 판정인 `conflict`를 보려면 그 자신의 접근 가능 목록에 동명 채널이
+있어야 하는데, 그건 비멤버에게 private 채널의 존재를 알리는 것과 같은 일이다
+— provenance를 전역 스코프로 바꿔 누구나 읽게 하는 것과 다르지 않다. 정확히
+이 누출을 [`SECURITY_CONTRACT.md`](SECURITY_CONTRACT.md)가 막는다. 그러므로
+비멤버에게는 존재를 드러내지 않는 오판(`deleted`)이 정확하지만 존재를
+드러내는 판정(`conflict`)보다 안전한 실패다 — 자동 채택 대신 사용자 해결을
+요구하는 쪽을 택한 것과 같은 원칙이다.
 
 ## 5. 채널 ID 도출
 
@@ -162,6 +175,25 @@ UUIDv5(SCHOOLX_CATALOG_NAMESPACE,
 `deleted`·`not_owned`·`adopted`를 가른다. 앞의 둘이면 **그 항목만 멈추고**
 나머지 항목은 계속 진행한다. 사용자가 "다시 만들기"를 선택하면 `generation`을
 올려 새 ID로 만들고 증명서에 세대를 기록한다.
+
+> **구현 상태 (세션 D 종료 시점) — 프롬프트는 뜨지만 답할 방법이 없다.** 바로
+> 위 문단의 마지막 문장 — "다시 만들기"를 선택하면 `generation`을 올려 새
+> ID로 만든다 — 은 아직 아무 코드도 하지 않는다. saga는 §7의 `deleted`
+> 판정에서 `user_action: confirm_recreate`를 실제로 보고하고, 설정 카드는 그
+> 값을 `catalog.userAction.confirm_recreate`로 번역해 "이전에 삭제한
+> 방입니다. 다시 만들까요?"를 **문구로만** 띄운다
+> (`WorkspaceCatalogSettingsCard.tsx`) — "예"를 누를 버튼도 체크박스도 없다.
+> `generation`을 늘리는 코드 경로는 크레이트 어디에도 없다: preflight·saga·
+> ledger·provenance·channel_id 다섯 곳 모두 이미 정해진 값을 그대로 나르기만
+> 하고, 신규 항목의 값은 항상 리터럴 `1`이다(`preflight.rs`의
+> `None => { ... generation: 1, ... }`).
+>
+> 사용자 데이터를 잘못 건드리는 결함은 아니다 — `deleted`로 떨어진 항목은
+> 아무것도 쓰지 않고 그 자리에 멈춘다. 그러나 이 컨트롤이 생기기 전까지는
+> 재시도해도 같은 판정을 반복할 뿐 앞으로 나아갈 방법이 없다. 닫는 방법:
+> 설정 카드에 재생성 확인 컨트롤을 추가하고, 확인되면 `generation + 1`로
+> saga를 다시 부르는 경로를 Tauri command에 더한다. `derive_channel_id`는
+> 이미 `generation`을 인자로 받으므로 saga·Tauri command 쪽만 있으면 된다.
 
 ## 7. preflight 판정표
 

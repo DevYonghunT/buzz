@@ -410,7 +410,7 @@ e2e_workspace_catalog` 4 passed, `just schoolx-upstream-check` 3/3 통과.
    낸다. 모르는 값은 **끝난 것**으로 센다 — 미완료로 세면 그 단계를 다시
    실행한다는 뜻이고 캔버스 단계의 재실행이 바로 그 덮어쓰기다.
 
-**세션 D에서 넘긴 것.** 앞의 셋은 Phase 3을 닫기 위해 필요하고, 뒤의 셋은
+**세션 D에서 넘긴 것.** 앞의 셋은 Phase 3을 닫기 위해 필요하고, 뒤의 넷은
 다음 세션의 범위다.
 
 1. **설정 카드의 실행 증거** (완료 기준 #7). 카드는 `outcome` 4종,
@@ -442,6 +442,14 @@ e2e_workspace_catalog` 4 passed, `just schoolx-upstream-check` 3/3 통과.
 6. **CLI 적용 경로.** 이번 CLI는 `buzz catalog list`뿐이고 preflight도 ledger도
    읽지 않는다. `ledger_serializes_for_ui_and_cli`가 고정한 wire format은 그
    경로가 붙을 때를 위한 것이다.
+7. **재생성(recreate) 프롬프트가 답할 수 없다.** `deleted` 판정은
+   `user_action: confirm_recreate`를 실제로 보고하고 설정 카드가 "이전에
+   삭제한 방입니다. 다시 만들까요?"를 문구로 띄우지만, 그 물음에 답할
+   컨트롤이 없다 — `generation`을 늘리는 코드 경로가 크레이트 전체에 없어서다
+   (preflight·saga·ledger·provenance·channel_id 다섯 곳 모두 이미 정해진
+   값을 그대로 나르기만 한다). `deleted`로 떨어진 항목은 이 컨트롤이 생기기
+   전까지 재시도해도 같은 판정을 반복할 뿐이다. 자세한 내용과 닫는 방법은
+   [`WORKSPACE_CATALOG.md`](WORKSPACE_CATALOG.md) §6의 「구현 상태」 문단을 본다.
 
 <details>
 <summary>원래 계획 (참고)</summary>

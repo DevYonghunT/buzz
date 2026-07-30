@@ -97,6 +97,9 @@ cold, 현재 checkout이 warm인 상태에서 측정했으므로 성능 비교�
 ### 세션 D (2026-07-30, 워크스페이스 catalog 최종 게이트)
 
 측정 대상은 `3b0859d6`이고 실행 직전 `git status --short`는 비어 있었다.
+**이후 브랜치 리뷰 수정으로 HEAD가 이 커밋을 여러 번 앞질렀다 — 아래 표는
+`3b0859d6` 시점의 기록 그대로 두고, 현재 HEAD와의 관계는 「브랜치 리뷰 수정
+이후 HEAD 재지정」 절에 별도로 적는다.**
 시각은 UTC이며 cargo 캐시는 첫 명령에서 cold, 이후 warm이다.
 
 | command | 시작(UTC) | exit | passed | failed | 소요 | 분류 |
@@ -148,6 +151,57 @@ grep을 손으로 돌려 확인했다 — 식별자 리터럴 없음.
 **앞으로 SchoolX가 저 넷 밖에 크레이트를 추가하면 검사 3이 그것을 보지
 못한다.** `roots` 확장 여부는 세션 소유자가 결정할 사항이라 이번에는 고치지
 않았다.
+
+#### 브랜치 리뷰 수정 이후 HEAD 재지정 (2026-07-31)
+
+위 표(측정 대상 `3b0859d6`)는 이후의 브랜치 전체 리뷰 수정을 반영하지 않는다.
+`3b0859d6` 위로 `68349244`(구현 결과 기록), `ce12b5cb`(비멤버 차단 테스트에
+positive control 추가), `042e59db`(provenance를 도출된 채널에 묶는 결합
+검사 추가 — `WORKSPACE_CATALOG.md` §11의 「브랜치 리뷰 수정」이 그 결과를
+기록한다)가 얹혔고, 그 위에 이 문서를 포함해 §4·§6 정정, `roots` 확장(바로
+위 절), owner 오류 지역화를 담은 커밋이 지금의 HEAD다
+(`git log -1 --format='%H %s'`로 정확한 값을 확인한다).
+
+이 마지막 커밋에서 실제로 재실행해 확인한 것은 아래뿐이다. 위 표의 나머지
+값(`just ci` 분해 실행, `desktop-tauri-test`, `e2e_workspace_catalog` 등)은
+**재실행하지 않았다** — 여전히 `3b0859d6`(일부는 `042e59db`, §11 참고) 시점의
+기록이므로 그 시점의 증거로만 읽는다.
+
+| command | 결과 |
+|---|---|
+| `cargo test -p schoolx-catalog` | 71 passed / 0 failed |
+| `cargo fmt -p schoolx-catalog` | 이미 규칙을 만족함 — 추가 변경 없음 |
+| `cargo clippy -p schoolx-catalog --all-targets -- -D warnings` | 경고 0 |
+| `pnpm --dir desktop typecheck` | 통과 |
+| `pnpm --dir desktop test` | 3,756 passed / 0 failed |
+| `just schoolx-upstream-check` (기본 범위 — 마지막 sync 이후 변경분) | 3/3 통과, 대상 37개 파일 |
+
+바로 위 절이 적은 "검사 3이 새 크레이트를 훑지 않는다"는 이 커밋으로
+**닫혔다.** `justfile`의 `roots`에 `crates/schoolx-catalog/src`를 추가했고,
+위 `schoolx-upstream-check` 실행이 그 경로의 8개 파일(`catalog.rs`·
+`channel_id.rs`·`effects.rs`·`ledger.rs`·`lib.rs`·`preflight.rs`·
+`provenance.rs`·`saga.rs`)을 대상에 포함해 통과시켰음을 확인한다.
+`crates/buzz-test-client/tests/`는 여전히 범위 밖이다 — 이번 수정이 다루는
+문제가 아니라 손대지 않았다.
+
+**참고 — 전체 트리 스캔(`since=all`)은 이 범위 밖에서 실패한다.** 확인
+차원에서 `just schoolx-upstream-check all`도 돌려 봤는데, 아래 파일에서
+히트가 났다.
+
+- `desktop/src-tauri/src/managed_agents/repos.rs` (테스트 내 `.buzz`
+  디렉터리명 다수)
+- `desktop/src-tauri/src/migration/materialize.rs`
+- `desktop/src/features/agents/ui/agentSessionToolClassifier.ts`
+- `desktop/src/features/profile/ui/NostrBindConsentDialog.tsx`
+- `web/src/features/repos/mock-repos.ts`
+- `web/src/features/repos/ui/ReposPage.tsx`
+
+전부 `roots`에 이번에 추가한 `crates/schoolx-catalog/src`가 **아니라**
+원래부터 있던 네 디렉터리 안이고, 이번 세션이 만들거나 건드린 파일이 아니다
+— 검사 3의 기본 호출(마지막 sync 이후 변경분)은 그 파일들이 바뀌지 않아 스캔
+대상에서 빠지므로 이 실패를 가리지 않는다. 실제 리터럴인지 정규식 오탐(예:
+파일 바깥 이름이 아닌 `#[cfg(test)] mod tests`용 임시 디렉터리)인지는
+확인하지 않았다 — 이번 다섯 항목의 범위 밖이라 별도 세션의 판단에 맡긴다.
 
 ### 검증되지 않은 첫 실행과 그 원인
 

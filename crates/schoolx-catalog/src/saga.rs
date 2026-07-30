@@ -137,6 +137,8 @@ async fn apply_item(
     };
 
     let mut error: Option<String> = None;
+    // 단계 3(owner 확인)이 `Ok(false)`일 때만 쓴다 — 아래 그 분기의 주석 참고.
+    let mut user_action: Option<UserAction> = None;
 
     // 단계 1이 이 방을 어떻게 얻었는가 — 아래 owner 게이트가 이 값으로
     // 갈린다. 기본값이 `CreateSkipped`인 이유: provenance가 채널 단계를
@@ -312,7 +314,21 @@ async fn apply_item(
             Ok(true) => provenance.steps.membership = StepStatus::Done,
             Ok(false) => {
                 provenance.steps.membership = StepStatus::Failed;
-                error = Some("적용자가 채널 owner가 아닙니다".to_string());
+                // 하드코딩한 문장 대신 이미 있는 어휘를 쓴다. 위 owner
+                // 게이트가 `Ok(false)`일 때 내는 것과 같은 사실 — 적용자가
+                // 이 채널의 owner가 아니다 — 이므로 같은 `UserAction`을
+                // 싣는다. `not_owned`/`request_ownership`는 이미
+                // `catalog.decision.*`·`catalog.userAction.*`로 번역돼
+                // 있어(`desktop/src/shared/i18n/locales/{en,ko}.ts`) 설정
+                // 카드가 그대로 현지화해 보여준다 — `error`에 넣는 문자열은
+                // 그 카드가 번역 없이 그대로 렌더한다(`ledgerItem.error`,
+                // `WorkspaceCatalogSettingsCard.tsx`). `decision`은 바꾸지
+                // 않는다: 이 분기는 위 게이트와 달리 캔버스 단계를 이미
+                // 지난 뒤라 provenance를 계속 발행해야 하므로(바로 아래),
+                // `not_owned`가 §7에서 약속하는 "아무것도 쓰지 않는다"와
+                // 어긋난다 — `outcome: Partial` + `user_action`만으로
+                // 충분하다.
+                user_action = Some(UserAction::RequestOwnership);
             }
             Err(e) => {
                 provenance.steps.membership = StepStatus::Failed;
@@ -346,7 +362,7 @@ async fn apply_item(
         } else {
             Outcome::Partial
         },
-        user_action: None,
+        user_action,
         error,
     }
 }

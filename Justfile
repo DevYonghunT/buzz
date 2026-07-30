@@ -1122,7 +1122,7 @@ schoolx-upstream-check since="":
         since="$(git for-each-ref --sort=-refname --format='%(refname:short)' \
             'refs/heads/schoolx-pre-upstream-sync-*' | head -1)"
     fi
-    roots=(desktop/src-tauri/src desktop/src crates/buzz-cli/src web/src)
+    roots=(desktop/src-tauri/src desktop/src crates/buzz-cli/src crates/schoolx-catalog/src web/src)
     # No `mapfile`: macOS ships bash 3.2.
     files=()
     if [[ -z "${since}" || "${since}" == "all" ]]; then
