@@ -10,7 +10,7 @@ use schoolx_catalog_pkg::effects::{
 };
 use schoolx_catalog_pkg::ledger::Ledger;
 use schoolx_catalog_pkg::preflight::PreflightItem;
-use schoolx_catalog_pkg::provenance::{d_tag, Provenance, KIND_WORKSPACE_PROVENANCE};
+use schoolx_catalog_pkg::provenance::{Provenance, KIND_WORKSPACE_PROVENANCE};
 use tauri::State;
 use uuid::Uuid;
 
@@ -94,26 +94,30 @@ impl CatalogEffects for RelayEffects<'_> {
         // `create_channel`을 걸어 `duplicate`를 받아도 `channel_present`가
         // (별도의, 잘리지 않는 `list_channels()` 호출에서 나오므로) true라
         // owner 게이트를 그대로 통과해 캔버스를 catalog 기본값으로 덮어쓴다.
+        // 그래서 개수 상한이 아니라 `commands::channels::query_relay_all`의
+        // `(until, before_id)` 커서 페이징을 그대로 재사용한다 — 매직 넘버
+        // `limit` 없이 몇 신원이 쌓아 놨든 끝까지 읽는다.
         //
-        // 그래서 개수 상한이 아니라 `#d` 필터로 범위를 좁힌다: 이 빌드에
-        // 컴파일된 catalog(`schoolx_catalog_pkg::builtin()`)의 항목 키만큼만
-        // d 태그를 만들어 건다 — 이 집합은 catalog 크기로 정확히 알려진 작은
-        // 집합이다. 하지만 그 필터가 돌려주는 이벤트 **개수**는 신원 수에
-        // 비례해 늘 수 있어 catalog 크기만으로는 그 개수의 상한을 셀 수
-        // 없으므로, 매직 넘버 `limit` 대신 `commands::channels::query_relay_all`의
-        // `(until, before_id)` 커서 페이징을 그대로 재사용해 몇 신원이 쌓아
-        // 놨든 끝까지 읽는다.
-        let d_tags: Vec<String> = schoolx_catalog_pkg::builtin()
-            .items
-            .iter()
-            .map(|item| d_tag(catalog_id, &item.item_key))
-            .collect();
-
+        // 필터는 반드시 `{"kinds": [KIND_WORKSPACE_PROVENANCE]}`뿐이어야 한다.
+        // 절대로 이걸 현재 catalog 항목으로, 예를 들어
+        // `schoolx_catalog_pkg::builtin().items`에서 만든 `#d` 태그 목록으로
+        // 좁히지 마라. `Decision::Retired`(`preflight.rs`)는 provenance는
+        // 있는데 그 `item_key`가 지금 catalog에는 없는 항목을 찾아서 성립하는
+        // 판정이다 — 예전 catalog 버전이 만든 방인데 그 항목이 이후
+        // `catalog.json`에서 빠져도 사용자에게 계속 보여주기 위한 것이다.
+        // 이 조회를 현재 catalog 항목으로 좁히면 relay가 돌려줄 수 있는 모든
+        // 레코드가 이미 catalog에 있는 항목으로 보장되어 버려서, catalog에서
+        // 항목이 하나라도 빠지는 순간부터 Retired는 영영 성립할 수 없다 —
+        // 상황에 따라 가끔이 아니라 매번, 결정적으로. `crates/schoolx-catalog`의
+        // `FakeEffects::fetch_provenance`는 `catalog_id`와 살아 있는 채널로만
+        // 걸러 `#d` 스코핑 개념이 아예 없으므로, 크레이트 테스트
+        // (`item_dropped_from_catalog_is_retired`,
+        // `incomplete_item_dropped_from_catalog_is_retired`)는 이 회귀를 잡지
+        // 못한다 — 여기서 다시 좁히면 데스크톱 빌드에서만 조용히 재발한다.
         let events = crate::commands::channels::query_relay_all(
             &self.state,
             serde_json::json!({
                 "kinds": [KIND_WORKSPACE_PROVENANCE],
-                "#d": d_tags,
             }),
         )
         .await
