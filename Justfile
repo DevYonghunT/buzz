@@ -321,6 +321,10 @@ test-e2e suite="": _ensure-migrations
 # Run unit tests only (no infra needed)
 test-unit:
     #!/usr/bin/env bash
+    # 이 파일의 다른 셰방 레시피 33개와 같다. 이게 없으면 마지막 명령의 종료
+    # 코드만 전파되어 앞선 그룹의 실패가 조용히 묻힌다 — 그룹을 하나 덧붙일
+    # 때마다 그전까지 게이트 역할을 하던 그룹이 가려진다.
+    set -euo pipefail
     if command -v cargo-nextest &>/dev/null; then
         cargo nextest run -p buzz-core -p buzz-auth --lib
         # buzz-db migrator/lint tests: pure SQL-parsing unit tests (no infra).
