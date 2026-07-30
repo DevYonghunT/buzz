@@ -26,6 +26,26 @@ pub enum StepStatus {
     Done,
     /// 실행했고 실패했다. 재시도가 다시 시도한다.
     Failed,
+    /// 실행하지 않기로 했다 — 그 자리에 이미 지켜야 할 사용자 내용이 있었다.
+    ///
+    /// `Done`과 반드시 구별한다. 둘 다 "이 단계는 끝났다"이지만 `Done`은
+    /// catalog 값이 그 방에 들어가 있다는 뜻이고 `Skipped`는 들어가 있지
+    /// **않다**는 뜻이다. 같은 값으로 적으면 ledger가 하지 않은 쓰기를
+    /// 보고하고, 사용자는 자기 내용이 남았다는 사실을 읽을 방법이 없다.
+    ///
+    /// 지금은 캔버스 단계만 이 값을 낸다.
+    Skipped,
+}
+
+impl StepStatus {
+    /// 이 단계가 끝났는가 — 재시도가 다시 실행하지 않는다.
+    ///
+    /// `Done`과 `Skipped` 둘 다다. `Skipped`를 미완료로 세면 그 항목은 영원히
+    /// `partial`로 보고되고, 매 실행이 같은 결론(쓰지 않는다)에 다시 도달한다
+    /// — 사용자에게는 끝나지 않는 실패로 보인다.
+    pub fn is_settled(self) -> bool {
+        matches!(self, Self::Done | Self::Skipped)
+    }
 }
 
 /// 세 단계의 상태.
@@ -72,11 +92,13 @@ impl Provenance {
         d_tag(&self.catalog_id, &self.item_key)
     }
 
-    /// 세 단계가 모두 `Done`인가.
+    /// 세 단계가 모두 끝났는가.
+    ///
+    /// `Skipped`도 끝난 것으로 센다 — 이유는 [`StepStatus::is_settled`].
     pub fn is_complete(&self) -> bool {
-        self.steps.channel == StepStatus::Done
-            && self.steps.canvas == StepStatus::Done
-            && self.steps.membership == StepStatus::Done
+        self.steps.channel.is_settled()
+            && self.steps.canvas.is_settled()
+            && self.steps.membership.is_settled()
     }
 }
 
@@ -159,6 +181,30 @@ mod tests {
         assert!(p.is_complete());
     }
 
+    /// 내용이 있어 건너뛴 캔버스 단계는 **끝난** 것이다.
+    ///
+    /// 미완료로 세면 그 항목은 매 실행마다 `resume`으로 다시 들어와 영원히
+    /// `partial`을 보고한다 — 재시도가 도달할 수 있는 결론은 "쓰지 않는다"
+    /// 하나뿐인데도.
+    #[test]
+    fn skipped_canvas_counts_as_complete() {
+        let mut p = sample();
+        p.steps = StepStates {
+            channel: StepStatus::Done,
+            canvas: StepStatus::Skipped,
+            membership: StepStatus::Done,
+        };
+        assert!(p.is_complete());
+    }
+
+    #[test]
+    fn only_done_and_skipped_are_settled() {
+        assert!(StepStatus::Done.is_settled());
+        assert!(StepStatus::Skipped.is_settled());
+        assert!(!StepStatus::Pending.is_settled());
+        assert!(!StepStatus::Failed.is_settled());
+    }
+
     #[test]
     fn partial_steps_are_not_complete() {
         let mut p = sample();
@@ -220,5 +266,40 @@ mod tests {
             "kind 39500 wire format changed (field names or enum spellings) — \
              this orphans already-published provenance events, see doc comment above"
         );
+    }
+
+    /// `golden_json_matches_known_wire_format` 위에 얹는 짝. 그쪽 리터럴은
+    /// `done`·`failed`·`pending` 셋만 지나가므로 `skipped` 철자는 어디에도
+    /// 고정되지 않는다 — 그런데 이 값도 relay에 실려 나가고 다음 실행이 다시
+    /// 읽는다. 철자가 바뀌면 이미 발행된 `skipped` 증명서가 파싱되지 않고,
+    /// 그 항목은 "적용한 적 없음"으로 보여 지켜 둔 사용자 캔버스 위로 시작
+    /// 캔버스가 다시 내려간다. 위 golden과 같은 규칙이다 — 실패를 없애려고
+    /// 이 리터럴을 고치지 말 것.
+    #[test]
+    fn golden_json_pins_the_skipped_spelling() {
+        let mut p = sample();
+        p.steps = StepStates {
+            channel: StepStatus::Done,
+            canvas: StepStatus::Skipped,
+            membership: StepStatus::Done,
+        };
+
+        let actual = serde_json::to_value(&p).expect("serialize to Value");
+        assert_eq!(
+            actual["steps"],
+            serde_json::json!({
+                "channel": "done",
+                "canvas": "skipped",
+                "membership": "done"
+            }),
+            "kind 39500의 `skipped` 철자가 바뀌었다 — 이미 발행된 증명서가 \
+             파싱되지 않고 지켜 둔 캔버스가 다시 덮어써진다"
+        );
+
+        // 되읽기까지 확인한다. 직렬화만 보면 `Deserialize` 쪽이 이 철자를
+        // 받지 못해도 통과한다 — 그런데 이 값을 실제로 읽는 것은 **다음
+        // 실행의 preflight**다.
+        let back: Provenance = serde_json::from_value(actual).expect("skipped가 되읽어져야 한다");
+        assert_eq!(back.steps.canvas, StepStatus::Skipped);
     }
 }

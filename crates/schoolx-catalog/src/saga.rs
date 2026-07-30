@@ -5,6 +5,9 @@
 //!
 //! **실패해도 되돌리지 않는다.** 채널을 만든 뒤 캔버스에서 실패하면 채널을
 //! 지우지 않고 상태만 기록한다. 재시도가 캔버스부터 이어서 한다.
+//!
+//! **내용이 있는 캔버스는 덮어쓰지 않는다.** 캔버스 단계는 쓰기 전에 그 방의
+//! 현재 캔버스를 읽고, 지켜야 할 내용이 있으면 쓰지 않고 `skipped`로 적는다.
 
 use crate::catalog::Catalog;
 use crate::channel_id::derive_channel_id;
@@ -247,11 +250,43 @@ async fn apply_item(
         }
     }
 
-    // 단계 2 — 시작 캔버스.
-    if error.is_none() && provenance.steps.canvas != StepStatus::Done {
-        match effects.set_canvas(channel_id, &item.canvas).await {
-            Ok(()) => provenance.steps.canvas = StepStatus::Done,
+    // 단계 2 — 시작 캔버스. **내용이 있는 캔버스는 덮어쓰지 않는다.**
+    //
+    // 위 owner 게이트는 *누가* 써도 되는가만 가른다. 쓸 권한이 있어도 그
+    // 방에 지켜야 할 내용이 있을 수 있다 — 캔버스 단계가 미완료로 남는 것은
+    // 부분 실패의 정상적인 결과이고(§8 「실패해도 되돌리지 않는다」), 그 사이
+    // 팀이 그 방을 쓰기 시작하는 것도 정상이다. 그 상태에서 관리자가 재시도를
+    // 돌리면, 조건 없이 쓰는 saga는 팀이 써 둔 내용을 catalog 기본값으로
+    // 지운다. 되돌릴 수 없다.
+    //
+    // 그래서 쓰기 전에 현재 캔버스를 읽는다. 읽기를 이번 실행이 만든 방까지
+    // 포함해 **무조건** 하는 이유는 규칙을 하나로 두기 위해서다 — 방금 만든
+    // 방은 어차피 비어 있는 것으로 읽힌다.
+    if error.is_none() && !provenance.steps.canvas.is_settled() {
+        match effects.read_canvas(channel_id).await {
+            Ok(Some(existing)) if !existing.trim().is_empty() => {
+                // 쓰지 않았다는 사실을 `Done`과 **구별해서** 남긴다. 조용히
+                // 넘어가면 ledger는 catalog 캔버스를 넣은 것처럼 보이고,
+                // 사용자는 자기 내용이 그대로 남았다는 사실도 이 항목이
+                // 왜 catalog와 다른지도 읽을 방법이 없다.
+                provenance.steps.canvas = StepStatus::Skipped;
+            }
+            // 공백만 있는 캔버스는 지켜야 할 내용이 아니다. 그걸 내용으로
+            // 세면 사실상 비어 있는 방에 시작 캔버스가 영영 들어가지 않는다.
+            Ok(_) => match effects.set_canvas(channel_id, &item.canvas).await {
+                Ok(()) => provenance.steps.canvas = StepStatus::Done,
+                Err(e) => {
+                    provenance.steps.canvas = StepStatus::Failed;
+                    error = Some(e.0);
+                }
+            },
             Err(e) => {
+                // 지켜야 할 내용이 있는지 **모르는** 채로는 쓰지 않는다.
+                // 위 owner 확인 실패와 같은 규칙이다: 잘못 쓰면 되돌릴 수
+                // 없고, 쓰지 않으면 잃는 것은 이번 실행의 진행뿐이다.
+                // `Failed`로 남으므로 다음 실행이 `resume`으로 들어와 이
+                // 단계부터 이어서 하고 그때 다시 묻는다 — 재시도가 막히지
+                // 않는다.
                 provenance.steps.canvas = StepStatus::Failed;
                 error = Some(e.0);
             }
@@ -349,10 +384,25 @@ mod tests {
     fn seed_team_canvas(fx: &FakeEffects, channel_id: Uuid) {
         // catalog 값과 같으면 덮어써도 assert가 통과한다.
         assert_ne!(TEAM_CANVAS, canvas_of("meeting"));
-        fx.canvases
-            .lock()
-            .expect("lock")
-            .insert(channel_id, TEAM_CANVAS.to_string());
+        fx.seed_canvas(channel_id, TEAM_CANVAS);
+    }
+
+    /// saga가 그 방에 캔버스를 **쓰지 않았다**는 것을 두 각도에서 확인한다.
+    ///
+    /// 저장된 값만 보면 saga가 같은 값을 다시 쓴 경우와 구별되지 않고,
+    /// 호출 횟수만 보면 어떤 값이 남았는지 알 수 없다. 덮어쓰기 금지가 이
+    /// 변경의 전부이므로 둘 다 본다.
+    fn assert_canvas_untouched(fx: &FakeEffects, channel_id: Uuid, expected: &str) {
+        assert_eq!(
+            fx.canvases.lock().expect("lock").get(&channel_id),
+            Some(&expected.to_string()),
+            "이미 내용이 있는 캔버스를 덮어썼다"
+        );
+        assert_eq!(
+            fx.call_count("set_canvas"),
+            0,
+            "내용이 있는 방에 set_canvas를 보냈다"
+        );
     }
 
     /// 이미 적용됐거나 적용 중이던 항목을 세대 1로 시드한다.
@@ -671,11 +721,15 @@ mod tests {
         assert_eq!(entry.outcome, Outcome::Applied);
         assert_eq!(entry.steps.membership, StepStatus::Done);
         assert_eq!(entry.error, None);
-        // 미완료였던 캔버스 단계를 **실제로** 이어서 했다.
+        // 권한을 받았다고 팀이 써 둔 내용을 지우지는 않는다. owner 게이트는
+        // *누가* 써도 되는가만 가르고, 그 다음 질문 — 지켜야 할 내용이 있는가
+        // — 은 캔버스 단계가 한다. 이 재시도는 그 둘이 모두 걸리는 유일한
+        // 지점이다: 게이트는 통과하고 캔버스는 건너뛴다.
+        assert_canvas_untouched(&fx, channel_id, TEAM_CANVAS);
         assert_eq!(
-            fx.canvases.lock().expect("lock").get(&channel_id),
-            Some(&canvas_of("meeting").to_string()),
-            "재시도가 시작 캔버스를 쓰지 않았다"
+            entry.steps.canvas,
+            StepStatus::Skipped,
+            "쓰지 않았는데 `done`으로 보고했다"
         );
         // 아무것도 새로 만들지 않았다.
         assert_eq!(fx.channels.lock().expect("lock").len(), 1);
@@ -738,18 +792,215 @@ mod tests {
             assert_eq!(stored[0].1.steps, steps);
         }
 
-        // relay가 돌아오면 재시도가 이어서 끝난다.
+        // relay가 돌아오면 재시도가 이어서 끝난다 — 팀이 써 둔 캔버스는
+        // 그대로 두고서다. owner 확인이 통과했다는 것과 그 방에 써도 된다는
+        // 것은 다른 이야기다.
         let retry = apply(crate::builtin(), &fx, &["meeting".to_string()])
             .await
             .expect("retry");
         let entry = item(&retry, "meeting");
         assert_eq!(entry.decision, "resume");
         assert_eq!(entry.outcome, Outcome::Applied);
+        assert_canvas_untouched(&fx, channel_id, TEAM_CANVAS);
+        assert_eq!(entry.steps.canvas, StepStatus::Skipped);
+        assert_eq!(fx.channels.lock().expect("lock").len(), 1);
+    }
+
+    /// 재개가 **내용이 있는** 캔버스를 덮어쓰지 않는다.
+    ///
+    /// owner 게이트가 덮지 못하는 자리다. 게이트는 *누가* 써도 되는가만
+    /// 가르는데, 여기서는 적용자가 진짜 owner다 — 그런데도 써서는 안 된다.
+    ///
+    /// 도달 경로는 부분 실패의 정상적인 결과다(§8 「실패해도 되돌리지
+    /// 않는다」). 관리자가 적용을 돌렸는데 캔버스 단계가 일시적으로 실패해
+    /// 증명서가 `channel: done, canvas: failed`로 남는다. 팀이 그 방을 쓰기
+    /// 시작해 자기 내용을 채운다. 관리자가 재시도를 돌린다 — 조건 없이 쓰는
+    /// saga는 이 지점에서 팀의 내용을 catalog 기본값으로 지운다. 되돌릴 수
+    /// 없고, 이것이 Phase 3 수용 기준 「catalog upgrade가 사용자 수정 채널이나
+    /// 사용자 template copy를 덮어쓰거나 삭제하지 않는다」가 말하는 바로 그
+    /// 사고다.
+    #[tokio::test]
+    async fn resume_does_not_overwrite_a_canvas_that_has_content() {
+        let fx = FakeEffects::new();
+        let steps = StepStates {
+            channel: StepStatus::Done,
+            canvas: StepStatus::Failed,
+            membership: StepStatus::Pending,
+        };
+        // `seed_applied`는 적용자를 owner로 넣는다 — 권한 문제가 아니라는
+        // 것이 이 테스트의 전제다.
+        let channel_id = seed_applied(&fx, "meeting", "메인 회의방", steps);
+        seed_team_canvas(&fx, channel_id);
+
+        let ledger = apply(crate::builtin(), &fx, &["meeting".to_string()])
+            .await
+            .expect("apply");
+
+        assert_canvas_untouched(&fx, channel_id, TEAM_CANVAS);
+
+        let entry = item(&ledger, "meeting");
+        // 건너뛴 것을 `done`으로 적으면 ledger가 하지 않은 쓰기를 보고한다 —
+        // 사용자는 자기 내용이 남았다는 사실도, 이 방이 catalog와 다른
+        // 이유도 읽을 방법이 없다.
+        assert_eq!(
+            entry.steps.canvas,
+            StepStatus::Skipped,
+            "쓰지 않았는데 `done`으로 보고했다"
+        );
+        assert_eq!(entry.decision, "resume");
+        assert_eq!(entry.error, None);
+        // 조용히 아무것도 하지 않은 것이 아니다 — 남은 단계는 끝냈다.
+        assert_eq!(entry.steps.membership, StepStatus::Done);
+        assert_eq!(entry.outcome, Outcome::Applied);
+
+        // 건너뛴 사실이 durable하게 남는다. 여기까지 확인해야 다음 실행이
+        // 이 항목을 다시 미완료로 보지 않는다.
+        {
+            let stored = fx.provenance.lock().expect("lock");
+            assert_eq!(stored.len(), 1, "NIP-33 LWW — 항목당 정확히 하나다");
+            assert_eq!(stored[0].1.steps.canvas, StepStatus::Skipped);
+        }
+
+        // 두 번째 실행은 아무것도 하지 않는다. `skipped`를 미완료로 세면
+        // 이 항목은 영원히 `resume`/`partial`로 보이고, 재시도가 도달할 수
+        // 있는 결론은 "쓰지 않는다" 하나뿐인데도 사용자에게는 끝나지 않는
+        // 실패로 보인다.
+        let reads_before = fx.call_count("read_canvas");
+        let second = apply(crate::builtin(), &fx, &["meeting".to_string()])
+            .await
+            .expect("second");
+        let entry = item(&second, "meeting");
+        assert_eq!(entry.decision, "no_change");
+        assert_eq!(entry.outcome, Outcome::Unchanged);
+        assert_canvas_untouched(&fx, channel_id, TEAM_CANVAS);
+        assert_eq!(
+            fx.call_count("read_canvas"),
+            reads_before,
+            "끝난 캔버스 단계를 다시 실행했다"
+        );
+    }
+
+    /// 같은 재개인데 방이 비어 있으면 시작 캔버스를 **쓴다**.
+    ///
+    /// 위 테스트와 이 테스트의 차이는 캔버스에 내용이 있느냐 하나뿐이다.
+    /// 이게 없으면 "캔버스를 아예 쓰지 않는" saga도 위 테스트를 통과한다 —
+    /// 그러면 부분 실패한 항목이 영영 시작 캔버스를 받지 못한다.
+    #[tokio::test]
+    async fn resume_writes_the_starter_canvas_when_the_room_is_empty() {
+        let fx = FakeEffects::new();
+        let channel_id = seed_applied(
+            &fx,
+            "meeting",
+            "메인 회의방",
+            StepStates {
+                channel: StepStatus::Done,
+                canvas: StepStatus::Failed,
+                membership: StepStatus::Pending,
+            },
+        );
+        // 캔버스를 심지 않는다 — 방은 있는데 캔버스 이벤트가 없는 상태다.
+
+        let ledger = apply(crate::builtin(), &fx, &["meeting".to_string()])
+            .await
+            .expect("apply");
+
+        let entry = item(&ledger, "meeting");
+        assert_eq!(entry.outcome, Outcome::Applied);
+        assert_eq!(entry.steps.canvas, StepStatus::Done);
         assert_eq!(
             fx.canvases.lock().expect("lock").get(&channel_id),
-            Some(&canvas_of("meeting").to_string())
+            Some(&canvas_of("meeting").to_string()),
+            "빈 방에 시작 캔버스를 쓰지 않았다"
         );
-        assert_eq!(fx.channels.lock().expect("lock").len(), 1);
+        assert_eq!(fx.call_count("set_canvas"), 1);
+    }
+
+    /// 공백만 있는 캔버스는 지켜야 할 내용이 아니다.
+    ///
+    /// 캔버스 이벤트는 있지만 본문이 공백뿐인 방 — 사람이 열어 보면 비어
+    /// 있다. `is_empty()`로만 판정하면 이런 방은 영영 시작 캔버스를 받지
+    /// 못하고, 사용자 눈에는 catalog 적용이 그 항목만 조용히 건너뛴 것으로
+    /// 보인다.
+    #[tokio::test]
+    async fn a_blank_canvas_is_treated_as_empty_and_gets_the_starter_text() {
+        let fx = FakeEffects::new();
+        let channel_id = seed_applied(
+            &fx,
+            "meeting",
+            "메인 회의방",
+            StepStates {
+                channel: StepStatus::Done,
+                canvas: StepStatus::Failed,
+                membership: StepStatus::Pending,
+            },
+        );
+        fx.seed_canvas(channel_id, "   \n\t \n");
+
+        let ledger = apply(crate::builtin(), &fx, &["meeting".to_string()])
+            .await
+            .expect("apply");
+
+        let entry = item(&ledger, "meeting");
+        assert_eq!(entry.steps.canvas, StepStatus::Done);
+        assert_eq!(entry.outcome, Outcome::Applied);
+        assert_eq!(
+            fx.canvases.lock().expect("lock").get(&channel_id),
+            Some(&canvas_of("meeting").to_string()),
+            "공백뿐인 캔버스를 지켜야 할 내용으로 셌다"
+        );
+    }
+
+    /// 내용이 있는지 **모르는** 채로는 쓰지 않는다.
+    ///
+    /// 읽기가 실패했을 때 그냥 쓰면, relay가 잠깐 느린 것만으로 팀의 캔버스가
+    /// 사라진다 — 이 변경이 막으려는 사고 그 자체다. 반대로 쓰지 않으면 잃는
+    /// 것은 이번 실행의 진행뿐이고, 그건 되돌릴 수 있다. owner 확인 실패를
+    /// 다루는 규칙(`resume_ownership_check_error_writes_nothing`)과 같다.
+    ///
+    /// 대신 조용히 넘어가서도 안 된다: `failed` + 사유를 실어야 다음 실행이
+    /// `resume`으로 들어와 이 단계부터 이어서 하고 그때 다시 묻는다.
+    #[tokio::test]
+    async fn canvas_read_failure_writes_nothing_and_retry_makes_progress() {
+        let fx = FakeEffects::new();
+        let steps = StepStates {
+            channel: StepStatus::Done,
+            canvas: StepStatus::Failed,
+            membership: StepStatus::Pending,
+        };
+        let channel_id = seed_applied(&fx, "meeting", "메인 회의방", steps);
+        seed_team_canvas(&fx, channel_id);
+        fx.fail_next("read_canvas");
+
+        let ledger = apply(crate::builtin(), &fx, &["meeting".to_string()])
+            .await
+            .expect("apply");
+
+        assert_canvas_untouched(&fx, channel_id, TEAM_CANVAS);
+
+        let entry = item(&ledger, "meeting");
+        assert_eq!(entry.outcome, Outcome::Partial);
+        assert_eq!(entry.steps.canvas, StepStatus::Failed);
+        assert!(entry.error.is_some(), "읽기 실패 사유가 실려야 한다");
+        // 뒤 단계로 넘어가지 않았다.
+        assert_eq!(entry.steps.membership, StepStatus::Pending);
+        // 이전 실행이 남긴 진행을 지우지 않았다 — 재시도가 여기서 이어서 한다.
+        {
+            let stored = fx.provenance.lock().expect("lock");
+            assert_eq!(stored.len(), 1);
+            assert_eq!(stored[0].1.steps, steps);
+        }
+
+        // relay가 돌아오면 재시도가 막히지 않고 끝난다 — 여전히 쓰지 않고서다.
+        let retry = apply(crate::builtin(), &fx, &["meeting".to_string()])
+            .await
+            .expect("retry");
+        // 되돌릴 수 없는 쪽을 먼저 확인한다 — 단계 상태만 보면 팀의 내용을
+        // 지운 **뒤에** 끝난 saga도 여기까지는 같은 값을 낸다.
+        assert_canvas_untouched(&fx, channel_id, TEAM_CANVAS);
+        let entry = item(&retry, "meeting");
+        assert_eq!(entry.decision, "resume");
+        assert_eq!(entry.outcome, Outcome::Applied);
+        assert_eq!(entry.steps.canvas, StepStatus::Skipped);
     }
 
     #[tokio::test]
@@ -1189,6 +1440,23 @@ mod tests {
                     user_action: Some(UserAction::RequestOwnership),
                     error: None,
                 },
+                // 캔버스에 이미 내용이 있어 쓰지 않은 항목. `applied`인데
+                // 캔버스 단계만 `skipped`인 이 조합이, 사용자가 "이 방은
+                // 시작 캔버스를 받지 않았다"를 읽을 수 있는 유일한 자리다.
+                LedgerItem {
+                    item_key: "notices".into(),
+                    decision: "resume".into(),
+                    channel_id: Some(Uuid::nil()),
+                    generation: 1,
+                    steps: StepStates {
+                        channel: StepStatus::Done,
+                        canvas: StepStatus::Skipped,
+                        membership: StepStatus::Done,
+                    },
+                    outcome: Outcome::Applied,
+                    user_action: None,
+                    error: None,
+                },
             ],
         };
 
@@ -1265,6 +1533,16 @@ mod tests {
                     "steps": { "channel": "pending", "canvas": "pending", "membership": "pending" },
                     "outcome": "blocked",
                     "user_action": "request_ownership",
+                    "error": null
+                },
+                {
+                    "item_key": "notices",
+                    "decision": "resume",
+                    "channel_id": "00000000-0000-0000-0000-000000000000",
+                    "generation": 1,
+                    "steps": { "channel": "done", "canvas": "skipped", "membership": "done" },
+                    "outcome": "applied",
+                    "user_action": null,
                     "error": null
                 }
             ]

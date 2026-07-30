@@ -64,6 +64,19 @@ pub trait CatalogEffects: Send + Sync {
     /// 채널을 만든다. 이미 점유된 ID면 `Duplicate`.
     async fn create_channel(&self, spec: ChannelSpec) -> Result<CreateOutcome, EffectError>;
 
+    /// 이 채널의 현재 캔버스 본문. 캔버스가 아직 없으면 `None`.
+    ///
+    /// saga가 시작 캔버스를 쓰기 **전에** 부른다. 캔버스 단계는 provenance가
+    /// 미완료라고 적혀 있으면 다시 실행되는데, 부분 실패로 그 상태가 남는
+    /// 것은 정상이고 그 사이 팀이 방을 쓰기 시작하는 것도 정상이다. 캔버스
+    /// 쓰기는 되돌릴 수 없으므로, 지켜야 할 내용이 있는지 먼저 묻지 않으면
+    /// 재시도 한 번이 팀이 써 둔 내용을 지운다.
+    ///
+    /// `Ok(None)`은 "채널은 있는데 캔버스가 없다"이지 오류가 아니다. 읽지
+    /// 못한 것은 `Err`로만 표현한다 — 둘을 같은 값으로 뭉개면 relay 오류가
+    /// "비어 있음"으로 둔갑해 saga가 그대로 덮어쓴다.
+    async fn read_canvas(&self, channel_id: Uuid) -> Result<Option<String>, EffectError>;
+
     /// 시작 캔버스를 적용한다.
     async fn set_canvas(&self, channel_id: Uuid, content: &str) -> Result<(), EffectError>;
 
@@ -188,6 +201,19 @@ pub(crate) mod fake {
                 .insert((op.to_string(), nth));
         }
 
+        /// 이번 실행 **이전부터** 그 방에 있던 캔버스 내용을 심는다.
+        ///
+        /// `set_canvas`를 대신 부르면 `calls`가 올라가 "saga가 쓰지
+        /// 않았다"를 호출 횟수로 관측할 수 없게 된다. 그래서 저장소에 직접
+        /// 넣는다 — `channels`·`owned`를 직접 채워 이전 실행의 흔적을 만드는
+        /// 다른 시딩과 같은 방식이다.
+        pub(crate) fn seed_canvas(&self, channel_id: Uuid, content: &str) {
+            self.canvases
+                .lock()
+                .expect("lock")
+                .insert(channel_id, content.to_string());
+        }
+
         /// 지금까지 `op`가 호출된 횟수.
         pub(crate) fn call_count(&self, op: &str) -> u32 {
             self.calls
@@ -282,6 +308,21 @@ pub(crate) mod fake {
             // 채널도 남는다 — 재시도가 `Duplicate` + 접근 가능을 만난다.
             self.take_post_commit_failure("create_channel")?;
             Ok(CreateOutcome::Created)
+        }
+
+        // `canvases`에 항목이 없는 것이 곧 "캔버스가 아직 없다"이다 —
+        // 실제 relay에서 kind 40100 이벤트가 하나도 없는 상태에 대응한다.
+        // 빈 문자열로 뭉개지 않는다: 그러면 "캔버스 이벤트가 없다"와 "본문이
+        // 빈 캔버스 이벤트가 있다"가 fake에서 구별되지 않아, saga가 그 둘을
+        // 어떻게 다루는지 테스트가 관측할 수 없다.
+        async fn read_canvas(&self, channel_id: Uuid) -> Result<Option<String>, EffectError> {
+            self.take_failure("read_canvas")?;
+            Ok(self
+                .canvases
+                .lock()
+                .expect("lock")
+                .get(&channel_id)
+                .cloned())
         }
 
         async fn set_canvas(&self, channel_id: Uuid, content: &str) -> Result<(), EffectError> {

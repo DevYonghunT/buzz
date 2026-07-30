@@ -25,6 +25,32 @@ fn is_duplicate_channel_rejection(error: &str) -> bool {
     error.contains("relay rejected event:") && error.contains("duplicate: channel already exists")
 }
 
+/// `commands::canvas::get_canvas`의 JSON 응답을 `CatalogEffects::read_canvas`의
+/// 계약으로 옮긴다.
+///
+/// `get_canvas`는 캔버스 이벤트가 하나도 없으면 오류가 아니라
+/// `{"content": "", "event_id": null, ...}`을 돌려준다 — "채널은 있는데
+/// 캔버스가 없다"는 정상 상태이므로 `Ok(None)`이다. `event_id`가 있는데
+/// `content`를 문자열로 읽을 수 없으면 그건 "비어 있다"가 **아니라**
+/// 모르겠다이다. 빈 문자열로 뭉개면 saga가 그 방을 비었다고 보고 사용자
+/// 내용 위에 시작 캔버스를 쓴다 — 그래서 오류로 돌린다.
+fn canvas_content_from_response(
+    response: &serde_json::Value,
+) -> Result<Option<String>, EffectError> {
+    if response
+        .get("event_id")
+        .is_none_or(serde_json::Value::is_null)
+    {
+        return Ok(None);
+    }
+
+    response
+        .get("content")
+        .and_then(serde_json::Value::as_str)
+        .map(|content| Some(content.to_string()))
+        .ok_or_else(|| EffectError("캔버스 응답에 content 문자열이 없습니다".to_string()))
+}
+
 /// `CatalogEffects`를 이 데스크톱 백엔드의 relay 접근으로 구현한다.
 ///
 /// 각 메서드는 같은 `commands` 디렉터리의 기존 채널/캔버스 명령이 쓰는 헬퍼를
@@ -126,6 +152,16 @@ impl CatalogEffects for RelayEffects<'_> {
             Err(error) if is_duplicate_channel_rejection(&error) => Ok(CreateOutcome::Duplicate),
             Err(error) => Err(EffectError(error)),
         }
+    }
+
+    async fn read_canvas(&self, channel_id: Uuid) -> Result<Option<String>, EffectError> {
+        // 새 relay 경로를 만들지 않는다 — 기존 캔버스 읽기 명령을 그대로
+        // 쓴다. 매핑은 `canvas_content_from_response`가 한다.
+        let response =
+            crate::commands::canvas::get_canvas(channel_id.to_string(), self.state.clone())
+                .await
+                .map_err(EffectError)?;
+        canvas_content_from_response(&response)
     }
 
     async fn set_canvas(&self, channel_id: Uuid, content: &str) -> Result<(), EffectError> {
@@ -252,5 +288,65 @@ mod tests {
         assert!(!is_duplicate_channel_rejection(
             "relay unreachable: could not connect to relay"
         ));
+    }
+
+    /// `commands::canvas::get_canvas`가 캔버스 이벤트가 하나도 없을 때 실제로
+    /// 내는 응답 그대로다. 채널은 있는데 캔버스가 없는 것은 오류가 아니므로
+    /// `Ok(None)`이어야 한다 — 오류로 돌리면 새 방마다 캔버스 단계가
+    /// `failed`가 되어 시작 캔버스가 영영 들어가지 않는다.
+    #[test]
+    fn missing_canvas_event_reads_as_no_canvas() {
+        let response = serde_json::json!({
+            "content": "",
+            "event_id": null,
+            "updated_at": null,
+            "author": null,
+        });
+        assert_eq!(canvas_content_from_response(&response), Ok(None));
+    }
+
+    #[test]
+    fn existing_canvas_reads_as_its_content() {
+        let response = serde_json::json!({
+            "content": "팀이 직접 정리한 회의 규칙",
+            "event_id": "abc123",
+            "updated_at": 1_770_000_000_u64,
+            "author": "deadbeef",
+        });
+        assert_eq!(
+            canvas_content_from_response(&response),
+            Ok(Some("팀이 직접 정리한 회의 규칙".to_string()))
+        );
+    }
+
+    /// 본문이 빈 캔버스 **이벤트**는 이벤트가 없는 것과 다르다. 여기서는
+    /// 있는 그대로 `Some("")`로 옮기고, "지켜야 할 내용인가"는 saga가
+    /// 판단한다 (`schoolx-catalog`의 캔버스 단계). 어댑터가 미리 `None`으로
+    /// 뭉개면 두 상태가 saga에 도착하기도 전에 사라진다.
+    #[test]
+    fn empty_content_with_an_event_is_reported_as_empty_not_missing() {
+        let response = serde_json::json!({
+            "content": "",
+            "event_id": "abc123",
+            "updated_at": 1_770_000_000_u64,
+            "author": "deadbeef",
+        });
+        assert_eq!(
+            canvas_content_from_response(&response),
+            Ok(Some(String::new()))
+        );
+    }
+
+    /// 캔버스 이벤트는 있는데 본문을 문자열로 읽을 수 없다 — 응답 모양이
+    /// 우리가 아는 것과 다르다. 이건 "비어 있다"가 아니라 **모르겠다**이므로
+    /// 오류여야 한다. `unwrap_or_default()`로 빈 문자열을 지어내면 saga가 그
+    /// 방을 비었다고 보고 사용자 캔버스 위에 시작 캔버스를 덮어쓴다.
+    #[test]
+    fn unreadable_content_is_an_error_not_an_empty_canvas() {
+        let response = serde_json::json!({
+            "content": 42,
+            "event_id": "abc123",
+        });
+        assert!(canvas_content_from_response(&response).is_err());
     }
 }
