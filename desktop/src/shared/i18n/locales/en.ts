@@ -125,5 +125,25 @@ export const en = {
     // gone, so no name survives anywhere. The internal key is shown beneath
     // it rather than in the name's place.
     unnamedItem: "Name unknown",
+    // Labels the bare `item_key` shown under an unnamed (`retired`) item, so
+    // it reads as a deliberate reference identifier rather than leftover
+    // debug output.
+    itemKeyLabel: "Reference ID: {{key}}",
+    // Notes shown next to a ledger row's canvas step outcome. Keyed by the
+    // same wire values as `CatalogStepStatus` (provenance.rs) — see
+    // `canvasStepNoteKey` in WorkspaceCatalogSettingsCard.tsx. Only the two
+    // values worth surfacing to an administrator get an entry; `done`,
+    // `pending`, and `failed` render no note here.
+    canvasStep: {
+      // `StepStatus::Skipped`: the room already had content, so the starter
+      // canvas was deliberately not written. The fact that matters to an
+      // administrator is that nothing was lost — not the internal step name.
+      skipped: "This room already had content, so it was left untouched.",
+      // `StepStatus::Unrecognized`: a newer app version recorded this step
+      // with a value this build does not know. Must not claim "kept" or
+      // "written" — this build genuinely does not know which happened.
+      unrecognized:
+        "A newer version of the app recorded this step — this version can't show what happened.",
+    },
   },
 } as const;

@@ -12,6 +12,7 @@ import type {
   CatalogLedgerItem,
   CatalogOutcome,
   CatalogPreflightItem,
+  CatalogStepStatus,
 } from "@/shared/api/tauriWorkspaceCatalog";
 import { cn } from "@/shared/lib/cn";
 import { Alert, AlertDescription } from "@/shared/ui/alert";
@@ -73,6 +74,37 @@ function isOpenVisibility(_item: CatalogPreflightItem): boolean {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * The two {@link CatalogStepStatus} values worth a note next to the canvas
+ * step, translated to a key under `catalog.canvasStep.*`.
+ *
+ * `"skipped"` and `"unrecognized"` both mean "the starter canvas was not
+ * written by this run" but for different reasons the administrator needs to
+ * read differently:
+ * - `"skipped"`: the saga looked and found existing content, so it
+ *   deliberately left the room alone. See `StepStatus::Skipped` in
+ *   `provenance.rs` — reporting this the same as `"done"` would hide the
+ *   one fact that matters here, that the team's content survived.
+ * - `"unrecognized"`: a newer build of the app wrote a value this build
+ *   does not know (`StepStatus::Unrecognized`, the `#[serde(other)]`
+ *   catch-all). This build genuinely does not know what happened, so the
+ *   copy must not claim either "kept" or "written" — only that a newer
+ *   version recorded something here.
+ *
+ * `"pending"`, `"done"`, and `"failed"` get no separate note here: `"done"`
+ * is the unremarkable default already implied by the outcome/decision
+ * badges, and `"pending"`/`"failed"` are covered by the outcome badge and
+ * `ledgerItem.error`.
+ */
+function canvasStepNoteKey(
+  status: CatalogStepStatus | undefined,
+): `catalog.canvasStep.${"skipped" | "unrecognized"}` | null {
+  if (status === "skipped" || status === "unrecognized") {
+    return `catalog.canvasStep.${status}`;
+  }
+  return null;
 }
 
 export function WorkspaceCatalogSettingsCard() {
@@ -185,6 +217,7 @@ function CatalogItemRow({
 }) {
   const { t } = useTranslation();
   const checkboxId = `workspace-catalog-item-${item.item_key}`;
+  const canvasNoteKey = canvasStepNoteKey(ledgerItem?.steps.canvas);
 
   return (
     <div
@@ -226,7 +259,7 @@ function CatalogItemRow({
               className="text-2xs text-muted-foreground"
               data-testid={`catalog-item-key-${item.item_key}`}
             >
-              {item.item_key}
+              {t("catalog.itemKeyLabel", { key: item.item_key })}
             </p>
           ) : null}
           {item.renamed ? (
@@ -235,8 +268,11 @@ function CatalogItemRow({
             </p>
           ) : null}
           {isOpenVisibility(item) ? (
-            <Alert data-testid={`catalog-open-warning-${item.item_key}`}>
-              <AlertDescription className="space-y-1">
+            <Alert
+              className="border-amber-500/30 bg-amber-500/10"
+              data-testid={`catalog-open-warning-${item.item_key}`}
+            >
+              <AlertDescription className="space-y-1 text-amber-800 dark:text-amber-300">
                 <p>{t("catalog.openWarningScope")}</p>
                 <p>{t("catalog.openWarningAgents")}</p>
               </AlertDescription>
@@ -247,9 +283,29 @@ function CatalogItemRow({
 
       {ledgerItem ? (
         <div className="mt-3 space-y-2 border-border/50 border-t pt-3">
-          <Badge variant={OUTCOME_BADGE_VARIANT[ledgerItem.outcome]}>
-            {t(`catalog.outcome.${ledgerItem.outcome}`)}
-          </Badge>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant={OUTCOME_BADGE_VARIANT[ledgerItem.outcome]}>
+              {t(`catalog.outcome.${ledgerItem.outcome}`)}
+            </Badge>
+            {/*
+              `outcome` alone conflates two cases that both end in "applied":
+              a room this run created vs. one it adopted from a prior partial
+              run (`ADOPTED_DECISION` in ledger.rs). The decision badge is the
+              same vocabulary already shown pre-apply above, so an
+              administrator reads it the same way in both places.
+            */}
+            <Badge variant={DECISION_BADGE_VARIANT[ledgerItem.decision]}>
+              {t(`catalog.decision.${ledgerItem.decision}`)}
+            </Badge>
+          </div>
+          {canvasNoteKey ? (
+            <p
+              className="text-xs text-muted-foreground"
+              data-testid={`catalog-canvas-note-${item.item_key}`}
+            >
+              {t(canvasNoteKey)}
+            </p>
+          ) : null}
           {ledgerItem.user_action ? (
             <Alert
               className="border-amber-500/30 bg-amber-500/10"

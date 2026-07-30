@@ -114,5 +114,24 @@ export const ko = {
     // `retired` 항목의 이름 자리에 들어간다 — catalog에서 빠져 이름이 남아
     // 있는 곳이 없다. 내부 키는 이름 대신이 아니라 그 아래에 따로 보여준다.
     unnamedItem: "이름을 알 수 없음",
+    // 이름 없는(`retired`) 항목 아래 보이는 `item_key`에 붙는 라벨이다 —
+    // 라벨이 없으면 영문 슬러그가 디버그 출력처럼 보인다.
+    itemKeyLabel: "참조 ID: {{key}}",
+    // ledger 행의 캔버스 단계 결과에 붙는 설명이다. `CatalogStepStatus`
+    // (provenance.rs)와 같은 철자로 키를 삼는다 —
+    // WorkspaceCatalogSettingsCard.tsx의 `canvasStepNoteKey` 참고. 관리자에게
+    // 알려줄 가치가 있는 두 값만 있다 — `done`·`pending`·`failed`는 여기서
+    // 별도 문구를 내지 않는다.
+    canvasStep: {
+      // `StepStatus::Skipped`: 방에 이미 내용이 있어 시작 캔버스를 일부러
+      // 쓰지 않았다. 관리자에게 중요한 사실은 아무것도 사라지지 않았다는
+      // 것이지, 내부 단계 이름이 아니다.
+      skipped: "이 방에 이미 내용이 있어 그대로 두었습니다.",
+      // `StepStatus::Unrecognized`: 더 최신 버전의 앱이 이 빌드가 모르는
+      // 값을 기록했다. "지켰다"나 "썼다"라고 단정하면 안 된다 — 이 빌드는
+      // 실제로 무슨 일이 있었는지 모른다.
+      unrecognized:
+        "더 최신 버전의 앱이 기록한 단계라 이 버전에서는 결과를 알 수 없습니다.",
+    },
   },
 } as const satisfies TranslationShape<typeof en>;

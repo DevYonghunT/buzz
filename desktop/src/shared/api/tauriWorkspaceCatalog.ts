@@ -51,15 +51,29 @@ export type CatalogPreflightItem = {
 /**
  * `crates/schoolx-catalog/src/provenance.rs`의 `StepStatus`.
  *
- * 네 값이다 — `"skipped"`는 캔버스 단계에만 쓰인다. saga가 쓰기 전에 그
+ * 다섯 값이다 — `"skipped"`는 캔버스 단계에만 쓰인다. saga가 쓰기 전에 그
  * 방의 현재 캔버스를 읽어(`read_canvas` guard), 지켜야 할 사용자 내용이
  * 이미 있으면 캔버스를 덮어쓰지 않고 `skipped`로 남긴다. `done`과 다르다:
  * `done`은 catalog 캔버스가 그 방에 들어갔다는 뜻이고, `skipped`는 들어가지
  * **않았다**는 뜻이다 — `StepStatus::is_settled()`가 재시도에서 이 둘을
- * 같이 "끝남"으로 묶어 취급하는 이유이기도 하다. `#[serde(rename_all =
- * "lowercase")]`가 실제로 내는 네 철자와 맞춘다.
+ * 같이 "끝남"으로 묶어 취급하는 이유이기도 하다.
+ *
+ * `"unrecognized"`는 Rust `#[serde(other)]` catch-all이다 — 이 빌드가 모르는
+ * 값이 적힌 증명서를 **더 새 버전**이 남겼다는 뜻이다. 한 학교에 관리자가
+ * 여럿이고 각자 앱 버전이 다른 것이 정상 상태라 이 값은 예외가 아니라 흔한
+ * 경로다. `is_settled()`가 이 값도 "끝남"으로 센다 — 미완료로 세면 그
+ * 단계(주로 캔버스)를 재실행하게 되고, 그게 곧 최신 버전이 이미 내린 판단을
+ * 구버전이 뒤집는 경로다. 화면에는 "무슨 일이 있었는지 이 버전은 모른다"만
+ * 보여준다 — `done`이나 `skipped`로 지어내지 않는다.
+ *
+ * `#[serde(rename_all = "lowercase")]`가 실제로 내는 다섯 철자와 맞춘다.
  */
-export type CatalogStepStatus = "pending" | "done" | "failed" | "skipped";
+export type CatalogStepStatus =
+  | "pending"
+  | "done"
+  | "failed"
+  | "skipped"
+  | "unrecognized";
 
 export type CatalogStepStates = {
   channel: CatalogStepStatus;
