@@ -11,8 +11,10 @@ use crate::OutputFormat;
 
 /// `buzz catalog list`가 출력하는 catalog 항목 하나.
 ///
-/// `schoolx_catalog::CatalogItem`의 모든 필드를 그대로 옮긴다 — 크레이트
-/// 쪽 구조체가 필드를 더하거나 빼면 이 struct도 맞춰 고쳐야 한다.
+/// `schoolx_catalog::CatalogItem`의 모든 필드를 그대로 옮긴다. 아래 `render`
+/// 함수 내 exhaustive destructuring에서 CatalogItem의 각 필드를 명시적으로
+/// 이름 지어 매핑한다. 새 필드가 추가되면 패턴 매칭이 실패하므로, 이 struct을
+/// 맞춰 수정해야 한다는 컴파일 오류가 강제된다.
 #[derive(Serialize)]
 struct CatalogItemOut<'a> {
     item_key: &'a str,
@@ -42,9 +44,18 @@ fn render(catalog: &schoolx_catalog::Catalog, format: &OutputFormat) -> Result<S
             let items: Vec<CatalogItemCompactOut<'_>> = catalog
                 .items
                 .iter()
-                .map(|item| CatalogItemCompactOut {
-                    item_key: &item.item_key,
-                    name: &item.name,
+                .map(|item| {
+                    // Exhaustive destructuring: CatalogItem의 모든 필드를 명시적으로
+                    // 이름 짓는다. 새 필드가 추가되면 패턴 매칭이 실패한다.
+                    let schoolx_catalog::CatalogItem {
+                        item_key,
+                        name,
+                        description: _,
+                        channel_type: _,
+                        visibility: _,
+                        canvas: _,
+                    } = item;
+                    CatalogItemCompactOut { item_key, name }
                 })
                 .collect();
             serde_json::to_string(&items)
@@ -53,16 +64,28 @@ fn render(catalog: &schoolx_catalog::Catalog, format: &OutputFormat) -> Result<S
             let items: Vec<CatalogItemOut<'_>> = catalog
                 .items
                 .iter()
-                .map(|item| CatalogItemOut {
-                    item_key: &item.item_key,
-                    name: &item.name,
-                    description: &item.description,
-                    channel_type: &item.channel_type,
-                    visibility: item.visibility.as_str(),
-                    canvas: &item.canvas,
+                .map(|item| {
+                    // Exhaustive destructuring: CatalogItem의 모든 필드를 명시적으로
+                    // 이름 짓는다. 새 필드가 추가되면 패턴 매칭이 실패한다.
+                    let schoolx_catalog::CatalogItem {
+                        item_key,
+                        name,
+                        description,
+                        channel_type,
+                        visibility,
+                        canvas,
+                    } = item;
+                    CatalogItemOut {
+                        item_key,
+                        name,
+                        description,
+                        channel_type,
+                        visibility: visibility.as_str(),
+                        canvas,
+                    }
                 })
                 .collect();
-            serde_json::to_string_pretty(&items)
+            serde_json::to_string(&items)
         }
     }
     .map_err(|e| CliError::Other(format!("catalog 직렬화 실패: {e}")))
