@@ -72,6 +72,7 @@ use nostr::{Alphabet, EventBuilder, Filter, Keys, Kind, SingleLetterTag, Tag, Ti
 const WORKSPACE_PROVENANCE_KIND: u16 = 39500;
 const CREATE_GROUP_KIND: u16 = 9007;
 const DELETE_GROUP_KIND: u16 = 9008;
+const PUT_USER_KIND: u16 = 9000;
 
 /// `<catalog_id>:<item_key>` from the brief, reused verbatim across every
 /// test. Safe to repeat: NIP-33 replacement keys on `(kind, pubkey, d_tag)`,
@@ -164,6 +165,23 @@ async fn delete_channel(owner: &Keys, channel_id: uuid::Uuid) {
     );
 }
 
+/// Add `target` to `channel_id` as a member, signed by the channel owner.
+/// Mirrors `e2e_access_matrix.rs::add_member` (kind:9000 NIP-29 PUT_USER).
+async fn add_member(owner: &Keys, channel_id: uuid::Uuid, target: &Keys) {
+    let event = EventBuilder::new(Kind::Custom(PUT_USER_KIND), "")
+        .tags(vec![
+            Tag::parse(["h", &channel_id.to_string()]).unwrap(),
+            Tag::parse(["p", &target.public_key().to_hex()]).unwrap(),
+        ])
+        .sign_with_keys(owner)
+        .unwrap();
+    let body = post_event_as(owner, &event).await;
+    assert!(
+        body["accepted"].as_bool().unwrap_or(false),
+        "add_member not accepted: {body}"
+    );
+}
+
 // ─── provenance publish + read (WS, mirrors e2e_team.rs / e2e_persona.rs) ──
 
 /// The `Provenance` content shape from `crates/schoolx-catalog/src/provenance.rs`,
@@ -224,6 +242,13 @@ fn provenance_filter() -> Filter {
         .custom_tags(SingleLetterTag::lowercase(Alphabet::D), [D_TAG])
 }
 
+/// Reads via `collect_until_eose`, which silently drops a relay `CLOSED` and
+/// then just waits out the deadline — safe here only because
+/// `provenance_filter()` carries no `#h` tag. With an `#h` tag the relay
+/// takes a per-channel branch (`req.rs`) that can answer with `CLOSED`
+/// instead of an empty `EOSE`, which `collect_until_eose` cannot tell apart
+/// from a hang; `e2e_access_matrix.rs`'s `ws_read`/`ReadOutcome` exists for
+/// exactly that case.
 async fn read_provenance(client: &mut BuzzTestClient, name: &str) -> Vec<nostr::Event> {
     let sid = sub_id(name);
     client
@@ -378,6 +403,16 @@ async fn second_publish_replaces_the_first() {
 /// exactly what `SECURITY_CONTRACT.md` (session A) forbids for private
 /// channels. This kind never carries the channel name itself, but a nonempty
 /// result alone already confirms the channel exists — which is the leak.
+///
+/// Positive control: an empty result by itself cannot distinguish a genuine
+/// ACL block from a typo'd filter, a wrong channel id, or a query that simply
+/// does not work — proof the query works for an authorized reader otherwise
+/// lives only in `provenance_round_trips_through_the_relay`, a different test
+/// function. So after the stranger reads nothing, this test adds them to the
+/// same channel and reruns the identical query on the identical connection:
+/// same identity, same filter, same channel, only membership changed. The
+/// empty-then-nonempty pair makes the block self-evidently the ACL's doing,
+/// from inside this test alone.
 #[tokio::test]
 #[ignore]
 async fn non_member_cannot_read_provenance() {
@@ -409,6 +444,29 @@ async fn non_member_cannot_read_provenance() {
     assert!(
         events.is_empty(),
         "non-member read a private channel's provenance: {events:?}"
+    );
+
+    // Positive control: grant the same stranger membership and rerun the
+    // exact same query on the exact same connection. The PUT_USER handler
+    // calls `state.invalidate_membership`, which synchronously drops both
+    // `accessible_channels_cache` and `member_channels_cache` for the target
+    // pubkey (`buzz-relay/src/state.rs`), and `req.rs` resolves accessible
+    // channels fresh on every REQ — so, as in
+    // `e2e_access_matrix.rs::agent_gains_access_immediately_on_add`, no
+    // reconnect and no sleep are needed for the grant to be visible.
+    add_member(&owner, channel_id, &stranger).await;
+
+    let events_after_add = read_provenance(&mut stranger_client, "member-after-add").await;
+
+    assert_eq!(
+        events_after_add.len(),
+        1,
+        "newly added member still could not read the channel's provenance: {events_after_add:?}"
+    );
+    assert_eq!(
+        parsed_content(&events_after_add[0]),
+        content,
+        "member-read provenance content must match what was published"
     );
 
     stranger_client.disconnect().await.ok();
