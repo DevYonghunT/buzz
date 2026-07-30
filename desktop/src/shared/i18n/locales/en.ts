@@ -121,5 +121,9 @@ export const en = {
         "This room exists but you do not own it. Nothing was changed — ask an owner to apply it.",
     },
     renamed: "Renamed by a member",
+    // Shown instead of a room name for `retired` items: the catalog entry is
+    // gone, so no name survives anywhere. The internal key is shown beneath
+    // it rather than in the name's place.
+    unnamedItem: "Name unknown",
   },
 } as const;

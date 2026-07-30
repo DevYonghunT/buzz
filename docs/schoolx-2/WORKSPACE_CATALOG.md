@@ -68,6 +68,23 @@ content JSON (아래)
 - `steps`의 값은 `pending`·`done`·`failed`·`skipped` 넷이다. `skipped`는
   "그 자리에 지켜야 할 사용자 내용이 있어 쓰지 않았다"이고 `done`과 뜻이
   다르다 (§8 「내용이 있는 캔버스는 덮어쓰지 않는다」).
+- **`steps`에 값을 더하는 것은 읽기 쪽 breaking change다. 라이터보다 리더가
+  먼저 나가야 한다.** 학교 한 곳에 관리자가 여럿이고 앱 버전이 서로 다른 것이
+  정상이므로, 새 값을 쓰기 시작하면 그 값을 모르는 빌드가 그 레코드를 만난다.
+  그 빌드가 파싱에 실패하면 실패는 **조용하다** — 데스크톱 어댑터가 파싱
+  실패한 이벤트를 버리므로(`workspace_catalog.rs`의 `fetch_provenance`,
+  `.filter_map(...ok())`) 그 항목은 "적용한 적 없음"으로 보이고 saga가
+  `create_or_recreate` → `duplicate` → `adopted` → 캔버스 단계로 곧장 내려가
+  팀이 써 둔 내용을 덮어쓴다. 순서는 이렇다.
+  1. 모르는 값을 관용하는 **리더**를 먼저 릴리스한다 — 모르는 값은
+     `StepStatus::Unrecognized`로 읽힌다
+     (`crates/schoolx-catalog/src/provenance.rs`).
+  2. 그 리더가 퍼진 **뒤에** 새 값을 쓰는 라이터를 릴리스한다.
+
+  모르는 값은 **끝난 것**(`is_settled`)으로 센다. 미완료로 세는 쪽이 안전해
+  보이지만 정반대다 — 미완료는 곧 그 단계를 다시 실행한다는 뜻이고, 캔버스
+  단계의 재실행이 바로 위의 덮어쓰기다. 끝난 것으로 세면 최악이 "구버전이 이
+  항목에 아무것도 하지 않는다"이고 그건 되돌릴 수 있다.
 - **addressable 대역(30000–39999)** 이라 NIP-33 LWW가 적용된다. 재시도해도
   이벤트가 쌓이지 않고 항상 최신 하나가 권위다.
 - client-signed, `Scope::ChannelsWrite` — `KIND_CANVAS`(40100)와 같은 취급.
@@ -301,6 +318,7 @@ catalog의 두 항목은 모두 `private`이 기본이다. 관리자가 `open`�
   "items": [
     {
       "item_key": "meeting",
+      "name": "메인 회의방",
       "decision": "create_or_recreate",
       "channel_id": "…",
       "generation": 1,
@@ -320,6 +338,18 @@ catalog의 두 항목은 모두 `private`이 기본이다. 관리자가 `open`�
 `user_action` ∈ `null` · `confirm_recreate` · `resolve_conflict` ·
 `request_ownership`.
 `decision`은 §7 판정표의 여덟 값이다.
+
+`name`은 catalog가 정한 **표시 이름**이고, preflight 결과에도 같은 필드가
+실린다. 사람이 보는 표면(설정 카드·CLI)은 이 값을 쓰고 `item_key`를 쓰지
+않는다 — 키는 내부 식별자라 그대로 나가면 사용자가 `메인 회의방` 자리에서
+`meeting`을 본다. **`retired` 항목은 `null`이다**: catalog에서 빠진 항목이라
+이름이 남아 있는 곳이 없다(이름은 catalog에만 있고 증명서에는 실리지 않는다).
+그 자리를 `item_key`로 메우지 않는 이유는, 그러면 "이게 이름이다"와 "이름을
+모른다"가 같은 값이 되어 소비자가 둘을 구별할 수 없기 때문이다. `null`을
+어떻게 보여줄지는 소비자가 정한다.
+
+이 값은 그 방의 **현재** 이름이 아니다. 사용자가 방 이름을 바꿨으면 다르고,
+그 사실은 `renamed` 플래그가 말한다 (§7).
 
 `request_ownership`은 `resolve_conflict`와 조치가 다르다. 이름 충돌은 사용자가
 자기 채널 이름을 바꾸거나 항목을 건너뛰면 풀리지만, `not_owned`는 owner에게

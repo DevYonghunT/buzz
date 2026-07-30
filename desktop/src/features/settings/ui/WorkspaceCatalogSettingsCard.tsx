@@ -205,12 +205,30 @@ function CatalogItemRow({
               className={cn("font-medium text-sm", !locked && "cursor-pointer")}
               htmlFor={checkboxId}
             >
-              {item.item_key}
+              {/*
+                catalog 표시 이름이다. `item_key`("meeting")를 그대로 보여주면
+                catalog가 "메인 회의방"이라고 정한 방이 화면에서는 영문 슬러그로
+                보인다. 이름은 Rust catalog에서 온다 — TS에서 키를 이름으로
+                바꾸는 표를 따로 두지 않는다.
+
+                `retired` 항목은 이름이 `null`이다 (catalog에서 빠져 이름이
+                남아 있는 곳이 없다). 키로 조용히 메우지 않고 "모른다"를
+                그대로 말한다 — 아래에 키를 따로 보여주므로 식별은 된다.
+              */}
+              {item.name ?? t("catalog.unnamedItem")}
             </label>
             <Badge variant={DECISION_BADGE_VARIANT[item.decision]}>
               {t(`catalog.decision.${item.decision}`)}
             </Badge>
           </div>
+          {item.name === null ? (
+            <p
+              className="text-2xs text-muted-foreground"
+              data-testid={`catalog-item-key-${item.item_key}`}
+            >
+              {item.item_key}
+            </p>
+          ) : null}
           {item.renamed ? (
             <p className="text-2xs text-muted-foreground">
               {t("catalog.renamed")}

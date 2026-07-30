@@ -41,6 +41,16 @@ pub enum UserAction {
 pub struct LedgerItem {
     /// catalog 항목 키.
     pub item_key: String,
+    /// catalog가 정한 표시 이름 — 사람에게 보여줄 값이다.
+    ///
+    /// preflight가 읽어 온 값을 그대로 나른다
+    /// ([`crate::preflight::PreflightItem::name`]에 그 계약이 있다). 두
+    /// 소비자(UI·CLI)가 항목을 이름으로 부를 수 있게 하는 것이 목적이고,
+    /// 그래서 `item_key`와 나란히 실린다 — 키는 계속 식별자로 쓴다.
+    ///
+    /// **`retired` 항목은 `None`이다.** catalog에서 빠진 항목이라 이름이
+    /// 남아 있는 곳이 없다.
+    pub name: Option<String>,
     /// preflight 판정을 문자열로 남긴 것.
     pub decision: String,
     /// 관련 채널 ID.

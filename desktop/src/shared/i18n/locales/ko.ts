@@ -111,5 +111,8 @@ export const ko = {
         "방은 있지만 관리 권한이 없습니다. 아무것도 바꾸지 않았습니다 — 방 소유자에게 적용을 요청하세요.",
     },
     renamed: "멤버가 이름을 변경함",
+    // `retired` 항목의 이름 자리에 들어간다 — catalog에서 빠져 이름이 남아
+    // 있는 곳이 없다. 내부 키는 이름 대신이 아니라 그 아래에 따로 보여준다.
+    unnamedItem: "이름을 알 수 없음",
   },
 } as const satisfies TranslationShape<typeof en>;

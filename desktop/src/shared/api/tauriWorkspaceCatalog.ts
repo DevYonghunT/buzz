@@ -23,8 +23,23 @@ export type CatalogUserAction =
   | "resolve_conflict"
   | "request_ownership";
 
+/**
+ * catalog가 정한 표시 이름. 사람이 보는 자리에는 `item_key`가 아니라 이 값을
+ * 쓴다 — 키는 내부 식별자라 그대로 렌더하면 `메인 회의방` 자리에 `meeting`이
+ * 나온다.
+ *
+ * **`retired` 항목은 `null`이다.** 증명서는 남았는데 catalog 항목이 사라진
+ * 경우라 이름이 남아 있는 곳이 없다. Rust 쪽이 일부러 `item_key`로 메우지
+ * 않는다 (`crates/schoolx-catalog/src/preflight.rs`의 `PreflightItem::name`) —
+ * 그러면 "이게 이름이다"와 "이름을 모른다"가 같은 값이 되기 때문이다. 여기서
+ * `?? item.item_key`로 되돌리면 그 구별을 다시 없애는 것이니 하지 말 것.
+ * 이름 조회를 TS에서 따로 하지도 않는다: catalog의 단일 소스는 Rust다.
+ */
+type CatalogItemName = string | null;
+
 export type CatalogPreflightItem = {
   item_key: string;
+  name: CatalogItemName;
   decision: CatalogDecision;
   channel_id: string | null;
   channel_present: boolean;
@@ -54,6 +69,8 @@ export type CatalogStepStates = {
 
 export type CatalogLedgerItem = {
   item_key: string;
+  /** preflight와 같은 값이다 — {@link CatalogItemName} 참고. */
+  name: CatalogItemName;
   decision: CatalogDecision;
   channel_id: string | null;
   generation: number;

@@ -33,6 +33,22 @@ pub enum Decision {
 pub struct PreflightItem {
     /// catalog 항목 키. `Retired`면 catalog에 더는 없는 키다.
     pub item_key: String,
+    /// catalog가 정한 표시 이름 — 사람에게 보여줄 값이다.
+    ///
+    /// UI는 이 값을 쓰고 `item_key`를 쓰지 않는다. `item_key`는 내부
+    /// 식별자라 화면에 그대로 나가면 사용자는 `메인 회의방` 자리에서
+    /// `meeting`을 보게 된다.
+    ///
+    /// **`Retired`면 `None`이다.** 증명서는 남았는데 catalog 항목이 사라진
+    /// 경우라 이름을 알 수 있는 곳이 어디에도 없다 — 이름은 catalog에만
+    /// 있고 증명서에는 실리지 않는다. 그 자리에 `item_key`를 대신 넣지
+    /// 않는 이유는, 그러면 "이게 그 방의 이름"과 "이름을 모른다"가 같은
+    /// 값으로 보여 UI가 둘을 구별할 수 없기 때문이다. `None`을 어떻게
+    /// 보여줄지는 UI가 정한다.
+    ///
+    /// 이 방의 **현재** 이름이 아니다. 사용자가 방 이름을 바꿨으면 이 값과
+    /// 다르고, 그 사실은 [`PreflightItem::renamed`]가 말한다.
+    pub name: Option<String>,
     /// 판정.
     pub decision: Decision,
     /// 알려진 채널 ID. `CreateOrRecreate`면 앞으로 쓸 ID다.
@@ -81,6 +97,7 @@ pub async fn preflight(
                 let live = channels.iter().find(|c| c.id == channel_id);
                 out.push(PreflightItem {
                     item_key: item.item_key.clone(),
+                    name: Some(item.name.clone()),
                     decision: if p.is_complete() {
                         Decision::NoChange
                     } else {
@@ -99,6 +116,7 @@ pub async fn preflight(
                 let name_taken = channels.iter().any(|c| c.name == item.name);
                 out.push(PreflightItem {
                     item_key: item.item_key.clone(),
+                    name: Some(item.name.clone()),
                     decision: if name_taken {
                         Decision::Conflict
                     } else {
@@ -123,6 +141,9 @@ pub async fn preflight(
         if catalog.item(&p.item_key).is_none() {
             out.push(PreflightItem {
                 item_key: p.item_key.clone(),
+                // 이 분기의 정의가 곧 "catalog에 이 항목이 없다"이므로 이름을
+                // 가져올 곳이 없다. 지어내지 않는다.
+                name: None,
                 decision: Decision::Retired,
                 channel_id: None,
                 channel_present: false,
@@ -220,6 +241,20 @@ mod tests {
         for item in &items {
             assert_eq!(item.decision, Decision::CreateOrRecreate);
             assert_eq!(item.generation, 1);
+            // 설정 화면이 이 값을 방 이름으로 보여준다. 없으면 `item_key`가
+            // 그대로 나가 사용자는 `메인 회의방` 자리에서 `meeting`을 본다.
+            assert_eq!(
+                item.name.as_deref(),
+                Some(
+                    crate::builtin()
+                        .item(&item.item_key)
+                        .expect("catalog item")
+                        .name
+                        .as_str()
+                ),
+                "{}의 catalog 표시 이름이 실리지 않았다",
+                item.item_key
+            );
             // provenance가 없으면 단계는 전부 미실행이고, 도출된 ID를 쓰는
             // 채널도 아직 없다.
             assert_eq!(item.steps, StepStates::default());
@@ -321,7 +356,13 @@ mod tests {
         seed_applied(&fx, "finance", "재무", done());
 
         let items = preflight(crate::builtin(), &fx).await.expect("preflight");
-        assert_eq!(find(&items, "finance").decision, Decision::Retired);
+        let finance = find(&items, "finance");
+        assert_eq!(finance.decision, Decision::Retired);
+        // 이름은 catalog에만 있고 증명서에는 실리지 않는다 — catalog에서
+        // 빠진 항목의 이름은 알 방법이 없다. `item_key`로 메우면 UI가
+        // `finance`를 방 이름으로 보여주면서 그게 진짜 이름인지 모른다는
+        // 뜻인지 구별할 수 없게 된다.
+        assert_eq!(finance.name, None);
     }
 
     #[tokio::test]

@@ -76,6 +76,7 @@ async fn apply_item(
 
     let blocked = |action: UserAction| LedgerItem {
         item_key: plan.item_key.clone(),
+        name: plan.name.clone(),
         decision: decision.clone(),
         channel_id: plan.channel_id,
         generation: plan.generation,
@@ -90,6 +91,10 @@ async fn apply_item(
         Decision::Retired | Decision::NoChange => {
             return LedgerItem {
                 item_key: plan.item_key.clone(),
+                // `Retired`에서는 `None`이다 — preflight가 그렇게 싣는다.
+                // 여기서 `item_key`로 메우면 UI가 "이름을 모른다"를 이름으로
+                // 읽는다.
+                name: plan.name.clone(),
                 decision,
                 channel_id: plan.channel_id,
                 generation: plan.generation,
@@ -161,6 +166,7 @@ async fn apply_item(
                 // 예전에 만들었다가 삭제된 항목이다. 자동 재생성하지 않는다.
                 return LedgerItem {
                     item_key: plan.item_key.clone(),
+                    name: plan.name.clone(),
                     decision: DELETED_DECISION.to_string(),
                     channel_id: Some(channel_id),
                     generation: plan.generation,
@@ -227,6 +233,7 @@ async fn apply_item(
                 // ledger가 이번 실행이 하지 않은 일을 보고한다.
                 return LedgerItem {
                     item_key: plan.item_key.clone(),
+                    name: plan.name.clone(),
                     decision: NOT_OWNED_DECISION.to_string(),
                     channel_id: Some(channel_id),
                     generation: plan.generation,
@@ -329,6 +336,7 @@ async fn apply_item(
     let applied = provenance.is_complete() && error.is_none();
     LedgerItem {
         item_key: plan.item_key,
+        name: plan.name,
         decision,
         channel_id: Some(channel_id),
         generation: plan.generation,
@@ -442,6 +450,21 @@ mod tests {
         assert_eq!(ledger.items.len(), 2);
         for entry in &ledger.items {
             assert_eq!(entry.outcome, Outcome::Applied, "{}", entry.item_key);
+            // ledger도 사람이 읽는 표면이다 (UI와 CLI가 같이 읽는다).
+            // `ledger_serializes_for_ui_and_cli`의 golden은 손으로 만든
+            // ledger라, 실제 saga가 이 값을 싣는지는 여기서만 관측된다.
+            assert_eq!(
+                entry.name.as_deref(),
+                Some(
+                    crate::builtin()
+                        .item(&entry.item_key)
+                        .expect("catalog item")
+                        .name
+                        .as_str()
+                ),
+                "{}의 catalog 표시 이름이 ledger에 실리지 않았다",
+                entry.item_key
+            );
             // 세 단계 전부가 desired state다. `Applied`만 보면 owner 확인을
             // 아예 하지 않는 saga도 통과한다 — `outcome`은 `is_complete()`와
             // `error`에서만 나오고, 단계를 건너뛰면 그 둘 다 조용히 통과한다.
@@ -880,6 +903,46 @@ mod tests {
         );
     }
 
+    /// 더 새 버전이 적어 둔 **모르는** 상태 값은 미완료가 아니다 — 그 단계를
+    /// 다시 실행하지 않는다.
+    ///
+    /// `StepStatus::Unrecognized`를 settled로 센 결과가 여기서 관측된다.
+    /// 미완료로 세면 preflight가 `resume`을 내고 saga가 캔버스 단계를 다시
+    /// 실행한다 — 지금은 덮어쓰기 guard가 그 뒤를 막아 주지만, 새 버전이
+    /// 내린 판단을 구버전이 뒤집는다는 사실 자체가 문제다. 관리자 둘이 서로
+    /// 다른 앱 버전을 쓰는 것만으로 도달한다.
+    #[tokio::test]
+    async fn an_unrecognized_step_status_is_not_re_run() {
+        let fx = FakeEffects::new();
+        // 이 빌드가 모르는 값이 캔버스 단계에 적혀 있다 — 더 새 버전이 쓴
+        // 증명서를 읽어 온 상태다.
+        let channel_id = seed_applied(
+            &fx,
+            "meeting",
+            "메인 회의방",
+            StepStates {
+                channel: StepStatus::Done,
+                canvas: StepStatus::Unrecognized,
+                membership: StepStatus::Done,
+            },
+        );
+        seed_team_canvas(&fx, channel_id);
+
+        let ledger = apply(crate::builtin(), &fx, &["meeting".to_string()])
+            .await
+            .expect("apply");
+
+        let entry = item(&ledger, "meeting");
+        assert_eq!(entry.decision, "no_change");
+        assert_eq!(entry.outcome, Outcome::Unchanged);
+        assert_canvas_untouched(&fx, channel_id, TEAM_CANVAS);
+        assert_eq!(
+            fx.call_count("read_canvas"),
+            0,
+            "끝난 캔버스 단계를 다시 실행했다"
+        );
+    }
+
     /// 같은 재개인데 방이 비어 있으면 시작 캔버스를 **쓴다**.
     ///
     /// 위 테스트와 이 테스트의 차이는 캔버스에 내용이 있느냐 하나뿐이다.
@@ -1171,6 +1234,119 @@ mod tests {
         );
     }
 
+    /// 채택 경로도 **내용이 있는** 캔버스를 덮어쓰지 않는다.
+    ///
+    /// 재개 경로의 `resume_does_not_overwrite_a_canvas_that_has_content`와 같은
+    /// 사고인데, 그 방이 이미 쓰이고 있을 가능성은 이쪽이 더 높다: 증명서가
+    /// 없다는 것은 이 방이 catalog 적용과 무관하게 존재해 온 기간이 있다는
+    /// 뜻이고, 이름까지 바뀌어 있다면 팀이 실제로 쓰고 있다는 신호다.
+    ///
+    /// 이 테스트가 없으면 채택 경로에서만 읽기를 건너뛰는 구현 — "결정론적
+    /// ID가 맞았으니 우리 catalog가 만든 방이고, 그러면 비어 있다" — 이
+    /// 스위트 전체를 통과한다. 채택 경로의 캔버스 검증이 전부 빈 방
+    /// (`seed_orphaned_channel`은 캔버스를 심지 않는다)을 대상으로 하기
+    /// 때문이다. 그 추론은 틀렸다: 방이 우리 것이라는 사실과 그 방이 비어
+    /// 있다는 사실은 별개이고, 둘 사이에는 팀이 그 방을 쓴 시간이 있다.
+    #[tokio::test]
+    async fn adoption_does_not_overwrite_a_canvas_that_has_content() {
+        let fx = FakeEffects::new();
+        // 증명서 없이 방만 있고, 적용자는 그 방의 owner다 — owner 게이트는
+        // 통과한다. 막아야 하는 이유가 권한이 아니라는 것이 이 테스트의
+        // 전제다.
+        let channel_id = seed_orphaned_channel(&fx, "meeting", true);
+        // 팀이 그 방을 쓰고 있다. 이게 지켜져야 하는 값이다.
+        seed_team_canvas(&fx, channel_id);
+
+        let ledger = apply(crate::builtin(), &fx, &["meeting".to_string()])
+            .await
+            .expect("apply");
+
+        // 되돌릴 수 없는 쪽을 먼저 확인한다 — 단계 상태만 보면 팀의 내용을
+        // 지운 **뒤에** 끝난 saga도 같은 값을 낸다.
+        assert_canvas_untouched(&fx, channel_id, TEAM_CANVAS);
+
+        let entry = item(&ledger, "meeting");
+        assert_eq!(entry.decision, "adopted");
+        assert_eq!(
+            entry.steps.canvas,
+            StepStatus::Skipped,
+            "쓰지 않았는데 `done`으로 보고했다"
+        );
+        // 조용히 아무것도 하지 않은 것이 아니다 — 나머지 단계는 끝냈다.
+        assert_eq!(entry.steps.channel, StepStatus::Done);
+        assert_eq!(entry.steps.membership, StepStatus::Done);
+        assert_eq!(entry.outcome, Outcome::Applied);
+        assert_eq!(entry.error, None);
+        // 방을 하나 더 만들지 않았다.
+        assert_eq!(fx.channels.lock().expect("lock").len(), 1);
+
+        // 건너뛴 사실이 durable하게 남아야 다음 실행이 이 항목을 다시
+        // 미완료로 보지 않는다.
+        let stored = fx.provenance.lock().expect("lock");
+        assert_eq!(stored.len(), 1, "NIP-33 LWW — 항목당 정확히 하나다");
+        assert_eq!(stored[0].1.steps.canvas, StepStatus::Skipped);
+    }
+
+    /// 위 상태가 **실제 시퀀스로** 만들어진다 — 손으로 시드한 상태가 아니다.
+    ///
+    /// `provenance_publish_failure_is_partial_not_applied`가 만드는 상태 그대로
+    /// 시작한다: 세 단계가 다 끝났는데 증명서 발행만 실패해 relay에는 방이
+    /// 남고 증명서는 없다. 팀이 그 방 이름을 바꾸고(이름이 catalog 값 그대로면
+    /// preflight가 `conflict`로 막아 채택 분기에 닿지 못한다) 자기 캔버스를
+    /// 채운다. 같은 관리자가 재시도를 돌린다 — 자기가 만든 방이라 owner
+    /// 게이트도 통과한다.
+    ///
+    /// `assert_canvas_untouched`를 쓰지 않는 이유는 하나뿐이다: 첫 실행이
+    /// 정상적으로 `set_canvas`를 한 번 불렀으므로 누적 호출 수가 0이 아니다.
+    /// 대신 재시도 **전후**의 호출 수를 비교해 같은 성질을 본다.
+    #[tokio::test]
+    async fn adoption_after_a_publish_failure_keeps_the_canvas_the_team_wrote() {
+        let fx = FakeEffects::new();
+        fx.fail_next("publish_provenance");
+
+        let first = apply(crate::builtin(), &fx, &["meeting".to_string()])
+            .await
+            .expect("first");
+        let entry = item(&first, "meeting");
+        assert_eq!(entry.outcome, Outcome::Partial);
+        let channel_id = entry.channel_id.expect("channel id");
+        // 증명서가 남지 않아야 다음 실행이 채택 경로로 들어간다.
+        assert!(
+            fx.provenance.lock().expect("lock").is_empty(),
+            "증명서가 남았다면 이 시퀀스는 채택이 아니라 재개다"
+        );
+
+        // 팀이 방을 자기 것으로 쓰기 시작한다.
+        fx.channels.lock().expect("lock")[0].name = "2026 전체회의".into();
+        seed_team_canvas(&fx, channel_id);
+        let writes_before = fx.call_count("set_canvas");
+
+        let retry = apply(crate::builtin(), &fx, &["meeting".to_string()])
+            .await
+            .expect("retry");
+
+        // 되돌릴 수 없는 쪽 먼저.
+        assert_eq!(
+            fx.canvases.lock().expect("lock").get(&channel_id),
+            Some(&TEAM_CANVAS.to_string()),
+            "채택이 팀의 캔버스를 덮어썼다"
+        );
+        assert_eq!(
+            fx.call_count("set_canvas"),
+            writes_before,
+            "이미 내용이 있는 방에 set_canvas를 보냈다"
+        );
+
+        let entry = item(&retry, "meeting");
+        assert_eq!(entry.decision, "adopted");
+        assert_eq!(entry.steps.canvas, StepStatus::Skipped);
+        assert_eq!(entry.outcome, Outcome::Applied);
+        assert_eq!(entry.error, None);
+        // 방이 두 개가 되지 않았다.
+        assert_eq!(fx.channels.lock().expect("lock").len(), 1);
+        assert_eq!(fx.created.lock().expect("lock").len(), 1);
+    }
+
     /// 채택은 owner일 때만 한다. 아니면 **아무것도 쓰지 않고** 막는다.
     ///
     /// 도달 경로: 관리자 A가 방을 만들었는데 증명서 발행이 실패했다
@@ -1296,6 +1472,9 @@ mod tests {
         assert_eq!(entry.decision, "retired");
         assert_eq!(entry.outcome, Outcome::Unchanged);
         assert_eq!(entry.steps, steps);
+        // catalog에서 빠진 항목이라 이름을 가져올 곳이 없다. `item_key`를
+        // 대신 실으면 UI가 `finance`를 방 이름으로 보여준다.
+        assert_eq!(entry.name, None);
         // 기존 채널은 유지하고 아무것도 건드리지 않는다.
         assert_eq!(fx.channels.lock().expect("lock").len(), 1);
         assert!(fx.canvases.lock().expect("lock").is_empty());
@@ -1356,6 +1535,7 @@ mod tests {
             items: vec![
                 LedgerItem {
                     item_key: "meeting".into(),
+                    name: Some("메인 회의방".into()),
                     decision: "create_or_recreate".into(),
                     channel_id: Some(Uuid::nil()),
                     generation: 1,
@@ -1370,6 +1550,7 @@ mod tests {
                 },
                 LedgerItem {
                     item_key: "planning".into(),
+                    name: Some("기획".into()),
                     decision: "resume".into(),
                     channel_id: Some(Uuid::nil()),
                     generation: 2,
@@ -1384,6 +1565,7 @@ mod tests {
                 },
                 LedgerItem {
                     item_key: "finance".into(),
+                    name: Some("재무".into()),
                     decision: "deleted".into(),
                     channel_id: Some(Uuid::nil()),
                     generation: 1,
@@ -1394,6 +1576,7 @@ mod tests {
                 },
                 LedgerItem {
                     item_key: "hr".into(),
+                    name: Some("인사".into()),
                     decision: "conflict".into(),
                     channel_id: None,
                     generation: 1,
@@ -1404,6 +1587,7 @@ mod tests {
                 },
                 LedgerItem {
                     item_key: "sales".into(),
+                    name: Some("영업".into()),
                     decision: "no_change".into(),
                     channel_id: Some(Uuid::nil()),
                     generation: 1,
@@ -1418,6 +1602,7 @@ mod tests {
                 },
                 LedgerItem {
                     item_key: "ops".into(),
+                    name: Some("운영".into()),
                     decision: "adopted".into(),
                     channel_id: Some(Uuid::nil()),
                     generation: 1,
@@ -1432,6 +1617,7 @@ mod tests {
                 },
                 LedgerItem {
                     item_key: "library".into(),
+                    name: Some("도서관".into()),
                     decision: "not_owned".into(),
                     channel_id: Some(Uuid::nil()),
                     generation: 1,
@@ -1445,6 +1631,7 @@ mod tests {
                 // 시작 캔버스를 받지 않았다"를 읽을 수 있는 유일한 자리다.
                 LedgerItem {
                     item_key: "notices".into(),
+                    name: Some("공지".into()),
                     decision: "resume".into(),
                     channel_id: Some(Uuid::nil()),
                     generation: 1,
@@ -1454,6 +1641,26 @@ mod tests {
                         membership: StepStatus::Done,
                     },
                     outcome: Outcome::Applied,
+                    user_action: None,
+                    error: None,
+                },
+                // catalog에서 빠진 항목. `name`이 `null`인 유일한 자리이고,
+                // 그래서 여기서만 "이름을 모른다"의 wire 표현이 고정된다 —
+                // `item_key`를 대신 실어 버리는 구현은 UI에서 `clubs`가
+                // 방 이름으로 보이는데 이 golden만 통과한다. `retired`
+                // 판정 자체도 여기서 처음으로 wire format에 고정된다.
+                LedgerItem {
+                    item_key: "clubs".into(),
+                    name: None,
+                    decision: "retired".into(),
+                    channel_id: None,
+                    generation: 1,
+                    steps: StepStates {
+                        channel: StepStatus::Done,
+                        canvas: StepStatus::Done,
+                        membership: StepStatus::Done,
+                    },
+                    outcome: Outcome::Unchanged,
                     user_action: None,
                     error: None,
                 },
@@ -1467,6 +1674,7 @@ mod tests {
             "items": [
                 {
                     "item_key": "meeting",
+                    "name": "메인 회의방",
                     "decision": "create_or_recreate",
                     "channel_id": "00000000-0000-0000-0000-000000000000",
                     "generation": 1,
@@ -1477,6 +1685,7 @@ mod tests {
                 },
                 {
                     "item_key": "planning",
+                    "name": "기획",
                     "decision": "resume",
                     "channel_id": "00000000-0000-0000-0000-000000000000",
                     "generation": 2,
@@ -1487,6 +1696,7 @@ mod tests {
                 },
                 {
                     "item_key": "finance",
+                    "name": "재무",
                     "decision": "deleted",
                     "channel_id": "00000000-0000-0000-0000-000000000000",
                     "generation": 1,
@@ -1497,6 +1707,7 @@ mod tests {
                 },
                 {
                     "item_key": "hr",
+                    "name": "인사",
                     "decision": "conflict",
                     "channel_id": null,
                     "generation": 1,
@@ -1507,6 +1718,7 @@ mod tests {
                 },
                 {
                     "item_key": "sales",
+                    "name": "영업",
                     "decision": "no_change",
                     "channel_id": "00000000-0000-0000-0000-000000000000",
                     "generation": 1,
@@ -1517,6 +1729,7 @@ mod tests {
                 },
                 {
                     "item_key": "ops",
+                    "name": "운영",
                     "decision": "adopted",
                     "channel_id": "00000000-0000-0000-0000-000000000000",
                     "generation": 1,
@@ -1527,6 +1740,7 @@ mod tests {
                 },
                 {
                     "item_key": "library",
+                    "name": "도서관",
                     "decision": "not_owned",
                     "channel_id": "00000000-0000-0000-0000-000000000000",
                     "generation": 1,
@@ -1537,11 +1751,23 @@ mod tests {
                 },
                 {
                     "item_key": "notices",
+                    "name": "공지",
                     "decision": "resume",
                     "channel_id": "00000000-0000-0000-0000-000000000000",
                     "generation": 1,
                     "steps": { "channel": "done", "canvas": "skipped", "membership": "done" },
                     "outcome": "applied",
+                    "user_action": null,
+                    "error": null
+                },
+                {
+                    "item_key": "clubs",
+                    "name": null,
+                    "decision": "retired",
+                    "channel_id": null,
+                    "generation": 1,
+                    "steps": { "channel": "done", "canvas": "done", "membership": "done" },
+                    "outcome": "unchanged",
                     "user_action": null,
                     "error": null
                 }

@@ -17,6 +17,26 @@ use serde::{Deserialize, Serialize};
 pub const KIND_WORKSPACE_PROVENANCE: u32 = 39500;
 
 /// saga 단계 하나의 상태.
+///
+/// # `steps`에 값을 더하는 것은 **읽기 쪽 breaking change**다
+///
+/// 이 enum의 값은 kind 39500 content로 relay에 실려 나가고, **다른 버전의
+/// 앱이** 다시 읽는다. 학교 한 곳에 관리자가 여럿이고 각자 앱 버전이 다른
+/// 것이 정상이므로, 새 값을 쓰기 시작하는 순간 그 값을 모르는 빌드가 그
+/// 레코드를 만난다.
+///
+/// 그래서 값을 더할 때의 순서가 정해져 있다.
+///
+/// 1. **먼저** 관용(tolerance)을 릴리스한다 — 모르는 값을 [`Self::Unrecognized`]로
+///    받아들이는 리더. 이미 여기 있다.
+/// 2. 그 리더가 현장에 충분히 퍼진 **뒤에** 새 값을 쓰는 라이터를 릴리스한다.
+///
+/// 순서를 뒤집으면 구버전 리더는 그 레코드의 파싱에 실패한다. 실패는 조용하다
+/// — 데스크톱 어댑터(`desktop/src-tauri/src/commands/workspace_catalog.rs`의
+/// `fetch_provenance`)가 파싱 실패한 이벤트를 `.filter_map(...ok())`으로
+/// 버리므로, 그 항목은 "적용한 적 없음"으로 보이고 saga가 `CreateOrRecreate`
+/// → `duplicate` → `adopted` 경로로 곧장 들어가 캔버스를 덮어쓴다. 지키려던
+/// 사용자 내용이 사라지는 자리가 정확히 거기다.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum StepStatus {
@@ -35,16 +55,40 @@ pub enum StepStatus {
     ///
     /// 지금은 캔버스 단계만 이 값을 낸다.
     Skipped,
+    /// 이 빌드가 모르는 값이 적혀 있었다 — **더 새 버전이 쓴 것**이다.
+    ///
+    /// saga는 이 값을 절대 만들어 내지 않는다. 오직 역직렬화만이 만든다.
+    /// 이름이 "미실행"도 "실패"도 아닌 이유가 그것이다 — 그 단계에 무슨 일이
+    /// 있었는지 이 빌드는 모르고, 아는 것은 "우리보다 많이 아는 쪽이 무언가를
+    /// 기록해 두었다"뿐이다.
+    ///
+    /// **모르는 값은 [`Self::is_settled`]에서 끝난 것으로 센다.** 미완료로
+    /// 세는 쪽이 더 안전해 보이지만 정반대다: 미완료는 곧 그 단계를 **다시
+    /// 실행한다**는 뜻이고, 캔버스 단계의 재실행이야말로 이 크레이트가 막고
+    /// 있는 덮어쓰기 경로다. 새 버전이 "쓰지 않기로 했다"는 판단을 새 값으로
+    /// 적어 뒀는데 구버전이 그걸 "아직 안 했네"로 읽으면, 구버전이 그 판단을
+    /// 뒤집어 팀의 내용을 지운다 — 되돌릴 수 없다. 반대로 끝난 것으로 세면
+    /// 최악이 "이 빌드는 이 항목에 아무것도 하지 않고 완료로 보고한다"이고,
+    /// 그건 새 버전으로 다시 돌리면 그만인 되돌릴 수 있는 실패다. 캔버스 읽기
+    /// 실패와 owner 확인 실패를 다루는 규칙과 같은 비대칭이다.
+    ///
+    /// 직렬화하면 `"unrecognized"`가 된다. 원래 철자를 보존하지 않는 것은
+    /// 의도다 — 보존하려면 이 enum이 `String`을 들어야 하고, 그러면
+    /// `Copy`가 깨져 `StepStates`를 값으로 나르는 saga 전체가 바뀐다.
+    /// 되읽는 쪽은 어차피 이 값도 모르는 값으로 취급해 같은 결론에 닿는다.
+    #[serde(other)]
+    Unrecognized,
 }
 
 impl StepStatus {
     /// 이 단계가 끝났는가 — 재시도가 다시 실행하지 않는다.
     ///
-    /// `Done`과 `Skipped` 둘 다다. `Skipped`를 미완료로 세면 그 항목은 영원히
-    /// `partial`로 보고되고, 매 실행이 같은 결론(쓰지 않는다)에 다시 도달한다
-    /// — 사용자에게는 끝나지 않는 실패로 보인다.
+    /// `Done`·`Skipped`·`Unrecognized` 셋이다. `Skipped`를 미완료로 세면 그
+    /// 항목은 영원히 `partial`로 보고되고, 매 실행이 같은 결론(쓰지 않는다)에
+    /// 다시 도달한다 — 사용자에게는 끝나지 않는 실패로 보인다.
+    /// `Unrecognized`가 왜 여기 들어가는지는 그 variant의 주석에 있다.
     pub fn is_settled(self) -> bool {
-        matches!(self, Self::Done | Self::Skipped)
+        matches!(self, Self::Done | Self::Skipped | Self::Unrecognized)
     }
 }
 
@@ -198,11 +242,14 @@ mod tests {
     }
 
     #[test]
-    fn only_done_and_skipped_are_settled() {
+    fn only_done_skipped_and_unrecognized_are_settled() {
         assert!(StepStatus::Done.is_settled());
         assert!(StepStatus::Skipped.is_settled());
         assert!(!StepStatus::Pending.is_settled());
         assert!(!StepStatus::Failed.is_settled());
+        // 모르는 값을 미완료로 세면 그 단계를 다시 실행한다 — 캔버스 단계의
+        // 재실행이 곧 덮어쓰기다. 이유는 variant 주석에 있다.
+        assert!(StepStatus::Unrecognized.is_settled());
     }
 
     #[test]
@@ -301,5 +348,80 @@ mod tests {
         // 실행의 preflight**다.
         let back: Provenance = serde_json::from_value(actual).expect("skipped가 되읽어져야 한다");
         assert_eq!(back.steps.canvas, StepStatus::Skipped);
+    }
+
+    /// 이 빌드가 모르는 상태 값이 적힌 증명서도 **파싱된다**.
+    ///
+    /// 관용이 없으면 `steps`에 값이 하나 더해지는 순간 구버전은 그 레코드
+    /// 전체의 파싱에 실패한다. 그리고 그 실패는 조용하다 — 데스크톱 어댑터가
+    /// `.filter_map(...ok())`로 버리므로 그 항목은 "적용한 적 없음"으로 보이고,
+    /// saga가 `CreateOrRecreate` → `duplicate` → `adopted`로 곧장 내려가 캔버스를
+    /// 덮어쓴다. 관리자 둘이 서로 다른 앱 버전을 쓰는 것만으로 그 상태가 된다.
+    ///
+    /// 그래서 두 가지를 한 번에 확인한다: 레코드가 버려지지 않는가, 그리고
+    /// 모르는 값이 **끝난 것**으로 세어지는가. 두 번째가 핵심이다 — 미완료로
+    /// 세면 그 단계를 다시 실행하고, 캔버스 단계의 재실행이 곧 덮어쓰기다.
+    #[test]
+    fn an_unknown_status_reads_as_unrecognized_and_is_settled() {
+        // 미래 버전이 캔버스 단계에 지금 없는 값을 적어 둔 증명서.
+        let wire = serde_json::json!({
+            "catalog_id": "schoolx.default",
+            "catalog_version": 2,
+            "item_key": "meeting",
+            "generation": 1,
+            "steps": {
+                "channel": "done",
+                "canvas": "deferred_by_a_newer_version",
+                "membership": "done"
+            },
+            "applied_at": "2026-07-28T09:00:00Z"
+        });
+
+        let parsed: Provenance =
+            serde_json::from_value(wire).expect("모르는 상태 값 때문에 레코드가 버려졌다");
+
+        assert_eq!(parsed.steps.canvas, StepStatus::Unrecognized);
+        // 모르는 값을 아는 값으로 뭉개지 않았다 — 특히 `Pending`으로 읽으면
+        // 그 자체가 이 테스트가 막으려는 재실행이다.
+        assert!(parsed.steps.canvas.is_settled());
+        assert!(
+            parsed.is_complete(),
+            "모르는 값이 미완료로 세어졌다 — 이 항목이 resume으로 다시 들어온다"
+        );
+        // 아는 값까지 같이 삼키지 않았다.
+        assert_eq!(parsed.steps.channel, StepStatus::Done);
+        assert_eq!(parsed.steps.membership, StepStatus::Done);
+    }
+
+    /// 네 개의 아는 철자가 각각 자기 variant로 되읽어지고, `Unrecognized`만
+    /// catch-all이다.
+    ///
+    /// `#[serde(other)]`는 "나머지 전부"라 너무 잘 동작한다 — 예를 들어
+    /// `rename_all`이 바뀌어 `"Done"`이 나가기 시작해도 되읽기는 조용히
+    /// `Unrecognized`로 성공하고, 그러면 실제로 실행된 단계가 "모르는 값"으로
+    /// 둔갑한다. 위 golden 테스트들은 직렬화 철자만 고정하므로 이 방향은
+    /// 여기서만 잡힌다.
+    #[test]
+    fn every_known_spelling_round_trips_and_only_unknown_falls_through() {
+        for status in [
+            StepStatus::Pending,
+            StepStatus::Done,
+            StepStatus::Failed,
+            StepStatus::Skipped,
+            StepStatus::Unrecognized,
+        ] {
+            let wire = serde_json::to_value(status).expect("serialize");
+            let back: StepStatus = serde_json::from_value(wire.clone()).expect("deserialize");
+            assert_eq!(
+                back, status,
+                "{wire}의 철자가 Serialize와 Deserialize 사이에서 어긋났다"
+            );
+        }
+
+        // catch-all이 실제로 걸리는지 — 위 루프만으로는 `Unrecognized`가
+        // 자기 철자(`"unrecognized"`)로만 되읽어져도 통과한다.
+        let unknown: StepStatus =
+            serde_json::from_value(serde_json::json!("archived")).expect("모르는 값도 파싱된다");
+        assert_eq!(unknown, StepStatus::Unrecognized);
     }
 }
