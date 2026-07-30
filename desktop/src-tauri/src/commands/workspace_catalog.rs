@@ -10,12 +10,12 @@ use schoolx_catalog_pkg::effects::{
 };
 use schoolx_catalog_pkg::ledger::Ledger;
 use schoolx_catalog_pkg::preflight::PreflightItem;
-use schoolx_catalog_pkg::provenance::{Provenance, KIND_WORKSPACE_PROVENANCE};
+use schoolx_catalog_pkg::provenance::{d_tag, Provenance, KIND_WORKSPACE_PROVENANCE};
 use tauri::State;
 use uuid::Uuid;
 
 use crate::app_state::AppState;
-use crate::relay::{query_relay, relay_api_base_url_with_override, submit_event_with_keys};
+use crate::relay::{relay_api_base_url_with_override, submit_event_with_keys};
 
 /// `commands::channels::is_duplicate_channel_rejection`와 같은 판정을 한다
 /// (그쪽은 모듈 비공개라 재사용할 수 없어 그대로 반복한다). `submit_event_with_keys`는
@@ -57,12 +57,38 @@ impl CatalogEffects for RelayEffects<'_> {
         // relay의 채널 스코프 ACL이 보안 경계다 — 여기서는 relay가 실제로
         // 돌려준 것만 이 catalog_id로 골라낼 뿐, 그 이상 거르거나 중복을
         // 지우거나 없는 값을 지어내지 않는다.
-        let events = query_relay(
+        //
+        // kind 39500은 kind 39000과 달리 `(kind, pubkey, d-tag)`별로
+        // addressable이다 — d 태그 하나당 이벤트가 전역에 하나가 아니라, 그
+        // 항목을 완료·재개·채택한 신원마다 하나씩 쌓인다(다른 관리자가
+        // 이어받는 경로는 saga에서 예외가 아니라 흔한 경로다). 그래서 예전처럼
+        // 고정된 `limit`을 걸면 신원 수가 늘수록 결과가 조용히 잘릴 수 있고,
+        // saga는 그 잘림을 알 방법이 없다 — 잘려서 빠진 항목은 provenance가
+        // 없는 것처럼 보여 `CreateOrRecreate`로 오판하고, 이미 있는 채널에
+        // `create_channel`을 걸어 `duplicate`를 받아도 `channel_present`가
+        // (별도의, 잘리지 않는 `list_channels()` 호출에서 나오므로) true라
+        // owner 게이트를 그대로 통과해 캔버스를 catalog 기본값으로 덮어쓴다.
+        //
+        // 그래서 개수 상한이 아니라 `#d` 필터로 범위를 좁힌다: 이 빌드에
+        // 컴파일된 catalog(`schoolx_catalog_pkg::builtin()`)의 항목 키만큼만
+        // d 태그를 만들어 건다 — 이 집합은 catalog 크기로 정확히 알려진 작은
+        // 집합이다. 하지만 그 필터가 돌려주는 이벤트 **개수**는 신원 수에
+        // 비례해 늘 수 있어 catalog 크기만으로는 그 개수의 상한을 셀 수
+        // 없으므로, 매직 넘버 `limit` 대신 `commands::channels::query_relay_all`의
+        // `(until, before_id)` 커서 페이징을 그대로 재사용해 몇 신원이 쌓아
+        // 놨든 끝까지 읽는다.
+        let d_tags: Vec<String> = schoolx_catalog_pkg::builtin()
+            .items
+            .iter()
+            .map(|item| d_tag(catalog_id, &item.item_key))
+            .collect();
+
+        let events = crate::commands::channels::query_relay_all(
             &self.state,
-            &[serde_json::json!({
+            serde_json::json!({
                 "kinds": [KIND_WORKSPACE_PROVENANCE],
-                "limit": 200
-            })],
+                "#d": d_tags,
+            }),
         )
         .await
         .map_err(EffectError)?;
@@ -182,4 +208,49 @@ pub async fn apply_workspace_catalog(
     schoolx_catalog_pkg::saga::apply(schoolx_catalog_pkg::builtin(), &effects, &selected)
         .await
         .map_err(|e| e.0)
+}
+
+// ── Tests ────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `create_channel`이 `Ok(CreateOutcome::Duplicate)`로 바꿔 읽어야 하는
+    /// 정확한 문자열. `crates/buzz-relay/src/handlers/ingest.rs`의
+    /// `create_channel_with_id` 분기가 실제로 내는 그대로다:
+    /// `message: "duplicate: channel already exists".into()`를
+    /// `submit_event_with_keys`가 `"relay rejected event: {message}"`로
+    /// 감싼다. 이 리터럴이 바뀌면 saga가 중복 생성을 더는 인식하지 못하고
+    /// 하드 에러로 새서, 다른 관리자가 이어받는 채택 경로 전체가 막힌다.
+    #[test]
+    fn matches_the_exact_relay_duplicate_channel_rejection() {
+        assert!(is_duplicate_channel_rejection(
+            "relay rejected event: duplicate: channel already exists"
+        ));
+    }
+
+    /// 같은 "relay rejected event:" 래핑에 "duplicate:"까지 들어 있지만,
+    /// 채널이 아니라 kind:7 reaction 중복이다 (`ingest.rs`의
+    /// `message: "duplicate: reaction already exists".into()`). 문자열에
+    /// "duplicate"가 있다는 것만으로 판정하면 이 무관한 거부까지
+    /// `Duplicate`로 오판해, saga가 실제로는 만들어지지 않은 채널을 이미
+    /// 있는 채널인 것처럼 채택하려 든다.
+    #[test]
+    fn does_not_match_a_different_duplicate_kind() {
+        assert!(!is_duplicate_channel_rejection(
+            "relay rejected event: duplicate: reaction already exists"
+        ));
+    }
+
+    /// relay 거부와 아예 무관한 오류(`relay.rs`의 `classify_request_error`가
+    /// 내는 연결 실패 메시지). 이런 오류까지 `Duplicate`로 새면 진짜 실패가
+    /// "이미 있는 채널"로 둔갑해 saga가 아무 것도 하지 않고 성공한 것처럼
+    /// 보고한다.
+    #[test]
+    fn does_not_match_an_unrelated_error() {
+        assert!(!is_duplicate_channel_rejection(
+            "relay unreachable: could not connect to relay"
+        ));
+    }
 }

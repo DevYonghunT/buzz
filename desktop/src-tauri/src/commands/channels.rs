@@ -43,7 +43,12 @@ fn advance_directory_cursor(filter: &mut serde_json::Value, page: &[nostr::Event
 /// Fetch every page for a historical relay filter using the relay's composite
 /// `(until, before_id)` cursor. A timestamp-only cursor can skip rows when more
 /// than one page of events shares the same second.
-async fn query_relay_all(
+///
+/// `pub(crate)`: also used by `commands::workspace_catalog` to read every
+/// provenance event for the catalog's `#d` tags — kind 39500 is addressable
+/// per `(kind, pubkey, d-tag)`, not globally per `d`, so a flat `limit` there
+/// can silently drop another identity's stored event under the same tag.
+pub(crate) async fn query_relay_all(
     state: &AppState,
     mut filter: serde_json::Value,
 ) -> Result<Vec<nostr::Event>, String> {
