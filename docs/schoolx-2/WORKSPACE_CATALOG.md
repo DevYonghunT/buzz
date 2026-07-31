@@ -142,6 +142,17 @@ UUIDv5(SCHOOLX_CATALOG_NAMESPACE,
 채널에 실려 있을 때만 판정 근거가 된다 — 다른 채널에 실린 것은 버린다. 이유와
 버리는 규칙은 §7 「증명서 있음」의 정의에 있다.
 
+**이 도출식의 입력은 전부 공개다.** 네임스페이스는 오픈소스 코드의
+리터럴이고, `relay_scope`는 그 학교의 relay 주소, `item_key`는
+`buzz catalog list`가 그대로 출력하며, `generation`은 신규 항목이면 항상
+`1`이다. 그래서 이 ID는 **그 채널이 어느 catalog 항목에 대응하는지**는
+결정하지만 **누가 그 채널을 만들었는지**는 결정하지 않는다 — 도출할 수
+있는 사람이라면 누구나 관리자가 적용하기 전에 그 ID로 채널을 먼저 만들어
+둘 수 있다는 뜻이다. 이 사실이 여는 gap(선점)은 §7 「`adopted`의 owner
+게이트」의 「남는 구멍」에 이미 설명돼 있고, 다음 세션으로 넘긴 결정은
+[`IMPLEMENTATION_HANDOFF.md`](IMPLEMENTATION_HANDOFF.md) 세션 D 「넘긴
+것」 9번과 [`SECURITY_CONTRACT.md`](SECURITY_CONTRACT.md) §5에 있다.
+
 ## 6. 삭제된 항목: 왜 증명서로 감지할 수 없는가
 
 **확인된 사실 — 구현자가 되돌리면 안 된다.**

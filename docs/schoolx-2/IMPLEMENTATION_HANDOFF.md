@@ -410,8 +410,11 @@ e2e_workspace_catalog` 4 passed, `just schoolx-upstream-check` 3/3 통과.
    낸다. 모르는 값은 **끝난 것**으로 센다 — 미완료로 세면 그 단계를 다시
    실행한다는 뜻이고 캔버스 단계의 재실행이 바로 그 덮어쓰기다.
 
-**세션 D에서 넘긴 것.** 앞의 셋은 Phase 3을 닫기 위해 필요하고, 뒤의 넷은
-다음 세션의 범위다.
+**세션 D에서 넘긴 것.** 1–3은 Phase 3을 닫기 위해 필요하고, 4–7은 다음
+세션의 범위다. 8·9는 남은 구현이 아니라 브랜치 전체 리뷰(2026-07-31)에서
+나온 보안 결정이다 — 개별 작업 리뷰로는 보이지 않던 문제였고, 세션
+소유자가 세션 D 범위에서 고치는 대신 세션 E로 넘기기로 정했다. 서로 얽혀
+있어 한 쌍으로 적는다.
 
 1. **설정 카드의 실행 증거** (완료 기준 #7). 카드는 `outcome` 4종,
    `user_action` 3종, `decision` 8종, 캔버스 `skipped`/`unrecognized`를 모두
@@ -450,6 +453,74 @@ e2e_workspace_catalog` 4 passed, `just schoolx-upstream-check` 3/3 통과.
    값을 그대로 나르기만 한다). `deleted`로 떨어진 항목은 이 컨트롤이 생기기
    전까지 재시도해도 같은 판정을 반복할 뿐이다. 자세한 내용과 닫는 방법은
    [`WORKSPACE_CATALOG.md`](WORKSPACE_CATALOG.md) §6의 「구현 상태」 문단을 본다.
+8. **관리자 게이트 부재.** catalog 적용은 계획서 전반에서 관리자의 동작으로
+   서술된다 — [`DEVELOPMENT_PLAN.md`](DEVELOPMENT_PLAN.md) Phase 3의 첫
+   완료 기준이 "관리자가 선택한 private 업무방만 생성되고"로 시작한다.
+   그러나 이를 강제하는 코드가 없다. 설정 화면의 `workspace-catalog`
+   섹션에는 `featureGate`가 없다 — 형제 nav 섹션인 `channel-templates`는
+   `featureGate: "channel-templates"`를 갖는다
+   (`desktop/src/features/settings/ui/SettingsPanels.tsx`). featureGate
+   자체는 권한 검사가 아니라 preview-feature 토글이라 이 부재가 곧 침해는
+   아니지만, catalog 카드가 형제 섹션이 따르는 관례에서조차 벗어나 있다는
+   신호다. 실질적인 게이트는 Tauri 쪽에도 없다 —
+   `preflight_workspace_catalog`·`apply_workspace_catalog`
+   (`desktop/src-tauri/src/commands/workspace_catalog.rs`) 모두 서명 키가
+   유효한 워크스페이스 멤버라는 것 말고는 호출자에게 아무것도 요구하지
+   않는다. 그 결과 인증된 워크스페이스 멤버는 누구나 적용을 돌려 표준
+   업무방들의 owner가 될 수 있고, 정작 관리자는 그 방에서 `not_owned`를
+   받는다. [`WORKSPACE_CATALOG.md`](WORKSPACE_CATALOG.md) §8의 owner
+   게이트는 *이미 있는 방을 함부로 채택하지 못하게*는 막지만, 새로 만드는
+   첫 실행이 누구인지는 막지 않는다 — "생성이 곧 owner 권한"이기 때문이다.
+
+   Phase 3 완료 기준 7개 중 이 게이트를 요구하는 항목이 없어 위 판정에는
+   영향이 없었다. 세션 소유자가 세션 D 범위에서 고치는 대신 세션 E로
+   넘기기로 정했다 — 아래 9번과 서로 얽혀 있어서다. 세션 E가 알아야 할
+   것: 이 코드베이스에는 channel-local owner/admin과 구분되는 커뮤니티
+   단위 owner/admin이 이미 있다(`relay_members` 테이블,
+   `crates/buzz-relay/src/handlers/moderation_authz.rs`의
+   `authorize_moderation_action`). "관리자"가 이 커뮤니티 역할을 뜻하는지
+   부터 정하는 것이 설계 결정이고, 그 결정 전까지 확정된 사실은 지금 이
+   흐름 어디서도 role이 확인되지 않는다는 것뿐이다.
+9. **도출된 채널 ID 선점.** §5의 채널 ID를 만드는 네 입력(relay scope,
+   catalog id, item key, generation)은 모두 공개다 — 네임스페이스는
+   오픈소스 코드의 리터럴이고 `item_key`는 `buzz catalog list`가 그대로
+   출력한다. 인증된 사용자라면 누구나 그 UUID를 계산해 관리자가 적용하기
+   전에 그 ID로 채널을 먼저 만들어 둘 수 있다.
+
+   브랜치 전체 리뷰(2026-07-31)에서 나온 관련 결함 — 도출된 채널이 아닌
+   곳에 실린 증명서를 버리는 결합 검사
+   (`record_sits_in_its_derived_channel`,
+   [`WORKSPACE_CATALOG.md`](WORKSPACE_CATALOG.md) §7) — 은 이미 고쳐
+   커밋됐다. 이건 "아무 채널에나 위조 증명서를 발행해 다른 관리자의
+   preflight를 영구히 잠그는" 경로를 막는다. **도출된 ID 자체를 선점하는
+   것은 막지 않는다:**
+
+   - **약한 형태.** catalog 이름이 아닌 다른 이름으로 도출된 ID에 채널을
+     먼저 만들어 둔다 — 이름이 같으면 `conflict`로 걸린다. 그러면 모든
+     관리자의 적용이 `deleted` 또는 `not_owned`로 막히고, `generation`을
+     올리는 코드 경로가 크레이트 전체에 없어 **영구히** 복구되지 않는다.
+     공격자는 provenance를 발행할 필요도 관리자일 필요도 없다 — 채널
+     하나만 먼저 만들면 그 catalog 항목은 그 학교에서 영원히 막힌다.
+   - **강한 형태.** 선점한 채널에서 공격자가 피해 관리자에게 `admin`
+     role을 준다 — kind 9000 PUT_USER의 제3자 role 부여는 대상의 동의를
+     요구하지 않는다(`crates/buzz-relay/src/handlers/side_effects.rs`).
+     `is_owner`(`desktop/src-tauri/src/commands/workspace_catalog.rs`)는
+     `owner`와 `admin`을 동일하게 취급하므로 판정이 `adopted`로 떨어지고,
+     saga가 공격자의 채널을 그대로 채택해 시작 캔버스를 쓰고 성공을
+     보고한다. 화면에는 치환의 흔적이 없다 — ledger의 `name`은 항상
+     catalog 표시 이름이지 그 채널의 실제 이름이 아니다(§10). 관리자는
+     표준 업무방을 성공적으로 만들었다고 믿지만 실제로는 공격자가 만든
+     채널이고, 공격자는 그 채널의 최초 owner라 이후에도 접근권을
+     유지한다.
+
+   닫으려면 채널 결합만으로는 부족하다 — **provenance의 서명자를 확인해야
+   한다.** 지금 결합 검사는 "이 레코드가 도출된 채널에 있는가"만 보고
+   "누가 서명했는가"는 보지 않으므로, 선점한 자기 채널 안에서는 공격자도
+   결합 검사를 통과하는 레코드를 만들 수 있다
+   ([`WORKSPACE_CATALOG.md`](WORKSPACE_CATALOG.md) §7 「남는 구멍」).
+   서명자를 무엇과 비교할지는 위 8번의 "관리자가 누구인가" 결정에 달려
+   있다. `is_owner`가 `owner`뿐 아니라 `admin`도 통과시키는 것이 강한
+   형태를 가능하게 하는 지점이므로, 서명자 확인과 함께 재검토한다.
 
 <details>
 <summary>원래 계획 (참고)</summary>
@@ -491,6 +562,10 @@ e2e_workspace_catalog` 4 passed, `just schoolx-upstream-check` 3/3 통과.
 - 같은 채널의 `AI 초안`과 출처 metadata
 - 사용자가 검토·수정해 canvas에 수동 반영하는 흐름
 - 비활성 agent 비용, 실패, timeout, 권한 상실 상태
+- workspace catalog 적용에 관리자 권한 게이트 추가 (세션 D 「넘긴 것」
+  8번)
+- workspace catalog provenance 서명자 검증으로 도출된 채널 ID 선점을
+  닫고 `is_owner`의 admin 허용 여부 재검토 (세션 D 「넘긴 것」 9번)
 
 완료 조건:
 

@@ -171,6 +171,44 @@ membership 재확인과 생성-게시 사이 race까지 함께 테스트한다. 
 없다. 이 매트릭스는 회귀를 자동으로 잡아주지 못하며, 각 세션 시작 전에 수동
 실행이 필요하다. CI 연결은 세션 F(패키징) 범위로 둔다.
 
+다음 둘은 세션 A 이후 세션 D가 이 계약 위에 얹은 workspace catalog
+표면에서 나온 gap이다 — 위 접근 매트릭스가 다루는 채널 read/write 축이
+아니라 *누가 적용을 실행할 수 있는가*, *도출된 채널 ID를 누가 선점할 수
+있는가*라는 별도 축이다.
+
+**workspace catalog 적용에 관리자 역할 검사가 없다.** catalog는 계획서
+전반에서 관리자의 동작으로 서술되지만
+([`DEVELOPMENT_PLAN.md`](DEVELOPMENT_PLAN.md) Phase 3의 첫 완료 기준),
+`preflight_workspace_catalog`·`apply_workspace_catalog`
+(`desktop/src-tauri/src/commands/workspace_catalog.rs`)는 서명 키가
+유효한 워크스페이스 멤버라는 것 말고는 호출자에게 아무것도 요구하지
+않는다. 인증된 멤버 누구나 적용을 돌려 표준 업무방의 owner가 될 수 있고,
+실제 관리자는 그 방에서 `not_owned`를 받는다. **이번 실행이 만들지 않은
+방을 함부로 채택하지 못하게 막는 owner
+게이트([`WORKSPACE_CATALOG.md`](WORKSPACE_CATALOG.md) §8)는 그대로
+유효하다** — owner 확인 전에는 캔버스도 증명서도 쓰지 않는다. 막지 못하는
+것은 *새 방을 누가 먼저 만들 수 있는가*뿐이다. 세션 E로 넘어간다
+([`IMPLEMENTATION_HANDOFF.md`](IMPLEMENTATION_HANDOFF.md) 세션 D 「넘긴
+것」 8번).
+
+**도출된 workspace catalog 채널 ID는 공개·예측 가능해서 선점할 수 있다.**
+[`WORKSPACE_CATALOG.md`](WORKSPACE_CATALOG.md) §5의 채널 ID를 만드는 네
+입력(relay scope, catalog id, item key, generation)은 모두 공개다. 인증된
+사용자는 관리자가 적용하기 전에 그 ID로 채널을 먼저 만들어 둘 수 있다.
+약한 형태는 이름만 다른 채널을 선점해 모든 관리자의 적용을
+`deleted`·`not_owned`로 영구히 막는 것이다 — `generation`을 올리는 경로가
+없어 복구가 안 된다. 강한 형태는 선점한 채널에서 피해 관리자에게 `admin`
+role을 주는 것이다 — 그 role 부여에 대상의 동의는 필요 없고, `is_owner`가
+`owner`와 `admin`을 동일하게 취급해 saga가 공격자의 채널을 그대로
+채택한다. **도출된 채널에 실리지 않은 증명서를 버리는 결합 검사는 이미
+있다** (`record_sits_in_its_derived_channel`,
+[`WORKSPACE_CATALOG.md`](WORKSPACE_CATALOG.md) §7) — 아무 채널에나 위조
+증명서를 발행해 다른 사람의 preflight를 잠그는 경로는 막는다. 막지 못하는
+것은 선점한 **자기 채널 안에서** 그 결합 검사를 통과하는 데이터를 만드는
+경로다. 세션 E로 넘어간다
+([`IMPLEMENTATION_HANDOFF.md`](IMPLEMENTATION_HANDOFF.md) 세션 D 「넘긴
+것」 9번).
+
 ## 6. 관련 문서
 
 - [`DEVELOPMENT_PLAN.md`](DEVELOPMENT_PLAN.md) — §2.6 최소 권한, §7 Phase 1
