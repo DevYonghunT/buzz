@@ -60,6 +60,7 @@ const settingsNavGroups: Array<{
       "profile",
       "appearance",
       "notifications",
+      "voice",
       "shortcuts",
       "custom-emoji",
       "local-archive",

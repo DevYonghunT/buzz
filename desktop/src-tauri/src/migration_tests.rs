@@ -19,11 +19,9 @@ fn canonical_dev_data_dir_returns_none_for_root() {
     assert!(canonical_dev_data_dir(Path::new("/")).is_none());
 }
 
-/// SchoolX adopts no predecessor app-data directory. Upstream Buzz uses this
-/// hook to carry state across its own `sprout` → `buzz` rename; SchoolX is a
-/// rebrand of Buzz, not a rename of an earlier SchoolX, so there is nothing of
-/// its own to adopt — and adopting Buzz's would copy a co-installed Buzz's
-/// identity and agent settings into SchoolX on first launch.
+/// Deliberate: SchoolX rebrands Buzz, not an earlier SchoolX, so it has nothing of its own to
+/// adopt. Upstream reuses this hook for its `sprout` → `buzz` rename; doing so here would leak
+/// a co-installed Buzz's identity and agent settings into SchoolX on first launch.
 #[test]
 fn legacy_app_data_dir_adopts_nothing() {
     for current in [
@@ -41,10 +39,6 @@ fn legacy_app_data_dir_adopts_nothing() {
 /// The specific directory that must never be adopted: a co-installed Buzz's.
 #[test]
 fn legacy_app_data_dir_never_points_at_buzz() {
-    let current = PathBuf::from("/Users/me/Library/Application Support/io.github.schoolx520.app");
-    assert!(legacy_app_data_dir(&current).is_none());
-
-    // Even asked about a Buzz-shaped path, it must not resolve a source dir.
     let buzz = PathBuf::from("/Users/me/Library/Application Support/xyz.block.buzz.app");
     assert!(legacy_app_data_dir(&buzz).is_none());
 }

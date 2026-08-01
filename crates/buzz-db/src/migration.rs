@@ -347,6 +347,7 @@ mod tests {
             "push_gateway_delivery_auth_replays",
             "push_gateway_delivery_request_replays",
             "product_feedback",
+            "replica_heartbeat",
         ] {
             if normalized[insert_pos..].contains(&format!("'{value}'")) {
                 globals.insert(value.to_owned());
@@ -560,7 +561,7 @@ mod tests {
         let mut migrations: Vec<_> = MIGRATOR.iter().collect();
         migrations.sort_by_key(|migration| migration.version);
 
-        assert_eq!(migrations.len(), 26);
+        assert_eq!(migrations.len(), 27);
         assert_eq!(migrations[0].version, 1);
         assert_eq!(&*migrations[0].description, "initial schema");
         assert!(migrations[0]
@@ -899,6 +900,19 @@ mod tests {
             .contains("CREATE INDEX relay_invites_expires_at_idx ON relay_invites (expires_at)"));
         assert!(!relay_invites.contains("_operator_global_tables"));
 
+        // Replica heartbeat (upstream 0026, renumbered after 0025_relay_invites
+        // landed on main): the fence's portable read-side observation. A single
+        // CHECK'd row makes the token update the serialization point (multi-pod
+        // commit ordering), and the epoch column is what detects token resets —
+        // both are load-bearing for the routing proof.
+        assert_eq!(migrations[25].version, 26);
+        let heartbeat = migrations[25].sql.as_str();
+        assert!(heartbeat.contains("CREATE TABLE replica_heartbeat"));
+        assert!(heartbeat.contains("CHECK (id = 1)"));
+        assert!(heartbeat.contains("epoch"));
+        assert!(heartbeat.contains("INSERT INTO replica_heartbeat (id) VALUES (1)"));
+        assert!(heartbeat.contains("_operator_global_tables"));
+
         // SchoolX-only migrations live in a reserved `9001+` range so they
         // never collide with the next upstream version number. sqlx keys
         // `_sqlx_migrations` by version and does *not* reject duplicates at
@@ -906,12 +920,12 @@ mod tests {
         // migrations forever. The range also keeps SchoolX migrations sorted
         // after every upstream one, which is required: they read columns that
         // upstream migrations create.
-        assert_eq!(migrations[25].version, 9001);
-        let agent_add_policy = migrations[25].sql.as_str();
+        assert_eq!(migrations[26].version, 9001);
+        let agent_add_policy = migrations[26].sql.as_str();
         assert!(agent_add_policy.contains("channel_add_policy = 'owner_only'::channel_add_policy"));
         assert!(agent_add_policy.contains("agent_owner_pubkey IS NOT NULL"));
         assert!(
-            migrations[..25]
+            migrations[..26]
                 .iter()
                 .all(|migration| migration.version < 9001),
             "upstream migrations must stay below the SchoolX reserved range",
@@ -1165,6 +1179,7 @@ mod tests {
             .await
             .expect("retry succeeds after operator repair");
         // Highest embedded version, which SchoolX's reserved `9001+` range owns.
+        // Upstream's newest migration is 0026; 9001 still sorts last.
         assert_eq!(applied_versions(&pool).await.last().copied(), Some(9001));
     }
 

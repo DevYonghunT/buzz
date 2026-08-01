@@ -31,6 +31,7 @@ export const en = {
       appearance: "Appearance",
       profile: "Profile",
       notifications: "Notifications",
+      voice: "Voice",
       experimental: "Experiments",
       agents: "Agents",
       channelTemplates: "Templates",

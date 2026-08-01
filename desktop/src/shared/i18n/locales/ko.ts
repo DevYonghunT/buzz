@@ -28,6 +28,7 @@ export const ko = {
       appearance: "화면 및 언어",
       profile: "프로필",
       notifications: "알림",
+      voice: "음성",
       experimental: "실험 기능",
       agents: "에이전트",
       channelTemplates: "템플릿",
