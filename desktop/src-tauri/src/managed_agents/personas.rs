@@ -33,7 +33,11 @@ const BUILT_IN_PERSONAS: &[BuiltInPersona] = &[
         system_prompt: FIZZ_SYSTEM_PROMPT,
         name_pool: &[
             "Nectar", "Comet", "Bramble", "Clover", "Pollen", "Amber", "Daisy", "Mason", "Thistle",
-            "Waxwing", "Hive", "Meadow", "Juniper", "Aster", "Sage", "Willow", "Orchard", "Buzz",
+            // "Buzz" was upstream's last entry here. It is a bee word, not a product
+            // identifier, so it never risked sharing a data dir or keychain — but SchoolX
+            // is a rebrand, and a teacher should not meet an agent named after the parent
+            // product. "Linden" is a bee-forage tree, matching the pool's other trees.
+            "Waxwing", "Hive", "Meadow", "Juniper", "Aster", "Sage", "Willow", "Orchard", "Linden",
         ],
         model: None,
         runtime: None,
