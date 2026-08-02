@@ -325,12 +325,12 @@ fresh-install `en-US`→영어, 미지원 `ja-JP`→한국어, 한·영 양방�
 
 | 항목 | 값 |
 |---|---|
-| 마지막 확인 SHA | `3a4bf513df0e0c258587bfcbed9463d63723b56b` |
-| 확인 일시 | 2026-07-28 (세션 C 시작 전) |
-| 받은 커밋 수 | 2 (`925a9a7b`부터) |
-| 병합 전 SchoolX tip | `06822959` (`schoolx-pre-upstream-sync-20260728-1550` 브랜치로 보존) |
-| 텍스트 충돌 | 없음 |
-| 병합 커밋 | `545d1d4e` |
+| 마지막 확인 SHA | `b1b283cd4c7f926e12eeee8ae1f38c7471922b16` |
+| 확인 일시 | 2026-08-01 |
+| 받은 커밋 수 | 118 (`3a4bf513`부터) |
+| 병합 전 SchoolX tip | `a90879c8` (`schoolx-pre-upstream-sync-20260801-1014` 브랜치로 보존) |
+| 텍스트 충돌 | 8개 — `Cargo.toml`, `crates/buzz-db/src/migration.rs`, `crates/buzz-relay/src/handlers/ingest.rs`, `desktop/scripts/check-file-sizes.mjs`, `desktop/src-tauri/src/huddle/models.rs`, `desktop/src-tauri/tauri.conf.json`, `desktop/src/app/AppShell.tsx`, `desktop/tests/helpers/bridge.ts` |
+| 병합 커밋 | `5e9e40f3` (후속 `7c6ab8d2`) |
 
 다음 동기화 때 이 표의 SHA를 갱신한다.
 
@@ -381,6 +381,88 @@ Homebrew postgres(5432)에 붙어 `role "buzz" does not exist`로 죽는다.
 
 전체 stdout 로그는 세션 로컬 경로에 있었고 repo에 보존하지 않았다. 위
 표의 명령을 그대로 재실행하면 같은 값을 얻는다.
+
+### 2026-08-01 동기화에서 드러난 것
+
+텍스트 충돌 8개는 위 표에 있고 모두 해소됐다. 이번 동기화의 핵심은 그 8개가
+아니라 **충돌 없이 넘어간 부분** — 그중 넷은 실제로 틀렸거나 새로 깨져
+있었거나(아래 1·2·4), 도구 자체의 성질 때문에 검증이 비어 있었다(3). 전부
+병합된 트리에서 직접 실행해 확인했다.
+
+1. **git이 보지 못하는 동일-값 충돌.** `crates/buzz-db/src/migration.rs`의
+   `embedded_migrator_contains_consolidated_initial_schema`가 양쪽에서 각각
+   `26`을 단언했다 — upstream은 "내 마이그레이션 개수"로, SchoolX는 "내
+   인덱스"로 쓴 값이었다. 텍스트가 같아 충돌이 나지 않았지만 실제 트리는
+   27개였고, 병합 결과에는 같은 인덱스에 서로 다른 버전(`9001`과 `26`)을
+   요구하는 모순된 assert가 나란히 남아 있었다. `migrations.len()`을 27로,
+   가드의 `migrations[..25]`를 `migrations[..26]`으로 고쳐 실제 인덱스와
+   맞췄다. 파일 이름 충돌도 버전 번호 충돌도 아니고 **같은 정수를 서로 다른
+   의미로 쓴** 경우라, 검사 1(마이그레이션 버전 충돌)이 왜 필요한지 지금까지
+   나온 사례 중 가장 날카롭다.
+2. **타입이 있는 문자열의 회귀.** upstream이 설정 화면에 Voice 섹션을
+   추가하며 원문 그대로의 영어 라벨(`"Voice"`)을 넣었지만, SchoolX는 이
+   라벨을 `TranslationKey`로 타입을 매겨 뒀다. `pnpm --dir desktop typecheck`가
+   `Type '"Voice"' is not assignable to type 'TranslationKey'`로 즉시 잡았다.
+   두 카탈로그(`en.ts`, `ko.ts`)에 `settings.sections.voice`를 추가하고
+   `SettingsPanels.tsx`가 그 키를 가리키게 해서 고쳤다 — 하드코딩 문자열로
+   되돌리지 않았다. 번역 카탈로그 충돌 원칙("의미가 바뀌면 키를 유지하고
+   문구를 새 의미에 맞춘다")이 upstream이 아예 새로 추가한 키에도 그대로
+   적용된 경우다.
+3. **`just schoolx-upstream-check`의 검사 3은 머지가 커밋되지 않은 동안
+   공허하게 통과한다.** 검사 3은 `${since}...HEAD`를 diff하는데, `since`(가장
+   최근 `schoolx-pre-upstream-sync-*` 브랜치)가 머지 커밋이 생기기 전에는
+   곧 현재 HEAD이므로 범위가 비어 "no source files in scope"로 통과한다.
+   이번 동기화에서도 커밋 전 실행은 이렇게 공허하게 통과했다. **머지 커밋을
+   만든 뒤 다시 실행해야 진짜 검사가 된다** — 스킬이 안내하는 절차 순서(충돌
+   해소·검증 다음에 기록·커밋)를 그대로 따르면 누구나 만나는 함정이므로
+   도구의 속성으로 기록해 둔다.
+4. **fork의 `main`이 262커밋 밀려 있었고, 새 upstream 게이트가 그 위에
+   서 있었다.** upstream이 데스크톱 파일 크기 초과 목록(`overrides` map)을
+   `merge-base origin/main HEAD` 기준 diff 기반 ratchet으로 교체했다. fork의
+   `main`은 최초 fork 시점에 멈춰 있었으므로 ratchet이 upstream의 262커밋
+   전체 성장분을 "이 브랜치의 diff"로 읽어 16개 파일에서 실패했다. `origin/main`을
+   `upstream/main`으로 fast-forward했고(SchoolX 커밋이 얹혀 있지 않은 순수
+   fast-forward임을 확인했다), 그 결과 진짜 사례 하나로 좁혀졌다 — 세션 B의
+   제품 식별자 작업이 `desktop/src-tauri/src/migration_tests.rs`를 994줄에서
+   1004줄로 밀어 1000줄 상한을 넘겼다. 저장소 규칙대로 상한을 올리거나
+   override를 추가하지 않고 SchoolX가 추가한 줄 자체를 다시 줄여 고쳤다(998줄).
+   **fork의 `main`을 최신으로 유지하는 것은 이제 하우스키핑이 아니라 유지보수
+   요구사항이다.**
+
+후속 커밋 `7c6ab8d2`도 이번 동기화가 범위를 넓힌 결과다. upstream 에이전트
+닉네임 풀(`desktop/src-tauri/src/managed_agents/personas.rs`)의 마지막 항목이
+`"Buzz"`였다 — bee 테마 이름이지 제품 식별자가 아니어서 데이터 디렉터리·
+키체인·URL 스킴을 공유할 위험이 없었고, 그래서 세션 B의 식별자 전수 조사에도
+걸리지 않았다. 이번 머지가 이 파일을 처음으로 검사 3의 스캔 범위에 끌어들였고,
+커밋 뒤 재실행에서 히트로 잡혔다. SchoolX 교사가 부모 제품 이름을 딴 에이전트를
+만나서는 안 되므로, 풀의 다른 나무 이름들과 맞춰 `"Linden"`으로 바꿨다.
+
+검증 결과(병합된 트리에서 관찰):
+
+| 명령 | 결과 |
+|---|---|
+| `just schoolx-upstream-check` | 3/3 통과, 대상 301개 파일 |
+| `cargo build --workspace` | 통과 |
+| `just test-unit` | 통과, 8/8 그룹 |
+| `cargo test --manifest-path desktop/src-tauri/Cargo.toml` | 2,070 passed / 0 failed |
+| `pnpm --dir desktop test` | 3,920 / 3,920 |
+| `pnpm --dir desktop typecheck` | 통과 |
+| `just test-e2e e2e_access_matrix` | 17/17 — 세션 A 보안 계약이 병합 후에도 성립 |
+| `just test-e2e e2e_workspace_catalog` | 4/4 |
+
+미해결로 남은 것 — 해결된 것으로 표시하지 않는다:
+
+- `desktop/src-tauri/src/huddle/models.rs`가 999줄로 1000줄 상한 바로
+  아래다. 병합 해소가 SchoolX 자신의 코드 안에서 한 줄을 되찾아 상한을
+  넘기지 않게 한 것이지 상한을 올린 게 아니다. 이 파일은 실제로 분리가
+  필요하다.
+- `relay_admission.rs`의 Tauri 테스트 하나
+  (`concurrent_429_extends_the_window_for_parked_waiters`)가 병렬 실행에서만
+  플래키했다. 격리 실행과 직렬 실행에서는 통과하고, 파일 자체는 병합
+  전후로 byte-identical하다 — 원인은 프로세스 전역 게이트를 테스트별 가상
+  시계로 읽는 경합이다. 지금까지 known-flaky는 `crates/buzz-agent/tests/fake_llm.rs`
+  하나만 적어 왔는데, 이 파일도 같은 분류에 추가한다 — 다음 세션이 이걸
+  회귀로 오분류하지 않도록.
 
 ## 필수 비교 명령
 
