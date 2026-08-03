@@ -239,45 +239,44 @@ impl CatalogEffects for RelayEffects<'_> {
     async fn is_owner(&self, channel_id: Uuid) -> Result<bool, EffectError> {
         let keys = self.state.signing_keys().map_err(EffectError)?;
         let me = keys.public_key().to_hex();
-        let response = crate::commands::channels::get_channel_members(
-            channel_id.to_string(),
-            self.state.clone(),
-        )
-        .await
-        .map_err(EffectError)?;
-        // `owner`만 받는다. relay 전반의 쓰기 권한 판정은 `admin`도 같은
-        // 등급으로 보지만, 채택이 묻는 것은 「여기서 쓸 수 있는가」가 아니라
-        // 「이 방이 우리 것인가」다. `admin`은 남이 줄 수 있고 수신자 동의도
-        // 필요 없으므로, 도출 ID를 선점한 사람이 피해자에게 `admin`을 주는
-        // 것만으로 이 게이트를 통과시킬 수 있다. `owner`는 생성자에게
-        // 고정되어 그럴 수 없다. 설계 근거: docs/schoolx-2/CATALOG_SECURITY.md §6.
-        Ok(response
-            .members
-            .iter()
-            .any(|m| m.pubkey == me && m.role == "owner"))
+        Ok(self.channel_owner(channel_id).await? == Some(me))
     }
 
-    // `m.pubkey`는 relay가 kind:39002의 `p` 태그에 `hex::encode`로 적어 넣은
-    // 소문자 hex 문자열을 그대로 옮긴 값이다
-    // (`nostr_convert::channel_members_from_event`가 태그 값을 그대로 복사하고,
-    // 그 값을 채우는 유일한 발행처는
-    // `crates/buzz-relay/src/handlers/side_effects.rs::emit_group_discovery_events`의
-    // `KIND_NIP29_GROUP_MEMBERS` 블록이며 거기서 `hex::encode(&m.pubkey)`를 쓴다).
-    // `ProvenanceRecord::signer`(`ev.pubkey.to_hex()`, 위 `provenance_records_from_events`
-    // 참고)도 같은 `hex::encode` 경로를 타므로 두 값의 인코딩이 맞는다 — `preflight`가
-    // 이 값을 `signer`와 정확한 문자열(`==`)로 비교한다.
+    /// 채널의 **생성자**를 돌려준다 — 역할 테이블의 `owner`가 아니다.
+    ///
+    /// 채택이 묻는 것은 「여기서 쓸 수 있는가」가 아니라 「이 방이 우리 것인가」다.
+    /// 역할로는 그 답을 낼 수 없다: `owner`는 상위 등급이 남에게 **줄 수 있는
+    /// 값**이고(`buzz-db/src/channel.rs`의 부여 검사는 「주는 쪽이 elevated인가」만
+    /// 본다) 개수 상한도 없다 — 하한 가드("마지막 owner를 못 뺀다")만 있다.
+    /// 그래서 도출 ID를 선점한 공격자가 피해자에게 `admin`이 아니라 **`owner`**를
+    /// 주면, 역할 기반 판정은 피해자에게 「이 방은 우리 것」이라고 답한다.
+    /// `admin`만 떼는 것으로는 닫히지 않는다.
+    ///
+    /// `channels.created_by`는 생성 시 한 번 쓰이고 갱신되지 않으며 relay의 어떤
+    /// 경로도 그 컬럼을 다시 쓰지 않는다. 그래서 선점자가 무슨 역할을 뿌리든
+    /// 생성자는 바뀌지 않는다. 설계 근거: docs/schoolx-2/CATALOG_SECURITY.md §6.
+    ///
+    /// 값은 relay가 kind:39000의 `created_by` 태그에 `hex::encode`로 적은 소문자
+    /// hex다(`side_effects.rs::emit_group_discovery_events`, 그리고 backfill 경로인
+    /// `buzz-admin`의 reconcile도 같은 태그를 낸다). `ProvenanceRecord::signer`
+    /// (`ev.pubkey.to_hex()`)도 같은 `hex::encode` 경로라 두 값의 인코딩이 맞는다 —
+    /// `preflight`가 이 값을 `signer`와 정확한 문자열(`==`)로 비교한다.
+    ///
+    /// kind:39000은 relay만 저작할 수 있다(`is_relay_only_kind`, 회귀 테스트
+    /// `e2e_relay.rs::test_client_submitted_nip29_group_metadata_and_admins_are_rejected`).
+    /// 그 불변식이 없으면 이 값도 위조 가능해져 §6이 다시 무너진다.
+    ///
+    /// 태그가 비어 있으면 `Ok(None)` — 그 태그가 생기기 전에 쓰인 이벤트다.
+    /// 「모른다」이지 「아무나」가 아니므로, `preflight`는 이 채널의 증명서를 전부
+    /// 버리고 saga는 채택을 거부한다. 검증할 수 없는 것을 통과시키지 않는다.
     async fn channel_owner(&self, channel_id: Uuid) -> Result<Option<String>, EffectError> {
-        let response = crate::commands::channels::get_channel_members(
+        let detail = crate::commands::channels::get_channel_details(
             channel_id.to_string(),
             self.state.clone(),
         )
         .await
         .map_err(EffectError)?;
-        Ok(response
-            .members
-            .iter()
-            .find(|m| m.role == "owner")
-            .map(|m| m.pubkey.clone()))
+        Ok(Some(detail.created_by).filter(|creator| !creator.is_empty()))
     }
 
     async fn publish_provenance(

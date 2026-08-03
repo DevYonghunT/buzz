@@ -531,6 +531,15 @@ async fn reconcile_channels(relay_key_arg: Option<String>) -> Result<()> {
             }
             tags.push(Tag::parse(["closed"])?);
             tags.push(Tag::parse(["t", &channel.channel_type])?);
+            // Must match `emit_group_discovery_events` in the relay — clients
+            // read this as immutable channel provenance and cannot tell which
+            // producer wrote the event. Omitting it here would make a
+            // backfilled channel look creatorless, which SchoolX catalog
+            // adoption reads as "cannot verify" and refuses.
+            tags.push(Tag::parse([
+                "created_by",
+                &hex::encode(&channel.created_by),
+            ])?);
 
             let event = EventBuilder::new(Kind::Custom(39000), "")
                 .tags(tags)

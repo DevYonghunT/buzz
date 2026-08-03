@@ -124,24 +124,31 @@ pub trait CatalogEffects: Send + Sync {
     /// 시작 캔버스를 적용한다.
     async fn set_canvas(&self, channel_id: Uuid, content: &str) -> Result<(), EffectError>;
 
-    /// 현재 사용자가 이 채널의 owner인가.
+    /// 현재 사용자가 이 채널을 만든 사람인가.
+    ///
+    /// 구현은 [`CatalogEffects::channel_owner`]에서 도출해야 한다 —
+    /// `channel_owner(id) == Some(나)`. 별도 근거로 답하면 두 값이 어긋나는
+    /// 상태가 생기고, 그 틈이 정확히 §6이 막으려는 것이다.
     async fn is_owner(&self, channel_id: Uuid) -> Result<bool, EffectError>;
 
-    /// 이 채널의 owner pubkey — [`ProvenanceRecord::signer`]와 같은 인코딩
-    /// (소문자 hex)이어야 한다. owner를 알 수 없으면 `None`.
+    /// 이 채널을 **만든 사람**의 pubkey — [`ProvenanceRecord::signer`]와 같은
+    /// 인코딩(소문자 hex)이어야 한다. 알 수 없으면 `None`.
+    ///
+    /// **역할이 아니라 생성자다.** 「이 방이 우리 것인가」를 역할 테이블의
+    /// `owner`로 답하면 안 된다: `owner`는 상위 등급이 남에게 줄 수 있는
+    /// 값이고 개수 상한도 없다. 그래서 도출 ID를 선점한 공격자가 피해자에게
+    /// `owner`를 주는 것만으로 역할 기반 판정을 통과시킬 수 있다. 생성자는
+    /// 생성 시 한 번 정해지고 갱신되지 않으므로 그럴 수 없다.
+    /// 설계 근거: `docs/schoolx-2/CATALOG_SECURITY.md` §6.
     ///
     /// **인코딩을 반드시 맞춰야 한다.** `preflight`는 이 값을
     /// `ProvenanceRecord::signer`와 정확한 문자열(`==`)로 비교한다 —
     /// 대소문자나 bech32/npub 같은 다른 인코딩으로 돌려주면 실제로는 같은
-    /// owner라도 매번 불일치로 보여 그 채널의 모든 증명서가 조용히
+    /// 사람이라도 매번 불일치로 보여 그 채널의 모든 증명서가 조용히
     /// 버려진다. 버려진 결과가 `Err`가 아니라 "적용한 적 없음"으로만
     /// 보이므로(§5) 이 실수는 로그에도 남지 않는다.
     ///
-    /// `is_owner`와 다르다. 저쪽은 「내가 owner인가」이고 이쪽은 「owner가
-    /// 누구인가」다. provenance 검증은 후자를 필요로 한다 — 증명서를 남긴
-    /// 사람이 그 채널의 owner였는지 물어야 하기 때문이다.
-    ///
-    /// `Ok(None)`은 「채널은 있는데 owner를 특정할 수 없다」이지 오류가
+    /// `Ok(None)`은 「채널은 있는데 생성자를 특정할 수 없다」이지 오류가
     /// 아니다. 그 경우 그 채널의 증명서는 전부 버린다 — 검증할 수 없는 것을
     /// 통과시키지 않는다. `Err`도 같은 방향으로 다룬다 — 호출부(`preflight`)가
     /// 레코드 단위로 버리지 전체를 실패시키지 않는다.
@@ -231,16 +238,19 @@ pub(crate) mod fake {
         /// 있게 하는 것이 유일한 목적이며, 이건 의도적인 설계지 필터링을
         /// 깜빡한 게 아니다.
         pub published: Mutex<Vec<(Uuid, Provenance)>>,
-        /// 현재 사용자가 owner인 채널 UUID 집합.
+        /// 채널별 **생성자** pubkey.
         ///
         /// `channels`(= 접근 가능한/보이는 채널)와 고의로 분리한다 —
-        /// 그래야 "채널은 존재하고 접근도 되지만 내가 owner는 아니다"라는,
+        /// 그래야 "채널은 존재하고 접근도 되지만 내가 만든 것은 아니다"라는,
         /// `channels` 멤버십만으로는 표현할 수 없는 상태를 테스트가 만들 수
-        /// 있다.
-        pub owned: Mutex<HashSet<Uuid>>,
-        /// 채널별 owner pubkey. `owned`(내가 owner인 채널)와 분리한다 —
-        /// 「내가 owner다」와 「owner가 누구다」는 다른 질문이고, 선점 공격은
-        /// 그 차이에서 산다.
+        /// 있다. 그게 선점 공격의 모양이다.
+        ///
+        /// **`is_owner`와 `channel_owner`가 둘 다 이 하나를 본다.** 예전에는
+        /// 「내가 owner인가」를 별도 집합(`owned`)으로 들고 있었는데, 그러면
+        /// 두 답이 서로 어긋나는 상태를 fake가 만들 수 있었다 — 실제
+        /// 어댑터는 `is_owner`를 `channel_owner() == Some(me)`로 도출하므로
+        /// 만들 수 없는 상태다. fake가 현실에 없는 조합을 표현할 수 있으면
+        /// 그 조합 위에서 통과한 테스트는 아무것도 보장하지 않는다.
         pub owners: Mutex<HashMap<Uuid, String>>,
     }
 
@@ -276,7 +286,7 @@ pub(crate) mod fake {
         ///
         /// `set_canvas`를 대신 부르면 `calls`가 올라가 "saga가 쓰지
         /// 않았다"를 호출 횟수로 관측할 수 없게 된다. 그래서 저장소에 직접
-        /// 넣는다 — `channels`·`owned`를 직접 채워 이전 실행의 흔적을 만드는
+        /// 넣는다 — `channels`·`owners`를 직접 채워 이전 실행의 흔적을 만드는
         /// 다른 시딩과 같은 방식이다.
         pub(crate) fn seed_canvas(&self, channel_id: Uuid, content: &str) {
             self.canvases
@@ -329,8 +339,12 @@ pub(crate) mod fake {
             self.seed_provenance(channel_id, "attacker", provenance);
         }
 
-        /// 이 채널의 owner를 지정한다.
-        pub(crate) fn set_channel_owner(&self, channel_id: Uuid, pubkey: &str) {
+        /// 이 채널을 **누가 만들었는지** 지정한다.
+        ///
+        /// `FAKE_ME`를 주면 「내가 만든 방」이고 그때만 `is_owner`가 참이다.
+        /// 다른 값을 주면 「남이 만든 방」 — 채널이 보이고 내가 멤버여도
+        /// 채택은 거부되고 그 채널의 증명서는 인정되지 않는다.
+        pub(crate) fn set_channel_creator(&self, channel_id: Uuid, pubkey: &str) {
             self.owners
                 .lock()
                 .expect("lock")
@@ -437,7 +451,7 @@ pub(crate) mod fake {
                 id: spec.id,
                 name: spec.name.clone(),
             });
-            self.owned.lock().expect("lock").insert(spec.id);
+            // 만든 사람이 생성자다. `is_owner`도 여기서 답이 나온다.
             self.owners
                 .lock()
                 .expect("lock")
@@ -475,7 +489,13 @@ pub(crate) mod fake {
 
         async fn is_owner(&self, channel_id: Uuid) -> Result<bool, EffectError> {
             self.take_failure("is_owner")?;
-            Ok(self.owned.lock().expect("lock").contains(&channel_id))
+            // 실제 어댑터와 같은 도출: 「내가 owner인가」 = 「생성자가 나인가」.
+            Ok(self
+                .owners
+                .lock()
+                .expect("lock")
+                .get(&channel_id)
+                .is_some_and(|creator| creator == FAKE_ME))
         }
 
         async fn channel_owner(&self, channel_id: Uuid) -> Result<Option<String>, EffectError> {
@@ -530,5 +550,41 @@ mod tests {
         assert_eq!(record.channel_id, Uuid::nil());
         assert_eq!(record.signer, "abc123");
         assert_eq!(record.provenance.item_key, "meeting");
+    }
+
+    /// fake의 `is_owner`는 `channel_owner`에서 **도출된다** — 실제 어댑터와
+    /// 같은 방식이다(`RelayEffects::is_owner`는 `channel_owner(id) == Some(me)`).
+    ///
+    /// 예전 fake는 「내가 owner인가」를 별도 집합으로 들고 있었고, 그래서
+    /// 「`is_owner`는 참인데 `channel_owner`는 남」이라는 상태를 만들 수
+    /// 있었다. 그 조합은 현실에 없고, 그 위에서 통과한 테스트는 아무것도
+    /// 보장하지 않는다. 이 테스트가 도출을 고정한다.
+    ///
+    /// 이것이 §6의 선점 공격이 fake에서 **표현조차 안 되는** 이유이기도
+    /// 하다: 역할이라는 개념이 이 인터페이스에 없으므로, 공격자가 피해자에게
+    /// `owner`를 주는 수를 흉내 낼 자리 자체가 없다.
+    #[tokio::test]
+    async fn is_owner_is_derived_from_the_creator() {
+        let fx = fake::FakeEffects::new();
+        let mine = Uuid::from_u128(1);
+        let theirs = Uuid::from_u128(2);
+        let unknown = Uuid::from_u128(3);
+
+        fx.set_channel_creator(mine, fake::FAKE_ME);
+        fx.set_channel_creator(theirs, "attacker");
+
+        assert!(fx.is_owner(mine).await.expect("is_owner"));
+        assert!(!fx.is_owner(theirs).await.expect("is_owner"));
+        // 생성자를 모르는 채널은 내 것이 아니다 — 모른다를 통과로 읽지 않는다.
+        assert!(!fx.is_owner(unknown).await.expect("is_owner"));
+
+        assert_eq!(
+            fx.channel_owner(theirs).await.expect("channel_owner"),
+            Some("attacker".to_string())
+        );
+        assert_eq!(
+            fx.channel_owner(unknown).await.expect("channel_owner"),
+            None
+        );
     }
 }

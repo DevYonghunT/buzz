@@ -122,8 +122,13 @@ export const en = {
       confirm_recreate: "You deleted this room before. Create it again?",
       resolve_conflict:
         "A room with this name already exists. SchoolX will not adopt it automatically.",
+      // Adoption is anchored on who *created* the room, which never changes —
+      // so this is not "you lack a permission someone could grant you". Being
+      // made an owner or admin of the room will not unblock it. The only way
+      // forward is for the person who created it to run this themselves.
+      // See `CATALOG_SECURITY.md` §6.
       request_ownership:
-        "This room exists but you do not own it. Nothing was changed — ask an owner to apply it.",
+        "This room was created by someone else. Nothing was changed — ask whoever created it to apply this item.",
     },
     renamed: "Renamed by a member",
     // Shown instead of a room name for `retired` items: the catalog entry is

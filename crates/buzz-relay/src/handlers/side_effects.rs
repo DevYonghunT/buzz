@@ -1083,6 +1083,26 @@ pub async fn emit_group_discovery_events(
         tags.push(Tag::parse(["closed"])?);
         // Channel type tag so clients can distinguish stream/forum/dm without inference
         tags.push(Tag::parse(["t", &channel.channel_type])?);
+        // Who created this channel, as immutable provenance.
+        //
+        // Distinct from the roles in kind:39001/39002 in the one way that
+        // matters: `channels.created_by` is written once at creation and never
+        // updated, whereas `owner` is a grantable role with no cap on how many
+        // members hold it (`buzz-db/src/channel.rs` guards only against
+        // removing the *last* owner). A client deciding "is this room ours?"
+        // from the role table can be fooled by an attacker who squats a
+        // derived channel id and then grants the victim `owner` — the victim
+        // sees themselves as an owner of the attacker's room. Anchoring on the
+        // creator instead cannot be forged that way, because no relay path
+        // rewrites this column. SchoolX catalog adoption relies on exactly
+        // this; design ref `docs/schoolx-2/CATALOG_SECURITY.md` §6.
+        //
+        // Lowercase hex, same `hex::encode` as the `p` tags below, so clients
+        // can compare the two without normalising.
+        tags.push(Tag::parse([
+            "created_by",
+            &hex::encode(&channel.created_by),
+        ])?);
         // Optional topic / purpose for richer client UX
         if let Some(ref topic) = channel.topic {
             if !topic.is_empty() {

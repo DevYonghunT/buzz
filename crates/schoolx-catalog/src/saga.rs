@@ -443,17 +443,33 @@ mod tests {
     /// 그대로 남는다 — 「채널의 owner가 누구인가」와 「내가 owner인가」는
     /// 다른 질문이다.
     fn seed_applied(fx: &FakeEffects, item_key: &str, name: &str, steps: StepStates) -> Uuid {
+        seed_applied_by(fx, item_key, name, steps, FAKE_ME)
+    }
+
+    /// `seed_applied`의 「누가 했는지」를 고를 수 있는 판.
+    ///
+    /// `actor`가 생성자이자 증명서 서명자다. 둘을 따로 두지 않는 이유는 그
+    /// 조합이 현실에 없기 때문이다: 생성자가 아닌 사람이 남긴 증명서는 §5가
+    /// 버리는 위조 증명서 그 자체라, 「A가 만들고 B가 완료 도장을 찍은 방」은
+    /// 「적용된 적 있는 방」이 아니라 「동명 채널 + 증명서 없음」으로 읽힌다.
+    /// 그 상태가 필요한 테스트는 `preflight`의 §5 테스트들이 직접 만든다.
+    fn seed_applied_by(
+        fx: &FakeEffects,
+        item_key: &str,
+        name: &str,
+        steps: StepStates,
+        actor: &str,
+    ) -> Uuid {
         let channel_id = derive_channel_id("wss://relay.test", "schoolx.default", item_key, 1);
         fx.channels.lock().expect("lock").push(ChannelRef {
             id: channel_id,
             name: name.into(),
         });
         fx.burned_ids.lock().expect("lock").insert(channel_id);
-        fx.owned.lock().expect("lock").insert(channel_id);
-        fx.set_channel_owner(channel_id, FAKE_ME);
+        fx.set_channel_creator(channel_id, actor);
         fx.seed_provenance(
             channel_id,
-            FAKE_ME,
+            actor,
             Provenance {
                 catalog_id: "schoolx.default".into(),
                 catalog_version: 1,
@@ -725,9 +741,10 @@ mod tests {
             canvas: StepStatus::Failed,
             membership: StepStatus::Pending,
         };
-        let channel_id = seed_applied(&fx, "meeting", "메인 회의방", steps);
-        // 방은 있고 증명서도 읽히지만 적용자는 이 방의 owner가 아니다.
-        fx.owned.lock().expect("lock").remove(&channel_id);
+        // 남이 만들고 남이 도장을 찍은 방이다. 나는 읽을 수 있지만 내 것이
+        // 아니다 — 생성자와 서명자를 함께 그 사람으로 두어야 「적용된 적
+        // 있는 방」으로 읽힌다(생성자 아닌 서명자의 증명서는 §5가 버린다).
+        let channel_id = seed_applied_by(&fx, "meeting", "메인 회의방", steps, "someone-else");
         // 팀이 그 사이 자기 내용을 써 넣었다. 이게 지켜져야 하는 값이다.
         seed_team_canvas(&fx, channel_id);
 
@@ -757,38 +774,48 @@ mod tests {
         // 단계를 완료로 지어내지도, 이전 실행이 남긴 진행을 지우지도 않았다.
         assert_eq!(entry.steps, steps);
 
-        // owner 권한을 받고 재시도하면 그때 비로소 이어서 끝난다.
-        fx.owned.lock().expect("lock").insert(channel_id);
+        // **역할을 넘겨받아도 풀리지 않는다.** 판정은 `channels.created_by`에
+        // 걸려 있고 그 값은 생성 시 한 번 정해져 갱신되지 않는다 — relay의
+        // 어떤 경로도 그 컬럼을 다시 쓰지 않는다. 그게 §6이 선점 공격을 닫는
+        // 방식이자(`owner` 역할은 남에게 줄 수 있어 닫지 못한다) 동시에 이
+        // 막힘이 영구적인 이유다.
+        //
+        // 그래서 `RequestOwnership`은 「소유권을 넘겨받으면 풀린다」는 뜻이
+        // 아니라 「이 방은 저 사람 것이니 저 사람에게 실행을 부탁하라」는
+        // 뜻이다. 다시 돌려도 같은 자리에 멈춘다.
         let second = apply(crate::builtin(), &fx, &["meeting".to_string()])
             .await
             .expect("retry");
         let entry = item(&second, "meeting");
-        // 채택이 아니다 — 증명서가 이미 있는 항목이라 판정은 `resume` 그대로다.
-        assert_eq!(entry.decision, "resume");
-        assert_eq!(entry.outcome, Outcome::Applied);
-        assert_eq!(entry.steps.membership, StepStatus::Done);
-        assert_eq!(entry.error, None);
-        // 권한을 받았다고 팀이 써 둔 내용을 지우지는 않는다. owner 게이트는
-        // *누가* 써도 되는가만 가르고, 그 다음 질문 — 지켜야 할 내용이 있는가
-        // — 은 캔버스 단계가 한다. 이 재시도는 그 둘이 모두 걸리는 유일한
-        // 지점이다: 게이트는 통과하고 캔버스는 건너뛴다.
-        assert_canvas_untouched(&fx, channel_id, TEAM_CANVAS);
+        assert_eq!(entry.outcome, Outcome::Blocked);
+        assert_eq!(entry.user_action, Some(UserAction::RequestOwnership));
+        assert_eq!(entry.decision, "not_owned");
         assert_eq!(
-            entry.steps.canvas,
-            StepStatus::Skipped,
-            "쓰지 않았는데 `done`으로 보고했다"
+            fx.canvases.lock().expect("lock").get(&channel_id),
+            Some(&TEAM_CANVAS.to_string()),
+            "재시도가 남의 방 캔버스를 덮어썼다"
         );
+        assert_canvas_untouched(&fx, channel_id, TEAM_CANVAS);
+        // 이전 실행이 남긴 진행을 그대로 보고한다 — 두 번째 시도라고 해서
+        // 단계를 지어내지도 지우지도 않는다.
+        assert_eq!(entry.steps, steps);
         // 아무것도 새로 만들지 않았다.
         assert_eq!(fx.channels.lock().expect("lock").len(), 1);
         assert!(
             fx.created.lock().expect("lock").is_empty(),
             "이미 있는 방에 생성 요청을 보냈다"
         );
+        assert!(
+            fx.published.lock().expect("lock").is_empty(),
+            "남의 방에 provenance를 발행했다"
+        );
+        // 남이 남긴 증명서를 우리 것으로 덮어쓰지 않았다.
         let stored = fx.provenance.lock().expect("lock");
         assert_eq!(stored.len(), 1, "NIP-33 LWW — 항목당 정확히 하나다");
+        assert_eq!(stored[0].1, "someone-else", "남의 증명서를 덮어썼다");
         assert!(
-            stored[0].2.is_complete(),
-            "증명서가 desired state로 갱신되지 않았다"
+            !stored[0].2.is_complete(),
+            "손대지 않았어야 할 증명서가 완료로 바뀌었다"
         );
     }
 
@@ -1229,8 +1256,7 @@ mod tests {
         });
         fx.burned_ids.lock().expect("lock").insert(channel_id);
         if owned {
-            fx.owned.lock().expect("lock").insert(channel_id);
-            fx.set_channel_owner(channel_id, FAKE_ME);
+            fx.set_channel_creator(channel_id, FAKE_ME);
         }
         channel_id
     }

@@ -125,19 +125,23 @@ pub async fn preflight(
     // 이벤트 하나를 발행하는 것과는 값이 다르다 — 항목마다 그 ID를 영구히
     // 태워야 한다.
     //
-    // 아래 owner 검사를 더해도 이 선점 경로는 닫히지 않는다 — 선점자는
-    // 자기가 먼저 만든 그 채널의 **진짜 owner**다(relay가 그렇게 기록한다).
-    // 그러므로 자기 손으로 서명해 남긴 레코드는 owner 검사도 그대로
-    // 통과한다. 「내가 만들고 내가 서명했다」는 참인 진술이라 어느 검사로도
-    // 거짓으로 만들 수 없다. 선점을 막는 것은 이 크레이트가 아니다 —
-    // 관리자가 그 채널의 멤버가 아니면 relay의 읽기 ACL이 애초에 그
-    // 레코드를 넘기지 않고, 멤버라도 saga가 쓰기 직전에 묻는 owner
-    // 게이트(§7·§8, `saga.rs`)가 `not_owned`로 막는다 — 둘 다 이 함수 밖의
-    // 별도 방어선이다. 자세한 근거는 `docs/schoolx-2/CATALOG_SECURITY.md`
-    // §5(선점 채널 문단)·§7을 보라.
+    // 아래 서명자 검사를 더해도 이 선점 경로는 닫히지 않는다 — 선점자는
+    // 자기가 먼저 만든 그 채널의 **진짜 생성자**다(relay가 그렇게 기록한다).
+    // 그러므로 자기 손으로 서명해 남긴 레코드는 그 검사도 그대로 통과한다.
+    // 「내가 만들고 내가 서명했다」는 참인 진술이라 어느 검사로도 거짓으로
+    // 만들 수 없다. 선점을 막는 것은 이 크레이트가 아니다 — saga가 쓰기
+    // 직전에 묻는 게이트(§7·§8, `saga.rs`)가 `not_owned`로 막는다.
     //
-    // 그러면 아래 owner 검사는 실제로 무엇을 닫는가: **선점되지 않은 진짜
-    // 채널 안에서, owner가 아닌 멤버가 발행한 레코드.** kind 39500 쓰기는
+    // **읽힘 자체는 방어가 아니다.** 예전 주석은 여기에 「관리자가 그 채널의
+    // 멤버가 아니면 relay의 읽기 ACL이 애초에 그 레코드를 넘기지 않는다」를
+    // 함께 적어 두었는데, 그건 틀렸다: `open` 채널은 비멤버도 읽는다. relay의
+    // 채널 스코프 ACL은 경계가 아니라 1차 필터이고, 그 필터가 통과시키는
+    // 집합에는 커뮤니티의 모든 open 채널이 들어간다. 그러므로 방어선은
+    // 위의 saga 게이트 하나로 세어야 한다. 자세한 근거는
+    // `docs/schoolx-2/CATALOG_SECURITY.md` §5(선점 채널 문단)·§7을 보라.
+    //
+    // 그러면 아래 서명자 검사는 실제로 무엇을 닫는가: **선점되지 않은 진짜
+    // 채널 안에서, 생성자가 아닌 멤버가 발행한 레코드.** kind 39500 쓰기는
     // relay에서 채널 멤버십만 요구하고 owner십을 요구하지 않으므로
     // (`crates/buzz-relay/src/handlers/ingest.rs`의 `requires_h_channel_scope`
     // + 일반 멤버십 게이트), 진짜 `#회의` 채널의 멤버 아무나(학교라면 학생
@@ -367,7 +371,7 @@ mod tests {
             id: channel_id,
             name: name.into(),
         });
-        fx.set_channel_owner(channel_id, FAKE_ME);
+        fx.set_channel_creator(channel_id, FAKE_ME);
         fx.seed_provenance(
             channel_id,
             FAKE_ME,
@@ -668,7 +672,7 @@ mod tests {
             id: gen2_channel,
             name: "재무 (구)".into(),
         });
-        fx.set_channel_owner(gen2_channel, "admin-b");
+        fx.set_channel_creator(gen2_channel, "admin-b");
         fx.seed_provenance(
             gen2_channel,
             "admin-b",
@@ -719,15 +723,13 @@ mod tests {
     }
 
     /// §5의 두 번째 조건: 도출된 채널에 실려 있어도 서명자가 그 채널의
-    /// owner와 **다르면** 버린다 — owner를 몰라서가 아니라 owner를 알고,
+    /// 생성자와 **다르면** 버린다 — 생성자를 몰라서가 아니라 생성자를 알고,
     /// 그 값이 서명자와 다르기 때문이다.
     ///
-    /// owner를 `FAKE_ME`로 **등록해 둔다.** 등록하지 않으면 `channel_owner`가
-    /// `Ok(None)`을 돌려주고, 그 레코드는 owner **불명** 분기에서 버려진다
+    /// 생성자를 `FAKE_ME`로 **등록해 둔다.** 등록하지 않으면 `channel_owner`가
+    /// `Ok(None)`을 돌려주고, 그 레코드는 생성자 **불명** 분기에서 버려진다
     /// — 그건 이 테스트가 아니라 `provenance_is_ignored_when_the_owner_is_unknown`이
-    /// 다루는 별개의 경로다. `fx.owned`(내가 owner인가, `is_owner`가 보는
-    /// 값)를 채우는 것만으로는 이 분기에 닿지 않는다 — `channel_owner`는
-    /// `fx.owners`(채널의 owner가 누구인가)만 본다.
+    /// 다루는 별개의 경로다.
     ///
     /// 첫 번째 조건(채널 결합)만으로는 도출된 ID를 먼저 선점한 공격자가
     /// 자기 채널 안에서 발행한 증명서를 거르지 못한다 — 정말 그 채널에
@@ -741,10 +743,9 @@ mod tests {
             id: channel_id,
             name: "메인 회의방".into(),
         });
-        fx.owned.lock().expect("lock").insert(channel_id);
-        // 채널의 owner는 나다 — `channel_owner`가 보는 저장소(`owners`)에
-        // 등록한다. 위 `owned`(`is_owner`가 보는 값)와는 별개다.
-        fx.set_channel_owner(channel_id, FAKE_ME);
+        // 이 방은 내가 만들었다 — `is_owner`와 `channel_owner`가 둘 다
+        // 이 하나에서 답을 낸다.
+        fx.set_channel_creator(channel_id, FAKE_ME);
         // 그런데 증명서는 다른 사람이 서명했다 — owner는 알려져 있고,
         // 서명자와 **다르다**.
         fx.seed_provenance(
@@ -799,8 +800,7 @@ mod tests {
             id: channel_id,
             name: "메인 회의방".into(),
         });
-        fx.owned.lock().expect("lock").insert(channel_id);
-        fx.set_channel_owner(channel_id, "owner-pubkey");
+        fx.set_channel_creator(channel_id, "owner-pubkey");
         fx.seed_provenance(
             channel_id,
             "owner-pubkey",
