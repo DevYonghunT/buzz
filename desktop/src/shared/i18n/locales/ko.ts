@@ -84,6 +84,8 @@ export const ko = {
       "SchoolX 표준 업무방을 만듭니다. 적용을 누르기 전에는 아무것도 생성되지 않습니다.",
     apply: "선택 항목 적용",
     applying: "적용하는 중…",
+    adminRequired:
+      "기본 워크스페이스는 커뮤니티 소유자나 관리자만 적용할 수 있습니다. 관리자에게 요청하세요.",
     openWarningScope:
       "모든 로그인 사용자가 멤버가 아니어도 읽고 쓸 수 있습니다.",
     openWarningAgents:

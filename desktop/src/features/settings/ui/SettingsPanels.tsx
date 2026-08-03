@@ -202,6 +202,17 @@ export const settingsSections: SettingsSectionDescriptor[] = [
     featureGate: "channel-templates",
   },
   {
+    // No `featureGate` here on purpose. This section is hidden from
+    // non-administrators, and `featureGate` is the wrong tool for that: the
+    // manifest is preview-opt-in only, so an id absent from
+    // `preview-features.json` is fail-open (`SettingsView.tsx`) — a gate here
+    // would be a silent no-op — and an id present in it would demand a
+    // preview opt-in from administrators too. The role check lives in
+    // `SettingsView`'s `visibleSections`, next to the identical one for
+    // `community-members`.
+    //
+    // Neither is the security boundary. That is `require_community_admin` on
+    // the Tauri commands (`commands/workspace_catalog.rs`).
     value: "workspace-catalog",
     label: "settings.sections.workspaceCatalog",
     icon: LayoutGrid,

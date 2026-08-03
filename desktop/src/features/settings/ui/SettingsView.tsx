@@ -155,6 +155,22 @@ export function SettingsView({
       if (s.value === "community-members") {
         return canManageCommunityMembers(myMembershipQuery.data);
       }
+      // Applying the SchoolX catalog is community-admin-only, so a member who
+      // cannot run it should not be handed a panel whose only outcome is an
+      // error. Same predicate as `community-members` and as the Rust-side
+      // `role_may_apply` (`commands/workspace_catalog.rs`), read from the same
+      // relay-signed kind 13534 snapshot.
+      //
+      // **This is not the security boundary** — it only decides what the menu
+      // shows. The enforced gate is `require_community_admin` on the
+      // `preflight_workspace_catalog` / `apply_workspace_catalog` commands;
+      // this check is advisory and can disagree with it transiently (the
+      // membership query is async, and a redirect lands a beat later). The
+      // card therefore still renders `catalog.adminRequired` when the backend
+      // refuses, rather than assuming this filter already prevented it.
+      if (s.value === "workspace-catalog") {
+        return canManageCommunityMembers(myMembershipQuery.data);
+      }
       return true;
     });
   }, [myMembershipQuery.data, featureState]);

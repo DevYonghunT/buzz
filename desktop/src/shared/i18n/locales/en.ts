@@ -94,6 +94,8 @@ export const en = {
       "Create the standard SchoolX rooms. Nothing is created until you apply.",
     apply: "Apply selected",
     applying: "Applying…",
+    adminRequired:
+      "Only a community owner or admin can apply the default workspace. Ask an administrator to run it.",
     openWarningScope:
       "Every signed-in user can read and write without being a member.",
     openWarningAgents:
