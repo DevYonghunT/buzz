@@ -161,15 +161,27 @@ export function SettingsView({
       // `role_may_apply` (`commands/workspace_catalog.rs`), read from the same
       // relay-signed kind 13534 snapshot.
       //
+      // The `membershipRequired === false` escape hatch is deliberate and is
+      // NOT a relaxation: a relay that does not advertise NIP-43 publishes no
+      // roles at all, so `canManageCommunityMembers` is false for *everyone*
+      // there, community owner included. Hiding the panel in that state would
+      // make the feature vanish with no explanation — and would make
+      // `catalog.membershipUnavailable`, which exists precisely to explain it,
+      // unreachable. The backend still refuses (`gate_decision` denies an open
+      // relay outright), so showing the panel here only buys the explanation.
+      //
       // **This is not the security boundary** — it only decides what the menu
       // shows. The enforced gate is `require_community_admin` on the
       // `preflight_workspace_catalog` / `apply_workspace_catalog` commands;
       // this check is advisory and can disagree with it transiently (the
       // membership query is async, and a redirect lands a beat later). The
-      // card therefore still renders `catalog.adminRequired` when the backend
+      // card therefore still renders the refusal copy when the backend
       // refuses, rather than assuming this filter already prevented it.
       if (s.value === "workspace-catalog") {
-        return canManageCommunityMembers(myMembershipQuery.data);
+        return (
+          canManageCommunityMembers(myMembershipQuery.data) ||
+          myMembershipQuery.data?.membershipRequired === false
+        );
       }
       return true;
     });
@@ -188,10 +200,18 @@ export function SettingsView({
   }, []);
 
   React.useEffect(() => {
+    // Don't redirect while the membership lookup is still in flight. Both
+    // role-gated sections read `myMembershipQuery.data`, which is `undefined`
+    // on the first commit, so without this guard a genuine owner/admin who
+    // deep-links to one of them is bounced to Appearance — and stays there,
+    // because `handleSettingsSectionChange` navigates with `replace: true`
+    // (`AppShell.tsx`) and the section they asked for never regains focus once
+    // the query resolves.
+    if (myMembershipQuery.isPending) return;
     if (!visibleSections.some((entry) => entry.value === section)) {
       onSectionChange(visibleSections[0]?.value ?? "appearance");
     }
-  }, [onSectionChange, section, visibleSections]);
+  }, [myMembershipQuery.isPending, onSectionChange, section, visibleSections]);
 
   React.useEffect(() => {
     if (!isMobile && !sidebarOpen) {

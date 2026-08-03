@@ -2,7 +2,10 @@ import { AlertCircle, RefreshCw } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { isCatalogAdminRequiredError } from "@/features/workspace-catalog/catalogError";
+import {
+  isCatalogAdminRequiredError,
+  isCatalogMembershipUnavailableError,
+} from "@/features/workspace-catalog/catalogError";
 import {
   useApplyWorkspaceCatalogMutation,
   useWorkspaceCatalogPreflightQuery,
@@ -78,6 +81,35 @@ function errorMessage(error: unknown): string {
 }
 
 /**
+ * The two refusals `require_community_admin` (`commands/workspace_catalog.rs`)
+ * can return, and how each reads.
+ *
+ * They are kept apart because they ask the user for different things:
+ * `adminRequired` is actionable (go ask an administrator), while
+ * `membershipUnavailable` means the relay publishes no community roles at all,
+ * so there is no administrator to ask — that one is for whoever runs the
+ * relay. Collapsing them would send a community owner on a dead-end errand.
+ */
+const GATE_REFUSALS = [
+  {
+    matches: isCatalogAdminRequiredError,
+    copyKey: "catalog.adminRequired",
+    testId: "catalog-admin-required",
+  },
+  {
+    matches: isCatalogMembershipUnavailableError,
+    copyKey: "catalog.membershipUnavailable",
+    testId: "catalog-membership-unavailable",
+  },
+] as const;
+
+type GateRefusal = (typeof GATE_REFUSALS)[number];
+
+function gateRefusal(error: unknown): GateRefusal | null {
+  return GATE_REFUSALS.find((refusal) => refusal.matches(error)) ?? null;
+}
+
+/**
  * The two {@link CatalogStepStatus} values worth a note next to the canvas
  * step, translated to a key under `catalog.canvasStep.*`.
  *
@@ -117,16 +149,14 @@ export function WorkspaceCatalogSettingsCard() {
   const apply = useApplyWorkspaceCatalogMutation();
 
   const items = preflight.data ?? [];
-  // Preflight is the first call the panel makes, so this is where a
-  // non-administrator normally lands. `apply` is checked too because the two
-  // calls are separate round-trips: a role can be revoked between them, and
+  // Preflight is the first call the panel makes, so this is where a refused
+  // caller normally lands. `apply` is checked too because the two calls are
+  // separate round-trips: a role can be revoked between them, and
   // `SettingsView`'s section filter is advisory, so it does not close that
   // window. The enforced gate is `require_community_admin` on the commands
   // themselves (`commands/workspace_catalog.rs`); this only decides how the
   // refusal reads.
-  const adminRequired =
-    isCatalogAdminRequiredError(preflight.error) ||
-    isCatalogAdminRequiredError(apply.error);
+  const refusal = gateRefusal(preflight.error) ?? gateRefusal(apply.error);
 
   function toggle(item: CatalogPreflightItem) {
     if (LOCKED_DECISIONS.has(item.decision)) return;
@@ -162,19 +192,20 @@ export function WorkspaceCatalogSettingsCard() {
           <Skeleton className="h-20 w-full rounded-xl" />
           <Skeleton className="h-20 w-full rounded-xl" />
         </div>
-      ) : adminRequired ? (
+      ) : refusal ? (
         /*
           Not an error the user can act on by retrying — the answer will not
-          change until someone grants them the role — so this gets the amber
-          "you need to do something else" treatment used by `user_action`
-          below, not the destructive styling with a Try again button.
+          change until someone grants them the role, or reconfigures the relay
+          — so this gets the amber "you need to do something else" treatment
+          used by `user_action` below, not the destructive styling with a Try
+          again button.
         */
         <Alert
           className="border-amber-500/30 bg-amber-500/10"
-          data-testid="catalog-admin-required"
+          data-testid={refusal.testId}
         >
           <AlertDescription className="text-amber-800 dark:text-amber-300">
-            {t("catalog.adminRequired")}
+            {t(refusal.copyKey)}
           </AlertDescription>
         </Alert>
       ) : preflight.isError ? (
@@ -211,11 +242,10 @@ export function WorkspaceCatalogSettingsCard() {
 
       {/*
         The apply button is hidden rather than disabled when the backend has
-        refused for lack of a role: a disabled button reads as "not yet",
-        which is the wrong story — nothing the user does on this screen will
-        enable it.
+        refused: a disabled button reads as "not yet", which is the wrong
+        story — nothing the user does on this screen will enable it.
       */}
-      {adminRequired ? null : (
+      {refusal ? null : (
         <Button
           className="mt-6"
           data-testid="catalog-apply"
@@ -227,7 +257,7 @@ export function WorkspaceCatalogSettingsCard() {
         </Button>
       )}
 
-      {apply.isError && !adminRequired ? (
+      {apply.isError && !refusal ? (
         <Alert className="mt-3" variant="destructive">
           <AlertDescription>{errorMessage(apply.error)}</AlertDescription>
         </Alert>

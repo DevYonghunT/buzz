@@ -96,6 +96,8 @@ export const en = {
     applying: "Applying…",
     adminRequired:
       "Only a community owner or admin can apply the default workspace. Ask an administrator to run it.",
+    membershipUnavailable:
+      "This relay does not publish community roles, so SchoolX cannot tell who may apply the default workspace. Enable relay membership (NIP-43) on the relay first.",
     openWarningScope:
       "Every signed-in user can read and write without being a member.",
     openWarningAgents:

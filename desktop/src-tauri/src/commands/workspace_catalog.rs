@@ -336,6 +336,41 @@ fn role_may_apply(role: Option<&str>) -> bool {
     matches!(role, Some("owner") | Some("admin"))
 }
 
+/// 커뮤니티 역할이 없어 거부했다.
+///
+/// 이 값들은 문구가 아니라 **식별자**다. 사용자에게 보일 문장은 프론트엔드가
+/// 지역화한다(`features/workspace-catalog/catalogError.ts`) — 어댑터가 한국어를
+/// 하드코딩하면 영어 로케일 사용자에게 그대로 샌다.
+const CATALOG_ADMIN_REQUIRED: &str = "catalog-admin-required";
+
+/// 이 relay에 커뮤니티 역할이라는 개념 자체가 없어 판정할 수 없다.
+///
+/// `catalog-admin-required`와 **구별해서** 낸다. 두 상태는 사용자가 할 일이
+/// 다르다: 전자는 관리자에게 요청하면 되고, 후자는 요청할 관리자가 없다
+/// (릴레이 설정 문제다). 하나로 뭉개면 오픈 릴레이에서 커뮤니티 소유자
+/// 본인에게 "관리자에게 요청하세요"라고 말하게 된다.
+const CATALOG_MEMBERSHIP_UNAVAILABLE: &str = "catalog-membership-unavailable";
+
+/// 게이트의 판정 전부. relay I/O에서 떼어 놓아 네 갈래를 전부 시험한다.
+///
+/// `requires_membership`가 `false`면 `membership`은 보지 않는다 — 그 릴레이는
+/// kind 13534를 애초에 발행하지 않으므로 조회할 것이 없다.
+///
+/// **오픈 릴레이를 통과시키지 않는다.** 「명부가 없다」를 「제한 없음」으로
+/// 읽으면 게이트가 그 릴레이에서 no-op이 되고, `CATALOG_SECURITY.md` §1의
+/// 선점 공격 앞에 데스크톱 경로가 무방비가 된다. 판정할 수 없으면 거부하되,
+/// 무엇이 문제인지 구별되는 식별자로 말한다.
+fn gate_decision(requires_membership: bool, membership: &serde_json::Value) -> Result<(), String> {
+    if !requires_membership {
+        return Err(CATALOG_MEMBERSHIP_UNAVAILABLE.to_string());
+    }
+    if role_may_apply(membership_role(membership).as_deref()) {
+        Ok(())
+    } else {
+        Err(CATALOG_ADMIN_REQUIRED.to_string())
+    }
+}
+
 /// catalog 적용은 커뮤니티 관리자만 할 수 있다.
 ///
 /// 근거가 되는 역할은 relay가 서명한 kind 13534 목록에서 온다 —
@@ -347,6 +382,16 @@ fn role_may_apply(role: Option<&str>) -> bool {
 /// 채널 레벨 역할이 아니라 커뮤니티 레벨 역할을 본다: 이 동작은 커뮤니티
 /// 전체에 기본 업무방을 만드는 일이기 때문이다.
 ///
+/// **그 kind는 오픈 릴레이에는 없다.** `require_relay_membership`는 기본값이
+/// `false`이고(`buzz-relay/src/config.rs`), 그때 relay는 NIP-43을 광고하지도
+/// 발행하지도 않는다(`nip11.rs`의 `advertise_nip43`). `.env.example`도
+/// `just test-e2e`도 그 값을 켜지 않으므로 기본 개발 릴레이가 그 상태다.
+/// 그래서 명부를 조회하기 전에 릴레이가 NIP-43을 광고하는지부터 묻는다 —
+/// 명부의 부재를 거부로 읽으면 커뮤니티 소유자 본인이 잠긴다. 프론트엔드도
+/// 같은 규칙을 명문화하고 있다(`shared/api/relayMembers.ts`의
+/// `snapshotFound` doc: "absence of this snapshot must not be treated as a
+/// denial").
+///
 /// preflight도 막는다. 미리보기만으로도 어떤 항목이 이미 적용됐는지가
 /// 드러나고 그것은 private 채널의 존재 정보다.
 ///
@@ -355,15 +400,16 @@ fn role_may_apply(role: Option<&str>) -> bool {
 /// 구성원의 정상 권한이고, 여기서 막는 것은 「catalog 적용으로 기본 업무방
 /// 일습을 만드는 것」이다. 설계 근거: docs/schoolx-2/CATALOG_SECURITY.md §3·§4.
 async fn require_community_admin(state: &State<'_, AppState>) -> Result<(), String> {
-    let membership = crate::commands::relay_members::get_my_relay_membership(state.clone()).await?;
-    if role_may_apply(membership_role(&membership).as_deref()) {
-        Ok(())
+    let requires_membership =
+        crate::commands::relay_members::relay_requires_membership(state.clone()).await?;
+    // 명부가 존재할 수 있을 때만 조회한다. 오픈 릴레이에서는 왕복이 낭비고,
+    // 응답도 언제나 `{"member": null}`이라 판정에 보탤 것이 없다.
+    let membership = if requires_membership {
+        crate::commands::relay_members::get_my_relay_membership(state.clone()).await?
     } else {
-        // 문구가 아니라 **식별자**다. 사용자에게 보일 문장은 프론트엔드가
-        // 지역화한다 — 어댑터가 한국어를 하드코딩하면 영어 로케일 사용자에게
-        // 그대로 샌다.
-        Err("catalog-admin-required".to_string())
-    }
+        serde_json::Value::Null
+    };
+    gate_decision(requires_membership, &membership)
 }
 
 /// catalog 적용 전 항목별 판정을 돌려준다.
@@ -696,6 +742,52 @@ mod tests {
         assert_eq!(
             membership_role(&serde_json::json!({ "member": { "pubkey": "ab" } })),
             None
+        );
+    }
+
+    /// 게이트가 내는 세 결과를 전부 고정한다.
+    ///
+    /// 오픈 릴레이 갈래가 특히 중요하다. `require_relay_membership`는 기본값이
+    /// `false`라(`buzz-relay/src/config.rs`) `.env.example`로 띄운 개발 릴레이와
+    /// `just test-e2e`가 전부 그 상태다. 이 갈래를 `Ok`로 만들면 게이트가 거기서
+    /// 조용히 no-op이 되고, `catalog-admin-required`로 뭉개면 커뮤니티 소유자
+    /// 본인에게 "관리자에게 요청하세요"라고 말하게 된다 — 요청할 관리자가
+    /// 없는데도.
+    #[test]
+    fn a_relay_without_community_roles_is_refused_but_says_so_differently() {
+        assert_eq!(
+            gate_decision(false, &serde_json::Value::Null),
+            Err("catalog-membership-unavailable".to_string())
+        );
+        // 명부가 있다고 주장하는 릴레이에서도 역할이 없으면 거부한다. 다만
+        // 이쪽은 사용자가 관리자에게 요청하면 풀린다.
+        assert_eq!(
+            gate_decision(true, &serde_json::json!({ "member": null })),
+            Err("catalog-admin-required".to_string())
+        );
+        assert_eq!(
+            gate_decision(true, &serde_json::json!({ "member": { "role": "member" } })),
+            Err("catalog-admin-required".to_string())
+        );
+        assert_eq!(
+            gate_decision(true, &serde_json::json!({ "member": { "role": "admin" } })),
+            Ok(())
+        );
+        assert_eq!(
+            gate_decision(true, &serde_json::json!({ "member": { "role": "owner" } })),
+            Ok(())
+        );
+    }
+
+    /// 오픈 릴레이에서는 역할을 보지 않는다 — 봐서도 안 된다. 그 릴레이가
+    /// 어떤 이유로 `owner`가 담긴 명부를 돌려주더라도 통과시키지 않는다:
+    /// NIP-43을 광고하지 않는 릴레이의 kind 13534는 relay-only 불변식
+    /// (`is_relay_only_kind`)이 지켜 준다는 보장이 없기 때문이다.
+    #[test]
+    fn an_open_relay_is_refused_even_if_it_claims_a_role() {
+        assert_eq!(
+            gate_decision(false, &serde_json::json!({ "member": { "role": "owner" } })),
+            Err("catalog-membership-unavailable".to_string())
         );
     }
 }

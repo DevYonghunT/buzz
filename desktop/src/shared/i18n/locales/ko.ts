@@ -86,6 +86,8 @@ export const ko = {
     applying: "적용하는 중…",
     adminRequired:
       "기본 워크스페이스는 커뮤니티 소유자나 관리자만 적용할 수 있습니다. 관리자에게 요청하세요.",
+    membershipUnavailable:
+      "이 릴레이는 커뮤니티 역할을 게시하지 않아, 누가 기본 워크스페이스를 적용할 수 있는지 판단할 수 없습니다. 릴레이에서 멤버십(NIP-43)을 먼저 켜야 합니다.",
     openWarningScope:
       "모든 로그인 사용자가 멤버가 아니어도 읽고 쓸 수 있습니다.",
     openWarningAgents:
