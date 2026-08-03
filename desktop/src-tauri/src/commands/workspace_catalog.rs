@@ -6,7 +6,7 @@
 //! 옮기는 것뿐이다.
 
 use schoolx_catalog_pkg::effects::{
-    CatalogEffects, ChannelRef, ChannelSpec, CreateOutcome, EffectError,
+    CatalogEffects, ChannelRef, ChannelSpec, CreateOutcome, EffectError, ProvenanceRecord,
 };
 use schoolx_catalog_pkg::ledger::Ledger;
 use schoolx_catalog_pkg::preflight::PreflightItem;
@@ -52,15 +52,23 @@ fn canvas_content_from_response(
 }
 
 /// relay가 돌려준 kind 39500 이벤트를 `CatalogEffects::fetch_provenance`의
-/// 계약 — `(그 이벤트가 실려 있는 채널, 레코드)` 쌍 — 으로 옮긴다.
+/// 계약 — [`ProvenanceRecord`] (채널 + 서명자 + 레코드 셋) — 으로 옮긴다.
 ///
-/// **`h` 태그를 반드시 같이 낸다.** 채널을 버리고 `content`만 내면
+/// **`h` 태그와 서명자를 반드시 같이 낸다.** 채널을 버리고 `content`만 내면
 /// `preflight`가 도출된 채널 결합을 검사할 수 없고, 그러면 아무 인증
 /// 사용자나(학교에서는 학생 누구나) 자기 open 채널을 만들어 거기에 kind
 /// 39500을 발행하는 것만으로 관리자의 판정을 대신 정하게 된다 — 자기
-/// 채널이라 그 쓰기는 relay에서 정당하게 승인된다. 어느 쌍이 유효한가는
-/// `preflight`가 판정하고, 여기서는 relay가 말한 사실을 잃지 않는 것까지만
-/// 한다.
+/// 채널이라 그 쓰기는 relay에서 정당하게 승인된다. 서명자를 함께 내지 않으면
+/// `preflight`는 §5의 owner 검사(선점된 채널 안에서 발행된 위조 증명서를
+/// 걸러내는 검사)를 할 재료가 없다. 어느 쌍이 유효한가는 `preflight`가
+/// 판정하고, 여기서는 relay가 말한 사실을 잃지 않는 것까지만 한다.
+///
+/// 서명자는 `ev.pubkey.to_hex()` — 소문자 hex(NIP-01). `nostr::PublicKey::to_hex()`는
+/// 내부적으로 `hex::encode`를 쓰고, relay가 kind:39002 `p` 태그에 채널 owner를
+/// 적을 때도(`crates/buzz-relay/src/handlers/side_effects.rs::emit_group_discovery_events`)
+/// 같은 `hex::encode`를 쓴다 — 그래서 이 값은 `channel_owner`가 돌려주는 값과
+/// 인코딩이 맞는다. `preflight`는 이 값을 그 값과 정확한 문자열(`==`)로 비교하므로
+/// (`ProvenanceRecord::signer`의 문서 참고), 여기서 다른 인코딩으로 바꾸면 안 된다.
 ///
 /// 세 경우에 이벤트를 버린다. 셋 다 "이 이벤트는 우리가 읽을 수 있는 레코드가
 /// 아니다"이지 오류가 아니다.
@@ -74,7 +82,7 @@ fn canvas_content_from_response(
 fn provenance_records_from_events(
     events: &[nostr::Event],
     catalog_id: &str,
-) -> Vec<(Uuid, Provenance)> {
+) -> Vec<ProvenanceRecord> {
     events
         .iter()
         .filter_map(|ev| {
@@ -88,7 +96,11 @@ fn provenance_records_from_events(
             })?;
             let channel_id = Uuid::parse_str(&h_tag).ok()?;
             let provenance = serde_json::from_str::<Provenance>(&ev.content).ok()?;
-            (provenance.catalog_id == catalog_id).then_some((channel_id, provenance))
+            (provenance.catalog_id == catalog_id).then_some(ProvenanceRecord {
+                channel_id,
+                signer: ev.pubkey.to_hex(),
+                provenance,
+            })
         })
         .collect()
 }
@@ -124,7 +136,7 @@ impl CatalogEffects for RelayEffects<'_> {
     async fn fetch_provenance(
         &self,
         catalog_id: &str,
-    ) -> Result<Vec<(Uuid, Provenance)>, EffectError> {
+    ) -> Result<Vec<ProvenanceRecord>, EffectError> {
         // relay의 채널 스코프 ACL은 **경계가 아니라 1차 필터다.** 그 ACL이
         // 통과시키는 집합에는 커뮤니티의 모든 `open` 채널이 들어가고, 인증된
         // 사용자라면 누구나 open 채널을 만들어 자기 채널에 kind 39500을
@@ -233,13 +245,39 @@ impl CatalogEffects for RelayEffects<'_> {
         )
         .await
         .map_err(EffectError)?;
-        // relay 전반의 권한 검사와 같은 기준이다 (예: side_effects.rs) —
-        // owner와 admin 모두 채널을 대신해 쓸 수 있는 상위 등급이고,
-        // "owner" 단독 역할은 소유권 이전처럼 유일성이 필요한 연산에만 쓰인다.
+        // `owner`만 받는다. relay 전반의 쓰기 권한 판정은 `admin`도 같은
+        // 등급으로 보지만, 채택이 묻는 것은 「여기서 쓸 수 있는가」가 아니라
+        // 「이 방이 우리 것인가」다. `admin`은 남이 줄 수 있고 수신자 동의도
+        // 필요 없으므로, 도출 ID를 선점한 사람이 피해자에게 `admin`을 주는
+        // 것만으로 이 게이트를 통과시킬 수 있다. `owner`는 생성자에게
+        // 고정되어 그럴 수 없다. 설계 근거: docs/schoolx-2/CATALOG_SECURITY.md §6.
         Ok(response
             .members
             .iter()
-            .any(|m| m.pubkey == me && (m.role == "owner" || m.role == "admin")))
+            .any(|m| m.pubkey == me && m.role == "owner"))
+    }
+
+    // `m.pubkey`는 relay가 kind:39002의 `p` 태그에 `hex::encode`로 적어 넣은
+    // 소문자 hex 문자열을 그대로 옮긴 값이다
+    // (`nostr_convert::channel_members_from_event`가 태그 값을 그대로 복사하고,
+    // 그 값을 채우는 유일한 발행처는
+    // `crates/buzz-relay/src/handlers/side_effects.rs::emit_group_discovery_events`의
+    // `KIND_NIP29_GROUP_MEMBERS` 블록이며 거기서 `hex::encode(&m.pubkey)`를 쓴다).
+    // `ProvenanceRecord::signer`(`ev.pubkey.to_hex()`, 위 `provenance_records_from_events`
+    // 참고)도 같은 `hex::encode` 경로를 타므로 두 값의 인코딩이 맞는다 — `preflight`가
+    // 이 값을 `signer`와 정확한 문자열(`==`)로 비교한다.
+    async fn channel_owner(&self, channel_id: Uuid) -> Result<Option<String>, EffectError> {
+        let response = crate::commands::channels::get_channel_members(
+            channel_id.to_string(),
+            self.state.clone(),
+        )
+        .await
+        .map_err(EffectError)?;
+        Ok(response
+            .members
+            .iter()
+            .find(|m| m.role == "owner")
+            .map(|m| m.pubkey.clone()))
     }
 
     async fn publish_provenance(
@@ -355,15 +393,41 @@ mod tests {
     fn the_h_tag_travels_with_the_record() {
         let provenance = sample_provenance("schoolx.default");
         let events = vec![provenance_event(Some(FOREIGN_CHANNEL), &json(&provenance))];
+        let signer = events[0].pubkey.to_hex();
 
         let records = provenance_records_from_events(&events, "schoolx.default");
         assert_eq!(
             records,
-            vec![(
-                Uuid::parse_str(FOREIGN_CHANNEL).expect("고정 UUID"),
-                provenance
-            )]
+            vec![ProvenanceRecord {
+                channel_id: Uuid::parse_str(FOREIGN_CHANNEL).expect("고정 UUID"),
+                signer,
+                provenance,
+            }]
         );
+    }
+
+    /// `ProvenanceRecord::signer`는 그 이벤트에 실제로 서명한 pubkey를 소문자
+    /// hex로 나른다(`ev.pubkey.to_hex()`) — `preflight`가 `channel_owner`와
+    /// 정확한 문자열로 비교하는 값이라(§5), 여기서 잃거나 인덱스와 뒤섞이면
+    /// 안 된다. 이벤트마다 서로 다른 무작위 키로 서명해, 우연히 같은 문자열이
+    /// 나와 이 검증이 무력화되지 않게 한다.
+    #[test]
+    fn the_signer_travels_with_the_record() {
+        let mine = sample_provenance("schoolx.default");
+        let other_channel = "99999999-8888-4777-8666-555555555555";
+        let events = vec![
+            provenance_event(Some(FOREIGN_CHANNEL), &json(&mine)),
+            provenance_event(Some(other_channel), &json(&mine)),
+        ];
+        let expected_signers: Vec<String> = events.iter().map(|e| e.pubkey.to_hex()).collect();
+        assert_ne!(
+            expected_signers[0], expected_signers[1],
+            "테스트 이벤트는 서로 다른 무작위 키로 서명돼야 이 검증이 의미가 있다"
+        );
+
+        let records = provenance_records_from_events(&events, "schoolx.default");
+        let actual_signers: Vec<String> = records.iter().map(|r| r.signer.clone()).collect();
+        assert_eq!(actual_signers, expected_signers);
     }
 
     /// `h` 태그가 없는 kind 39500은 relay가 애초에 받지 않는다
@@ -422,16 +486,23 @@ mod tests {
             provenance_event(Some(other_channel), "not json"),
             provenance_event(Some(other_channel), &json(&mine)),
         ];
+        let signer_for_foreign = events[1].pubkey.to_hex();
+        let signer_for_other = events[4].pubkey.to_hex();
 
         let records = provenance_records_from_events(&events, "schoolx.default");
         assert_eq!(
             records,
             vec![
-                (
-                    Uuid::parse_str(FOREIGN_CHANNEL).expect("고정 UUID"),
-                    mine.clone()
-                ),
-                (Uuid::parse_str(other_channel).expect("고정 UUID"), mine),
+                ProvenanceRecord {
+                    channel_id: Uuid::parse_str(FOREIGN_CHANNEL).expect("고정 UUID"),
+                    signer: signer_for_foreign,
+                    provenance: mine.clone(),
+                },
+                ProvenanceRecord {
+                    channel_id: Uuid::parse_str(other_channel).expect("고정 UUID"),
+                    signer: signer_for_other,
+                    provenance: mine,
+                },
             ]
         );
     }
