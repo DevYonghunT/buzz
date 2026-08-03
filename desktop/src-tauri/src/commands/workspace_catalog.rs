@@ -310,11 +310,68 @@ impl CatalogEffects for RelayEffects<'_> {
     }
 }
 
+/// `get_my_relay_membership`의 응답에서 내 커뮤니티 역할을 꺼낸다.
+///
+/// 응답은 `{"member": {"pubkey": ..., "role": ...}}` 또는 `{"member": null}`이다
+/// (`commands::relay_members::get_my_relay_membership`). 비멤버는 후자이고, 그때는
+/// `None`이다 — 「역할을 모른다」와 「멤버가 아니다」를 여기서 구별하지 않는다.
+/// `role_may_apply`가 둘 다 거부하므로 구별할 이유가 없다.
+///
+/// relay I/O에서 떼어 놓은 이유는 `role_may_apply`와 같다: 이 게이트에서
+/// 손으로 쓴 파싱은 여기뿐이라 따로 시험할 수 있어야 한다.
+fn membership_role(membership: &serde_json::Value) -> Option<String> {
+    membership
+        .get("member")?
+        .get("role")?
+        .as_str()
+        .map(str::to_string)
+}
+
+/// 이 커뮤니티 역할이 catalog를 적용할 수 있는가.
+///
+/// relay I/O에서 분리해 두어 판정만 단위 테스트할 수 있게 한다. 모르는
+/// 역할은 거부한다 — 나중에 역할이 추가되어도 자동으로 권한을 얻지 않아야
+/// 한다.
+fn role_may_apply(role: Option<&str>) -> bool {
+    matches!(role, Some("owner") | Some("admin"))
+}
+
+/// catalog 적용은 커뮤니티 관리자만 할 수 있다.
+///
+/// 근거가 되는 역할은 relay가 서명한 kind 13534 목록에서 온다 —
+/// 클라이언트가 만드는 값이 아니라 위조할 수 없다. `is_relay_only_kind`가
+/// 그 kind의 클라이언트 제출을 ingest에서 거부하고
+/// (`buzz-core/src/kind.rs`, 회귀 테스트 `e2e_relay.rs`의
+/// `test_client_submitted_nip43_membership_snapshots_are_rejected`), 그래서
+/// 이 게이트의 근거는 채널 멤버십(kind 39002)과 달리 위조 가능한 값이 아니다.
+/// 채널 레벨 역할이 아니라 커뮤니티 레벨 역할을 본다: 이 동작은 커뮤니티
+/// 전체에 기본 업무방을 만드는 일이기 때문이다.
+///
+/// preflight도 막는다. 미리보기만으로도 어떤 항목이 이미 적용됐는지가
+/// 드러나고 그것은 private 채널의 존재 정보다.
+///
+/// 이 게이트는 클라이언트 측이다. 직접 relay에 채널 생성 이벤트를 쏘는
+/// 것은 막지 못하며 막으려는 대상도 아니다 — 채널을 만드는 것은 모든
+/// 구성원의 정상 권한이고, 여기서 막는 것은 「catalog 적용으로 기본 업무방
+/// 일습을 만드는 것」이다. 설계 근거: docs/schoolx-2/CATALOG_SECURITY.md §3·§4.
+async fn require_community_admin(state: &State<'_, AppState>) -> Result<(), String> {
+    let membership = crate::commands::relay_members::get_my_relay_membership(state.clone()).await?;
+    if role_may_apply(membership_role(&membership).as_deref()) {
+        Ok(())
+    } else {
+        // 문구가 아니라 **식별자**다. 사용자에게 보일 문장은 프론트엔드가
+        // 지역화한다 — 어댑터가 한국어를 하드코딩하면 영어 로케일 사용자에게
+        // 그대로 샌다.
+        Err("catalog-admin-required".to_string())
+    }
+}
+
 /// catalog 적용 전 항목별 판정을 돌려준다.
 #[tauri::command]
 pub async fn preflight_workspace_catalog(
     state: State<'_, AppState>,
 ) -> Result<Vec<PreflightItem>, String> {
+    require_community_admin(&state).await?;
     let effects = RelayEffects { state };
     schoolx_catalog_pkg::preflight::preflight(schoolx_catalog_pkg::builtin(), &effects)
         .await
@@ -327,6 +384,7 @@ pub async fn apply_workspace_catalog(
     selected: Vec<String>,
     state: State<'_, AppState>,
 ) -> Result<Ledger, String> {
+    require_community_admin(&state).await?;
     let effects = RelayEffects { state };
     schoolx_catalog_pkg::saga::apply(schoolx_catalog_pkg::builtin(), &effects, &selected)
         .await
@@ -603,5 +661,41 @@ mod tests {
             "event_id": "abc123",
         });
         assert!(canvas_content_from_response(&response).is_err());
+    }
+
+    /// 커뮤니티 소유자와 관리자만 catalog를 적용한다. 모르는 역할은 거부한다 —
+    /// 나중에 역할이 추가되어도 자동으로 권한을 얻으면 안 된다.
+    #[test]
+    fn only_community_owner_and_admin_may_apply() {
+        assert!(role_may_apply(Some("owner")));
+        assert!(role_may_apply(Some("admin")));
+        assert!(!role_may_apply(Some("member")));
+        assert!(!role_may_apply(None));
+        assert!(!role_may_apply(Some("guest")));
+    }
+
+    /// `relay_members_from_event`는 역할 태그가 비었으면 `"member"`로 떨어뜨리고
+    /// (`nostr_convert.rs:516-520`), 멤버가 아니면 `get_my_relay_membership`이
+    /// `{"member": null}`을 돌려준다. 그 두 모양을 `role_may_apply`가 받는
+    /// `Option<&str>`로 옮기는 부분이 이 게이트에서 유일하게 손으로 쓴 파싱이라
+    /// 따로 고정한다 — 여기서 `None`이 잘못 나오면 게이트가 조용히 전원 거부가
+    /// 되고, 잘못 `Some("admin")`이 나오면 게이트가 아무나 통과시킨다.
+    #[test]
+    fn membership_role_is_read_from_the_relay_signed_shape() {
+        assert_eq!(
+            membership_role(&serde_json::json!({ "member": { "pubkey": "ab", "role": "admin" } })),
+            Some("admin".to_string())
+        );
+        // 비멤버 — relay가 나를 목록에서 못 찾은 모양.
+        assert_eq!(
+            membership_role(&serde_json::json!({ "member": null })),
+            None
+        );
+        // 역할 없는 멤버는 있을 수 없는 모양이지만(`relay_members_from_event`가
+        // 항상 채운다), 왔다면 권한을 지어내지 않는다.
+        assert_eq!(
+            membership_role(&serde_json::json!({ "member": { "pubkey": "ab" } })),
+            None
+        );
     }
 }
