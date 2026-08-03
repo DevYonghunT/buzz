@@ -371,7 +371,7 @@ async fn apply_item(
 mod tests {
     use super::*;
     use crate::catalog::Visibility;
-    use crate::effects::fake::FakeEffects;
+    use crate::effects::fake::{FakeEffects, FAKE_ME};
     use crate::effects::ChannelRef;
     use crate::ledger::Outcome;
     use uuid::Uuid;
@@ -444,8 +444,9 @@ mod tests {
         });
         fx.burned_ids.lock().expect("lock").insert(channel_id);
         fx.owned.lock().expect("lock").insert(channel_id);
-        fx.provenance.lock().expect("lock").push((
+        fx.seed_provenance(
             channel_id,
+            FAKE_ME,
             Provenance {
                 catalog_id: "schoolx.default".into(),
                 catalog_version: 1,
@@ -454,7 +455,7 @@ mod tests {
                 steps,
                 applied_at: "2026-07-28T09:00:00Z".into(),
             },
-        ));
+        );
         channel_id
     }
 
@@ -672,7 +673,7 @@ mod tests {
             // 여기까지의 진행이 durable하게 남아야 재시도가 처음부터 하지 않는다.
             let stored = fx.provenance.lock().expect("lock");
             assert_eq!(stored.len(), 1);
-            assert_eq!(stored[0].1.steps.membership, StepStatus::Failed);
+            assert_eq!(stored[0].2.steps.membership, StepStatus::Failed);
         }
 
         let second = apply(crate::builtin(), &fx, &["meeting".to_string()])
@@ -688,7 +689,7 @@ mod tests {
         let stored = fx.provenance.lock().expect("lock");
         assert_eq!(stored.len(), 1, "NIP-33 LWW — 항목당 정확히 하나다");
         assert!(
-            stored[0].1.is_complete(),
+            stored[0].2.is_complete(),
             "증명서가 desired state로 갱신되지 않았다"
         );
     }
@@ -779,7 +780,7 @@ mod tests {
         let stored = fx.provenance.lock().expect("lock");
         assert_eq!(stored.len(), 1, "NIP-33 LWW — 항목당 정확히 하나다");
         assert!(
-            stored[0].1.is_complete(),
+            stored[0].2.is_complete(),
             "증명서가 desired state로 갱신되지 않았다"
         );
     }
@@ -828,7 +829,7 @@ mod tests {
         {
             let stored = fx.provenance.lock().expect("lock");
             assert_eq!(stored.len(), 1);
-            assert_eq!(stored[0].1.steps, steps);
+            assert_eq!(stored[0].2.steps, steps);
         }
 
         // relay가 돌아오면 재시도가 이어서 끝난다 — 팀이 써 둔 캔버스는
@@ -897,7 +898,7 @@ mod tests {
         {
             let stored = fx.provenance.lock().expect("lock");
             assert_eq!(stored.len(), 1, "NIP-33 LWW — 항목당 정확히 하나다");
-            assert_eq!(stored[0].1.steps.canvas, StepStatus::Skipped);
+            assert_eq!(stored[0].2.steps.canvas, StepStatus::Skipped);
         }
 
         // 두 번째 실행은 아무것도 하지 않는다. `skipped`를 미완료로 세면
@@ -1066,7 +1067,7 @@ mod tests {
         {
             let stored = fx.provenance.lock().expect("lock");
             assert_eq!(stored.len(), 1);
-            assert_eq!(stored[0].1.steps, steps);
+            assert_eq!(stored[0].2.steps, steps);
         }
 
         // relay가 돌아오면 재시도가 막히지 않고 끝난다 — 여전히 쓰지 않고서다.
@@ -1300,7 +1301,7 @@ mod tests {
         // 미완료로 보지 않는다.
         let stored = fx.provenance.lock().expect("lock");
         assert_eq!(stored.len(), 1, "NIP-33 LWW — 항목당 정확히 하나다");
-        assert_eq!(stored[0].1.steps.canvas, StepStatus::Skipped);
+        assert_eq!(stored[0].2.steps.canvas, StepStatus::Skipped);
     }
 
     /// 위 상태가 **실제 시퀀스로** 만들어진다 — 손으로 시드한 상태가 아니다.

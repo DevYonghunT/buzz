@@ -46,6 +46,21 @@ pub enum CreateOutcome {
     Duplicate,
 }
 
+/// relay에서 읽어 온 provenance 한 건과, 그것을 검증하는 데 필요한 맥락.
+///
+/// 내용만으로는 신뢰할 수 없다 — 어느 채널에 실려 있었는지(`channel_id`)와
+/// 누가 서명했는지(`signer`)가 있어야 §5의 두 조건을 검사할 수 있다.
+/// 튜플로 두면 세 값의 순서를 호출부가 외워야 하므로 이름을 붙인다.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProvenanceRecord {
+    /// 이 이벤트가 실려 있던 채널 (`h` 태그).
+    pub channel_id: Uuid,
+    /// 이 이벤트에 서명한 pubkey (hex).
+    pub signer: String,
+    /// 이벤트 content.
+    pub provenance: Provenance,
+}
+
 /// saga가 필요로 하는 relay 연산.
 #[async_trait::async_trait]
 pub trait CatalogEffects: Send + Sync {
@@ -55,11 +70,14 @@ pub trait CatalogEffects: Send + Sync {
     /// 현재 사용자가 접근할 수 있는 채널. 삭제된 채널은 포함되지 않는다.
     async fn list_channels(&self) -> Result<Vec<ChannelRef>, EffectError>;
 
-    /// 읽을 수 있는 이 catalog의 provenance 이벤트 전부 —
-    /// **`(그 이벤트가 실려 있는 채널, 레코드)` 쌍으로** 돌려준다.
+    /// 읽을 수 있는 이 catalog의 provenance 이벤트 전부.
     ///
     /// 채널 스코프라 비멤버인 항목은 결과에 나타나지 않는다. 이건 버그가
     /// 아니라 보안 계약이다.
+    ///
+    /// 각 레코드는 실려 있던 채널과 서명자를 함께 담는다. 둘 다
+    /// `preflight`가 §5의 검증에 쓴다 — 채널 결합만으로는 그 채널을 선점한
+    /// 사람이 발행한 증명서를 걸러내지 못한다.
     ///
     /// # 채널을 같이 나르는 이유
     ///
@@ -81,7 +99,7 @@ pub trait CatalogEffects: Send + Sync {
     async fn fetch_provenance(
         &self,
         catalog_id: &str,
-    ) -> Result<Vec<(Uuid, Provenance)>, EffectError>;
+    ) -> Result<Vec<ProvenanceRecord>, EffectError>;
 
     /// 채널을 만든다. 이미 점유된 ID면 `Duplicate`.
     async fn create_channel(&self, spec: ChannelSpec) -> Result<CreateOutcome, EffectError>;
@@ -122,6 +140,10 @@ pub(crate) mod fake {
     use std::collections::{HashMap, HashSet};
     use std::sync::Mutex;
 
+    /// fake에서 「현재 사용자」의 pubkey. 실제 값은 의미 없고, 테스트가
+    /// 「나」와 「남」을 구별할 수 있으면 된다.
+    pub(crate) const FAKE_ME: &str = "me";
+
     /// 실패를 주입할 수 있는 인메모리 구현.
     ///
     /// Task 6/7이 이 fake를 실제 테스트에서 쓰기 전까지는 아래 필드 중
@@ -139,12 +161,11 @@ pub(crate) mod fake {
     #[derive(Default)]
     pub(crate) struct FakeEffects {
         pub channels: Mutex<Vec<ChannelRef>>,
-        /// `(channel_id, provenance)` 쌍. 실제 relay에서 provenance
-        /// 이벤트는 채널 스코프다 — 자기 채널에 실려서 저장되고, 그 채널이
-        /// soft delete되면 함께 읽을 수 없게 된다. channel_id 없이는 이
-        /// 상태를 표현할 수조차 없어야 하므로, `channels`와의 연결을 필드
-        /// 타입 자체에 새긴다. 가시성 필터링은 `fetch_provenance`가 한다.
-        pub provenance: Mutex<Vec<(Uuid, Provenance)>>,
+        /// `(channel_id, signer, provenance)`. 실제 relay에서 provenance
+        /// 이벤트는 채널 스코프이고 서명자가 있다. 셋을 분리해 두면 테스트가
+        /// "채널은 맞는데 서명자가 다른" 상태를 만들 수 있다 — 그게 선점
+        /// 공격의 모양이다.
+        pub provenance: Mutex<Vec<(Uuid, String, Provenance)>>,
         /// 이미 점유된 채널 UUID — soft delete된 것 포함.
         pub burned_ids: Mutex<HashSet<Uuid>>,
         pub canvases: Mutex<HashMap<Uuid, String>>,
@@ -236,6 +257,21 @@ pub(crate) mod fake {
                 .insert(channel_id, content.to_string());
         }
 
+        /// 이전 실행이 남긴 증명서를 심는다. `signer`로 「내가 남긴 것」과
+        /// 「남이 남긴 것」을 구별한다.
+        pub(crate) fn seed_provenance(
+            &self,
+            channel_id: Uuid,
+            signer: &str,
+            provenance: Provenance,
+        ) {
+            self.provenance.lock().expect("lock").push((
+                channel_id,
+                signer.to_string(),
+                provenance,
+            ));
+        }
+
         /// provenance 레코드가 **호출자가 지정한 채널**에 실려 있는 상태를
         /// 만든다. 그 채널도 함께 접근 가능 목록에 넣는다 —
         /// `fetch_provenance`는 살아 있는 채널의 레코드만 돌려주므로 둘을
@@ -248,6 +284,10 @@ pub(crate) mod fake {
         /// 에서 아무 인증 사용자나 만들 수 있다(자기 open 채널을 만들고 거기에
         /// kind 39500을 발행하면 된다). 표현할 수 없는 상태는 테스트되지
         /// 않으므로, 짝을 어긋나게 놓을 수 있는 통로를 여기 하나 둔다.
+        ///
+        /// 서명자는 항상 `FAKE_ME`가 아닌 고정값("attacker")이다 — 이
+        /// 헬퍼가 모델링하는 레코드는 항상 「남의 채널」에 실린 것이라 「내」
+        /// 서명일 수 없다.
         pub(crate) fn seed_provenance_in_channel(
             &self,
             channel_id: Uuid,
@@ -258,10 +298,7 @@ pub(crate) mod fake {
                 id: channel_id,
                 name: channel_name.to_string(),
             });
-            self.provenance
-                .lock()
-                .expect("lock")
-                .push((channel_id, provenance));
+            self.seed_provenance(channel_id, "attacker", provenance);
         }
 
         /// 지금까지 `op`가 호출된 횟수.
@@ -325,7 +362,7 @@ pub(crate) mod fake {
         async fn fetch_provenance(
             &self,
             catalog_id: &str,
-        ) -> Result<Vec<(Uuid, Provenance)>, EffectError> {
+        ) -> Result<Vec<ProvenanceRecord>, EffectError> {
             self.take_failure("fetch_provenance")?;
             let live_channels: HashSet<Uuid> = self
                 .channels
@@ -334,20 +371,24 @@ pub(crate) mod fake {
                 .iter()
                 .map(|c| c.id)
                 .collect();
-            // 여기서 채널을 **버리지 않는다.** 예전에는 `(_, p)`로 벗겨서
-            // 레코드만 돌려줬는데, 그러면 이 fake만 채널 결합을 알고 실제
-            // 어댑터는 알 수 없는 상태가 된다 — 실제로 그렇게 벌어졌고,
+            // 여기서 채널과 서명자를 **버리지 않는다.** 예전에는 `(_, p)`로
+            // 벗겨서 레코드만 돌려줬는데, 그러면 이 fake만 채널 결합을 알고
+            // 실제 어댑터는 알 수 없는 상태가 된다 — 실제로 그렇게 벌어졌고,
             // 그 틈이 곧 남의 채널에 발행한 레코드가 판정을 가로채는 경로였다.
-            // 어느 쌍이 유효한가는 `preflight`가 도출식으로 판정한다.
+            // 어느 레코드가 유효한가는 `preflight`가 도출식과 서명자로 판정한다.
             Ok(self
                 .provenance
                 .lock()
                 .expect("lock")
                 .iter()
-                .filter(|(channel_id, p)| {
+                .filter(|(channel_id, _, p)| {
                     p.catalog_id == catalog_id && live_channels.contains(channel_id)
                 })
-                .cloned()
+                .map(|(channel_id, signer, provenance)| ProvenanceRecord {
+                    channel_id: *channel_id,
+                    signer: signer.clone(),
+                    provenance: provenance.clone(),
+                })
                 .collect())
         }
 
@@ -409,14 +450,40 @@ pub(crate) mod fake {
                 .push((channel_id, provenance.clone()));
             // NIP-33 LWW: 같은 d 태그는 교체된다 — retain-then-push라 같은
             // d_tag로 재발행해도 정확히 한 항목만 남고, 그 값은 새 값이다.
+            // 서명자는 항상 fake의 「나」다 — 발행은 언제나 적용자 본인이
+            // 하는 행동이다.
             let mut store = self.provenance.lock().expect("lock");
-            store.retain(|(_, p)| p.d_tag() != provenance.d_tag());
-            store.push((channel_id, provenance.clone()));
+            store.retain(|(_, _, p)| p.d_tag() != provenance.d_tag());
+            store.push((channel_id, FAKE_ME.to_string(), provenance.clone()));
             Ok(())
         }
 
         async fn now_rfc3339(&self) -> String {
             "2026-07-28T09:00:00Z".into()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn provenance_record_carries_channel_and_signer() {
+        let record = ProvenanceRecord {
+            channel_id: Uuid::nil(),
+            signer: "abc123".into(),
+            provenance: Provenance {
+                catalog_id: "schoolx.default".into(),
+                catalog_version: 1,
+                item_key: "meeting".into(),
+                generation: 1,
+                steps: crate::provenance::StepStates::default(),
+                applied_at: "2026-08-01T00:00:00Z".into(),
+            },
+        };
+        assert_eq!(record.channel_id, Uuid::nil());
+        assert_eq!(record.signer, "abc123");
+        assert_eq!(record.provenance.item_key, "meeting");
     }
 }

@@ -136,10 +136,15 @@ pub async fn preflight(
     // 것을 막고 `not_owned`로 사용자에게 넘긴다.
     let provenance: Vec<Provenance> = fetched
         .into_iter()
-        .filter(|(channel_id, p)| {
-            record_sits_in_its_derived_channel(&relay_scope, &catalog.catalog_id, *channel_id, p)
+        .filter(|record| {
+            record_sits_in_its_derived_channel(
+                &relay_scope,
+                &catalog.catalog_id,
+                record.channel_id,
+                &record.provenance,
+            )
         })
-        .map(|(_, p)| p)
+        .map(|record| record.provenance)
         .collect();
 
     let mut out = Vec::with_capacity(catalog.items.len());
@@ -236,7 +241,7 @@ pub async fn preflight(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::effects::fake::FakeEffects;
+    use crate::effects::fake::{FakeEffects, FAKE_ME};
     use crate::effects::ChannelRef;
     use crate::provenance::{StepStates, StepStatus};
 
@@ -316,10 +321,11 @@ mod tests {
             id: channel_id,
             name: name.into(),
         });
-        fx.provenance.lock().expect("lock").push((
+        fx.seed_provenance(
             channel_id,
+            FAKE_ME,
             provenance_with_generation(item_key, generation, steps),
-        ));
+        );
         channel_id
     }
 
@@ -597,13 +603,14 @@ mod tests {
         // 관리자 B의 레코드. 같은 `d` 태그이지만 서명자가 달라 relay에서
         // 지워지지 않고 나란히 남는다. `Provenance`에는 서명자 필드가 없으므로
         // (신원은 이벤트에만 있다) 두 레코드의 차이는 `applied_at`뿐이다.
-        fx.provenance.lock().expect("lock").push((
+        fx.seed_provenance(
             channel_id,
+            "admin-b",
             Provenance {
                 applied_at: "2026-07-29T11:00:00Z".into(),
                 ..provenance_with_generation("finance", 1, done())
             },
-        ));
+        );
 
         let items = preflight(crate::builtin(), &fx).await.expect("preflight");
         assert_eq!(
