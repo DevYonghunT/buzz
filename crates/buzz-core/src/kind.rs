@@ -828,6 +828,20 @@ pub const fn is_command_kind(kind: u32) -> bool {
 
 /// Returns `true` if `kind` may only be authored by the relay.
 /// Client submission of these kinds must be rejected.
+///
+/// The NIP-29 discovery kinds (39000/39001/39002) are here because they are
+/// the relay's own statement of what a channel is and who belongs to it —
+/// clients read them as authority. Desktop in particular reads kind:39002 to
+/// answer "who owns this channel", which gates SchoolX catalog adoption
+/// (`docs/schoolx-2/CATALOG_SECURITY.md` §5). Note the *admin* kinds
+/// (9000/9001/9002/…) are deliberately absent: those are how a client asks
+/// the relay to change a group, and the relay emits the discovery events in
+/// response. Asking is a client action; answering is not.
+///
+/// This predicate is consulted only in `ingest_event`. The relay's own
+/// discovery emission (`emit_group_discovery_events`) writes through
+/// `replace_addressable_event` directly and so is unaffected — the same shape
+/// `KIND_NIP43_MEMBERSHIP_LIST` already relies on.
 pub const fn is_relay_only_kind(kind: u32) -> bool {
     matches!(
         kind,
@@ -837,6 +851,9 @@ pub const fn is_relay_only_kind(kind: u32) -> bool {
             | KIND_DM_VISIBILITY
             | KIND_THREAD_SUMMARY
             | KIND_WINDOW_BOUNDS
+            | KIND_NIP29_GROUP_METADATA
+            | KIND_NIP29_GROUP_ADMINS
+            | KIND_NIP29_GROUP_MEMBERS
     )
 }
 
@@ -911,6 +928,36 @@ mod tests {
     fn nip43_membership_snapshot_is_relay_only() {
         assert!(is_relay_only_kind(KIND_NIP43_MEMBERSHIP_LIST));
         assert!(!is_relay_only_kind(KIND_NIP43_LEAVE_REQUEST));
+    }
+
+    /// NIP-29 discovery events are the relay's own answer to "what is this
+    /// channel, and who is in it". Clients must not be able to author them.
+    ///
+    /// This is not hypothetical tidiness. Desktop reads kind:39002 to decide
+    /// **who owns a channel** (`commands/workspace_catalog.rs`'s
+    /// `channel_owner` / `is_owner`), and that answer gates SchoolX catalog
+    /// adoption. The read carries no `authors` filter, and a client-authored
+    /// copy lands with `channel_id = NULL` — visible to every authenticated
+    /// user — so before this invariant existed any community member could
+    /// publish a 39002 naming themselves owner of someone else's channel and
+    /// have the desktop believe it. Design ref:
+    /// `docs/schoolx-2/CATALOG_SECURITY.md` §5.
+    ///
+    /// Safe for the relay's own emission: `emit_group_discovery_events`
+    /// (`buzz-relay/src/handlers/side_effects.rs`) writes through
+    /// `replace_addressable_event` directly and never passes through
+    /// `ingest_event`, which is the only place this predicate is consulted.
+    #[test]
+    fn nip29_discovery_events_are_relay_only() {
+        assert!(is_relay_only_kind(KIND_NIP29_GROUP_METADATA));
+        assert!(is_relay_only_kind(KIND_NIP29_GROUP_ADMINS));
+        assert!(is_relay_only_kind(KIND_NIP29_GROUP_MEMBERS));
+        // The NIP-29 *admin* kinds stay client-authored — they are how a user
+        // asks the relay to change a group, which is the normal path.
+        assert!(!is_relay_only_kind(KIND_NIP29_PUT_USER));
+        assert!(!is_relay_only_kind(KIND_NIP29_REMOVE_USER));
+        assert!(!is_relay_only_kind(KIND_NIP29_EDIT_METADATA));
+        assert!(!is_relay_only_kind(KIND_NIP29_CREATE_GROUP));
     }
 
     #[test]

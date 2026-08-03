@@ -252,6 +252,100 @@ async fn test_client_submitted_nip43_membership_snapshots_are_rejected() {
     );
 }
 
+/// A community member must not be able to forge the member list of a channel
+/// they do not own.
+///
+/// Kind:39002 is the relay's answer to "who is in this channel, and in what
+/// role". Desktop reads it to decide **who owns a channel**
+/// (`commands/workspace_catalog.rs`'s `channel_owner` / `is_owner`), and that
+/// answer gates SchoolX catalog adoption. That read carries no `authors`
+/// filter, and a client-authored 39002 without an `h` tag lands with
+/// `channel_id = NULL` — visible to every authenticated user — so without the
+/// relay-only invariant an attacker could name themselves owner of a victim's
+/// channel and have the desktop believe it. Design ref:
+/// `docs/schoolx-2/CATALOG_SECURITY.md` §5.
+///
+/// The attacker here creates their own channel first, which proves they are a
+/// normally-authorized actor — so the rejection below is specifically the
+/// relay-only invariant and not a broader authorization failure.
+#[tokio::test]
+#[ignore]
+async fn test_client_submitted_nip29_member_lists_are_rejected() {
+    let url = relay_url();
+    let victim = Keys::generate();
+    let attacker = Keys::generate();
+
+    let victim_channel = create_test_channel(&victim).await;
+    create_test_channel(&attacker).await;
+
+    // The forgery: "in the victim's channel, I am the owner."
+    let forged = EventBuilder::new(Kind::Custom(39_002), "")
+        .tags([
+            Tag::parse(["d", &victim_channel]).unwrap(),
+            Tag::parse(["p", &attacker.public_key().to_hex(), "", "owner"]).unwrap(),
+        ])
+        .sign_with_keys(&attacker)
+        .expect("sign forged member list");
+
+    let mut ws = BuzzTestClient::connect(&url, &attacker)
+        .await
+        .expect("connect");
+    let ok = ws
+        .send_event(forged.clone())
+        .await
+        .expect("submit forged member list via websocket");
+    assert!(
+        !ok.accepted,
+        "forged WebSocket member list must be rejected"
+    );
+    assert_eq!(ok.message, "restricted: relay-only kind");
+    ws.disconnect().await.expect("disconnect");
+
+    let response = reqwest::Client::new()
+        .post(format!("{}/events", relay_http_url()))
+        .header("X-Pubkey", attacker.public_key().to_hex())
+        .header("Content-Type", "application/json")
+        .body(serde_json::to_string(&forged).unwrap())
+        .send()
+        .await
+        .expect("submit forged member list via HTTP");
+    assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+    let body = response.text().await.expect("read HTTP rejection");
+    assert!(
+        body.contains("restricted: relay-only kind"),
+        "unexpected HTTP rejection: {body}"
+    );
+}
+
+/// The sibling discovery kinds are closed the same way, for the same reason —
+/// `is_relay_only_kind` covers all three, and a gap in any one of them would
+/// let a client contradict the relay about a channel it does not own.
+#[tokio::test]
+#[ignore]
+async fn test_client_submitted_nip29_group_metadata_and_admins_are_rejected() {
+    let url = relay_url();
+    let attacker = Keys::generate();
+    let channel = create_test_channel(&attacker).await;
+
+    for kind in [39_000_u16, 39_001] {
+        let forged = EventBuilder::new(Kind::Custom(kind), "")
+            .tags([Tag::parse(["d", &channel]).unwrap()])
+            .sign_with_keys(&attacker)
+            .expect("sign forged discovery event");
+
+        let mut ws = BuzzTestClient::connect(&url, &attacker)
+            .await
+            .expect("connect");
+        let ok = ws
+            .send_event(forged)
+            .await
+            .expect("submit forged discovery event");
+        assert!(!ok.accepted, "forged kind:{kind} must be rejected");
+        assert_eq!(ok.message, "restricted: relay-only kind");
+        ws.disconnect().await.expect("disconnect");
+    }
+}
+
 #[tokio::test]
 #[ignore]
 async fn test_invite_mint_and_claim_admits_new_pubkey() {
