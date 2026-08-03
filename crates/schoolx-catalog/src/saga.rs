@@ -1213,6 +1213,14 @@ mod tests {
     /// 이름은 catalog 값과 다르게 둔다 — 이름이 판정에 끼어 있으면 (§7이
     /// 금지한다) 이 케이스가 `Conflict`로 새어 나가 채택 분기에 아예 도달하지
     /// 못한다. `owned`는 호출자가 정한다: 채택은 owner일 때만 허용된다.
+    ///
+    /// `owned`가 참이면 `owners`(채널의 owner가 누구인가, preflight §5가
+    /// 본다)도 `FAKE_ME`로 같이 등록한다 — `owned`(내가 owner인가, saga의
+    /// §8 게이트가 본다)만 채우고 `owners`를 비워 두면, 채택이 끝나
+    /// `publish_provenance`가 `FAKE_ME` 서명 증명서를 남긴 뒤에도
+    /// `channel_owner`는 여전히 `Ok(None)`을 돌려준다. 그러면 다음 실행이
+    /// 그 증명서를 owner 불명으로 버리고 매번 처음부터 다시 채택을
+    /// 시도한다 — 실제로는 owner인데 fake만 그 사실을 모르는 상태다.
     fn seed_orphaned_channel(fx: &FakeEffects, item_key: &str, owned: bool) -> Uuid {
         let channel_id = derive_channel_id("wss://relay.test", "schoolx.default", item_key, 1);
         fx.channels.lock().expect("lock").push(ChannelRef {
@@ -1222,6 +1230,7 @@ mod tests {
         fx.burned_ids.lock().expect("lock").insert(channel_id);
         if owned {
             fx.owned.lock().expect("lock").insert(channel_id);
+            fx.set_channel_owner(channel_id, FAKE_ME);
         }
         channel_id
     }
@@ -1256,6 +1265,41 @@ mod tests {
             fx.canvases.lock().expect("lock").get(&channel_id),
             Some(&canvas_of("meeting").to_string())
         );
+    }
+
+    /// 채택도 owner를 등록한다 — 아니면 재적용이 idempotent하지 않다.
+    ///
+    /// `seed_orphaned_channel`은 "relay가 채널 생성을 커밋했는데 provenance는
+    /// 없는" 상태를 손으로 만든다. 채택은 `create_channel`이 아니라
+    /// `publish_provenance`로 증명서를 남기므로, owner 등록이
+    /// `create_channel`의 `Created` 분기에만 있으면 방금 채택한 채널은
+    /// 실제로는(`owned`) owner인데 `channel_owner`는 여전히 `Ok(None)`을
+    /// 돌려주는 상태가 된다. 그러면 두 번째 실행이 자기 서명 증명서를 owner
+    /// 불명으로 버리고 매번 다시 채택을 시도한다 — 이 테스트가 없으면 그
+    /// 사실이 조용히 넘어간다("오늘은 아무것도 실패하지 않는다"가 바로 그
+    /// 함정이다).
+    #[tokio::test]
+    async fn adoption_registers_the_owner_so_a_second_apply_is_no_change() {
+        let fx = FakeEffects::new();
+        seed_orphaned_channel(&fx, "meeting", true);
+
+        let first = apply(crate::builtin(), &fx, &["meeting".to_string()])
+            .await
+            .expect("first");
+        assert_eq!(item(&first, "meeting").decision, "adopted");
+
+        let second = apply(crate::builtin(), &fx, &["meeting".to_string()])
+            .await
+            .expect("second");
+        let entry = item(&second, "meeting");
+        assert_eq!(
+            entry.decision, "no_change",
+            "채택 후 두 번째 적용이 owner를 다시 모른다 — 매번 재채택한다"
+        );
+        assert_eq!(entry.outcome, Outcome::Unchanged);
+        // 방을 하나 더 만들거나 다시 채택하지 않았다.
+        assert_eq!(fx.channels.lock().expect("lock").len(), 1);
+        assert_eq!(fx.created.lock().expect("lock").len(), 0);
     }
 
     /// 채택 경로도 **내용이 있는** 캔버스를 덮어쓰지 않는다.

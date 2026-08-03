@@ -55,7 +55,11 @@ pub enum CreateOutcome {
 pub struct ProvenanceRecord {
     /// 이 이벤트가 실려 있던 채널 (`h` 태그).
     pub channel_id: Uuid,
-    /// 이 이벤트에 서명한 pubkey (hex).
+    /// 이 이벤트에 서명한 pubkey — 소문자 hex(NIP-01 표준 인코딩). 이
+    /// 크레이트는 [`CatalogEffects::channel_owner`]가 돌려주는 값과 정확한
+    /// 문자열(`==`)로 비교하므로, 인코딩이 어긋나면(대문자, bech32/npub 등)
+    /// 실제로 같은 키라도 다른 문자열로 보여 조용히 서명자 불일치로
+    /// 처리된다.
     pub signer: String,
     /// 이벤트 content.
     pub provenance: Provenance,
@@ -123,7 +127,15 @@ pub trait CatalogEffects: Send + Sync {
     /// 현재 사용자가 이 채널의 owner인가.
     async fn is_owner(&self, channel_id: Uuid) -> Result<bool, EffectError>;
 
-    /// 이 채널의 owner pubkey. owner를 알 수 없으면 `None`.
+    /// 이 채널의 owner pubkey — [`ProvenanceRecord::signer`]와 같은 인코딩
+    /// (소문자 hex)이어야 한다. owner를 알 수 없으면 `None`.
+    ///
+    /// **인코딩을 반드시 맞춰야 한다.** `preflight`는 이 값을
+    /// `ProvenanceRecord::signer`와 정확한 문자열(`==`)로 비교한다 —
+    /// 대소문자나 bech32/npub 같은 다른 인코딩으로 돌려주면 실제로는 같은
+    /// owner라도 매번 불일치로 보여 그 채널의 모든 증명서가 조용히
+    /// 버려진다. 버려진 결과가 `Err`가 아니라 "적용한 적 없음"으로만
+    /// 보이므로(§5) 이 실수는 로그에도 남지 않는다.
     ///
     /// `is_owner`와 다르다. 저쪽은 「내가 owner인가」이고 이쪽은 「owner가
     /// 누구인가」다. provenance 검증은 후자를 필요로 한다 — 증명서를 남긴
@@ -131,7 +143,8 @@ pub trait CatalogEffects: Send + Sync {
     ///
     /// `Ok(None)`은 「채널은 있는데 owner를 특정할 수 없다」이지 오류가
     /// 아니다. 그 경우 그 채널의 증명서는 전부 버린다 — 검증할 수 없는 것을
-    /// 통과시키지 않는다.
+    /// 통과시키지 않는다. `Err`도 같은 방향으로 다룬다 — 호출부(`preflight`)가
+    /// 레코드 단위로 버리지 전체를 실패시키지 않는다.
     async fn channel_owner(&self, channel_id: Uuid) -> Result<Option<String>, EffectError>;
 
     /// provenance 이벤트를 발행한다 (kind 39500).

@@ -118,13 +118,32 @@ pub async fn preflight(
     // 채널의 쓰기 권한이 필요하므로, 남의 채널에 레코드를 아무리 쌓아도
     // 판정은 움직이지 않는다.
     //
-    // **이 검사 혼자서는 막지 못하는 것도 적어 둔다.** 채널 ID는 클라이언트가
+    // **이 검사 혼자서는 막지 못하는 것도, 아래 §5의 owner 검사를 더해도
+    // 여전히 막지 못하는 것도 적어 둔다: 선점.** 채널 ID는 클라이언트가
     // 정하는 값이라, 도출식을 계산해 그 ID로 **채널을 먼저 만들어 버린**
     // 공격자는 자기 채널 안에서 이 검사를 통과하는 레코드를 만들 수 있다.
     // 이벤트 하나를 발행하는 것과는 값이 다르다 — 항목마다 그 ID를 영구히
-    // 태워야 한다. 그 경로를 닫는 것은 이 검사가 아니라 아래 §5의 owner
-    // 검사다 — 레코드의 **서명자**가 그 채널의 현재 owner인지 확인한다. 두
-    // 검사는 서로 다른 공격을 막으므로 하나가 다른 하나를 대신하지 않는다.
+    // 태워야 한다.
+    //
+    // 아래 owner 검사를 더해도 이 선점 경로는 닫히지 않는다 — 선점자는
+    // 자기가 먼저 만든 그 채널의 **진짜 owner**다(relay가 그렇게 기록한다).
+    // 그러므로 자기 손으로 서명해 남긴 레코드는 owner 검사도 그대로
+    // 통과한다. 「내가 만들고 내가 서명했다」는 참인 진술이라 어느 검사로도
+    // 거짓으로 만들 수 없다. 선점을 막는 것은 이 크레이트가 아니다 —
+    // 관리자가 그 채널의 멤버가 아니면 relay의 읽기 ACL이 애초에 그
+    // 레코드를 넘기지 않고, 멤버라도 saga가 쓰기 직전에 묻는 owner
+    // 게이트(§7·§8, `saga.rs`)가 `not_owned`로 막는다 — 둘 다 이 함수 밖의
+    // 별도 방어선이다. 자세한 근거는 `docs/schoolx-2/CATALOG_SECURITY.md`
+    // §5(선점 채널 문단)·§7을 보라.
+    //
+    // 그러면 아래 owner 검사는 실제로 무엇을 닫는가: **선점되지 않은 진짜
+    // 채널 안에서, owner가 아닌 멤버가 발행한 레코드.** kind 39500 쓰기는
+    // relay에서 채널 멤버십만 요구하고 owner십을 요구하지 않으므로
+    // (`crates/buzz-relay/src/handlers/ingest.rs`의 `requires_h_channel_scope`
+    // + 일반 멤버십 게이트), 진짜 `#회의` 채널의 멤버 아무나(학교라면 학생
+    // 아무나)가 그 채널 안에 완료로 위조한 레코드를 발행할 수 있다. 채널
+    // 결합만 보면 그 레코드는 진짜 채널에 있으므로 통과한다 — 아래 owner
+    // 검사가 서명자 불일치로 그 레코드를 버린다.
     //
     // 검사에 걸린 레코드는 "우리와 무관한 레코드"가 아니라 **위조이거나
     // 버그**다. 그런데도 오류로 올리지 않고 애초에 없었던 것처럼 버리는
@@ -146,16 +165,23 @@ pub async fn preflight(
         .collect();
 
     // §5: 증명서는 (1) 도출식이 예측하는 채널에 실려 있고 (2) 그 채널의
-    // 현재 owner가 서명한 것만 인정한다. (1)만으로는 그 채널을 선점한
-    // 사람이 자기 채널 안에서 발행한 증명서를 거르지 못한다 — 정말 그
-    // 채널에 있기 때문이다.
+    // 현재 owner가 서명한 것만 인정한다. 위에서 적었듯 (2)는 (1)이 놓치는
+    // 선점 경로를 닫지 않는다 — 그것을 닫는 것은 이 owner 검사가 아니라
+    // relay ACL과 saga의 owner 게이트다. (2)가 실제로 닫는 것은 선점되지
+    // 않은 진짜 채널에서 owner가 아닌 멤버가 발행한 레코드다.
     //
     // owner를 특정할 수 없으면 버린다. 검증할 수 없는 것을 통과시키지
-    // 않는다.
+    // 않는다. `channel_owner`가 `Err`를 돌려줘도 마찬가지로 버린다 —
+    // `?`로 올리지 않는다. 이 루프는 공격자가 통제할 수 있는 channel_id를
+    // 순회하므로, 조회 실패를 위로 전파하면 위 문단과 같은 이유로 그
+    // 하나가 관리자의 preflight 전체를 영구히 막는 지렛대가 된다. 버려진
+    // 레코드가 진짜였다면 그 항목은 "적용한 적 없음"으로 보일 뿐이고,
+    // 재적용은 §8의 캔버스 가드를 그대로 지나 기존 내용을 지키며 한 번
+    // 만에 스스로 복구된다.
     let mut honoured: Vec<&ProvenanceRecord> = Vec::new();
     for record in &provenance {
-        match effects.channel_owner(record.channel_id).await? {
-            Some(owner) if owner == record.signer => honoured.push(record),
+        match effects.channel_owner(record.channel_id).await {
+            Ok(Some(owner)) if owner == record.signer => honoured.push(record),
             _ => {}
         }
     }
@@ -609,39 +635,64 @@ mod tests {
         assert_eq!(items.len(), crate::builtin().items.len());
     }
 
-    /// 같은 항목을 적용한 신원이 둘이어도 `retired` 줄은 하나다.
+    /// 같은 `item_key`가 서로 다른 **세대**로 두 번 honoured돼도 `retired`
+    /// 줄은 하나다.
     ///
-    /// kind 39500은 `(kind, pubkey, d 태그)`별로 addressable이라 NIP-33 LWW는
-    /// 신원 안에서만 적용된다 — 관리자 A와 B가 같은 항목을 적용하면 같은
-    /// 채널에 레코드가 두 개 남는다(§4). 그 항목이 나중에 catalog에서 빠지면
-    /// 이 루프가 레코드마다 한 줄씩 밀어 `item_key`가 같은 줄이 두 개 나가고,
-    /// UI에는 같은 방이 두 번 보인다.
+    /// (이 테스트는 owner 검사 도입 전에는 "같은 채널·같은 세대, 서로 다른
+    /// 서명자"로 dedup을 시험했다. 이제는 그 모양이 성립하지 않는다: 한
+    /// 채널의 owner는 하나뿐이므로, owner가 아닌 서명자의 레코드는
+    /// `honoured`에 들어가기 전에 §5의 owner 검사가 이미 버린다 — 즉 같은
+    /// 채널·같은 세대에서 동시에 honoured되는 레코드는 최대 하나다. 이
+    /// dedup이 실제로 시험받는 유일한 경로는 **세대**가 다른 경우다: 세대가
+    /// 다르면 도출되는 채널도 다르므로(§5) 채널마다 별도의 owner가 각자
+    /// 자기 레코드에 서명하면 둘 다 honoured될 수 있다.)
+    ///
+    /// kind 39500은 `(kind, pubkey, d 태그)`별로 addressable이라 NIP-33
+    /// LWW는 신원 안에서만 적용된다 — 그래서 세대 1과 세대 2가 나란히
+    /// 남을 수 있다(§4). 그 항목이 나중에 catalog에서 빠지면 이 루프가
+    /// 레코드마다 한 줄씩 밀어 `item_key`가 같은 줄이 두 개 나가고, UI에는
+    /// 같은 방이 두 번 보인다.
     #[tokio::test]
-    async fn a_retired_item_applied_by_two_identities_is_one_row() {
+    async fn a_retired_item_at_two_generations_is_one_row() {
         let fx = FakeEffects::new();
-        // 관리자 A의 레코드 — 채널도 이 헬퍼가 함께 만든다.
-        let channel_id = seed_applied(&fx, "finance", "재무", done());
-        // 관리자 B의 레코드. 같은 `d` 태그이지만 서명자가 달라 relay에서
-        // 지워지지 않고 나란히 남는다. `Provenance`에는 서명자 필드가 없으므로
-        // (신원은 이벤트에만 있다) 두 레코드의 차이는 `applied_at`뿐이다.
+        // 세대 1 — 채널·owner·서명자를 `seed_applied`가 함께 만들고
+        // honoured 목록에 먼저 들어간다(삽입 순서를 그대로 따른다).
+        seed_applied(&fx, "finance", "재무", done());
+        // 세대 2 — 도출되는 채널이 다르므로 owner도 다른 사람("admin-b")
+        // 일 수 있고, 그 사람이 자기 레코드에 서명하면 이 레코드도
+        // honoured된다. steps를 세대 1과 다르게 두어, 아래 assert가
+        // "먼저 심은 세대 1이 그대로 실렸다"를 실제로 구별하게 한다 — 둘을
+        // 합치거나 뒤바꾸는 구현이었다면 여기서 갈린다.
+        let gen2_channel = derive_channel_id("wss://relay.test", "schoolx.default", "finance", 2);
+        fx.channels.lock().expect("lock").push(ChannelRef {
+            id: gen2_channel,
+            name: "재무 (구)".into(),
+        });
+        fx.set_channel_owner(gen2_channel, "admin-b");
         fx.seed_provenance(
-            channel_id,
+            gen2_channel,
             "admin-b",
-            Provenance {
-                applied_at: "2026-07-29T11:00:00Z".into(),
-                ..provenance_with_generation("finance", 1, done())
-            },
+            provenance_with_generation(
+                "finance",
+                2,
+                StepStates {
+                    channel: StepStatus::Done,
+                    canvas: StepStatus::Pending,
+                    membership: StepStatus::Pending,
+                },
+            ),
         );
 
         let items = preflight(crate::builtin(), &fx).await.expect("preflight");
         assert_eq!(
             count(&items, "finance"),
             1,
-            "신원마다 한 줄씩 나갔다 — UI에 같은 방이 두 번 보인다"
+            "세대마다 한 줄씩 나갔다 — UI에 같은 방이 두 번 보인다"
         );
         let finance = find(&items, "finance");
         assert_eq!(finance.decision, Decision::Retired);
-        // 실재하는 레코드를 그대로 실었다 — 두 레코드를 합치거나 지어내지 않았다.
+        // 먼저 만난 레코드(세대 1)를 그대로 실었다 — 두 레코드를 합치거나
+        // 지어내지 않았다.
         assert_eq!(finance.steps, done());
         assert_eq!(finance.generation, 1);
     }
@@ -668,7 +719,15 @@ mod tests {
     }
 
     /// §5의 두 번째 조건: 도출된 채널에 실려 있어도 서명자가 그 채널의
-    /// owner가 아니면 버린다.
+    /// owner와 **다르면** 버린다 — owner를 몰라서가 아니라 owner를 알고,
+    /// 그 값이 서명자와 다르기 때문이다.
+    ///
+    /// owner를 `FAKE_ME`로 **등록해 둔다.** 등록하지 않으면 `channel_owner`가
+    /// `Ok(None)`을 돌려주고, 그 레코드는 owner **불명** 분기에서 버려진다
+    /// — 그건 이 테스트가 아니라 `provenance_is_ignored_when_the_owner_is_unknown`이
+    /// 다루는 별개의 경로다. `fx.owned`(내가 owner인가, `is_owner`가 보는
+    /// 값)를 채우는 것만으로는 이 분기에 닿지 않는다 — `channel_owner`는
+    /// `fx.owners`(채널의 owner가 누구인가)만 본다.
     ///
     /// 첫 번째 조건(채널 결합)만으로는 도출된 ID를 먼저 선점한 공격자가
     /// 자기 채널 안에서 발행한 증명서를 거르지 못한다 — 정말 그 채널에
@@ -678,13 +737,16 @@ mod tests {
     async fn provenance_signed_by_a_non_owner_is_ignored() {
         let fx = FakeEffects::new();
         let channel_id = derive_channel_id("wss://relay.test", "schoolx.default", "meeting", 1);
-        // 채널은 존재하고 owner는 나다.
         fx.channels.lock().expect("lock").push(ChannelRef {
             id: channel_id,
             name: "메인 회의방".into(),
         });
         fx.owned.lock().expect("lock").insert(channel_id);
-        // 그런데 증명서는 다른 사람이 서명했다.
+        // 채널의 owner는 나다 — `channel_owner`가 보는 저장소(`owners`)에
+        // 등록한다. 위 `owned`(`is_owner`가 보는 값)와는 별개다.
+        fx.set_channel_owner(channel_id, FAKE_ME);
+        // 그런데 증명서는 다른 사람이 서명했다 — owner는 알려져 있고,
+        // 서명자와 **다르다**.
         fx.seed_provenance(
             channel_id,
             "someone-else",
@@ -694,6 +756,37 @@ mod tests {
         let items = preflight(crate::builtin(), &fx).await.expect("preflight");
         // 그 증명서는 없는 것으로 친다 — 이름이 catalog 값 그대로이므로
         // 동명 충돌로 떨어진다.
+        assert_eq!(find(&items, "meeting").decision, Decision::Conflict);
+    }
+
+    /// §5의 owner 검사에는 서명자 불일치 말고 또 하나의 버림 사유가 있다:
+    /// owner를 아예 특정할 수 없는 경우(`Ok(None)`). 위
+    /// `provenance_signed_by_a_non_owner_is_ignored`와 대비된다 — 저기는
+    /// owner가 `FAKE_ME`로 **알려져 있고** 서명자가 그와 다른 경우(불일치
+    /// 분기)였다. 여기는 owner를 아예 등록하지 않는다(불명 분기).
+    ///
+    /// 서명자를 일부러 `FAKE_ME`로 둔다 — "내가 서명했다"는 사실조차 owner를
+    /// 특정할 수 없으면 레코드를 구하지 못한다는 것을 보이기 위해서다. 이
+    /// 분기를 `Some(owner) if owner == signer`만으로 시험하면 우연히도
+    /// `None == signer`가 성립하지 않는다는 사실 하나로 통과해 버려서 정말
+    /// "불명이라 버렸는지"를 증명하지 못한다 — 서명자를 아무 값으로 둬도
+    /// 결과가 같다는 것 자체가 이 테스트의 핵심이다.
+    #[tokio::test]
+    async fn provenance_is_ignored_when_the_owner_is_unknown() {
+        let fx = FakeEffects::new();
+        let channel_id = derive_channel_id("wss://relay.test", "schoolx.default", "meeting", 1);
+        fx.channels.lock().expect("lock").push(ChannelRef {
+            id: channel_id,
+            name: "메인 회의방".into(),
+        });
+        // owner를 등록하지 않는다 — `channel_owner`는 `Ok(None)`을 돌려준다.
+        fx.seed_provenance(
+            channel_id,
+            FAKE_ME,
+            provenance_with_generation("meeting", 1, done()),
+        );
+
+        let items = preflight(crate::builtin(), &fx).await.expect("preflight");
         assert_eq!(find(&items, "meeting").decision, Decision::Conflict);
     }
 
@@ -716,5 +809,29 @@ mod tests {
 
         let items = preflight(crate::builtin(), &fx).await.expect("preflight");
         assert_eq!(find(&items, "meeting").decision, Decision::NoChange);
+    }
+
+    /// `channel_owner` 조회 자체가 실패해도 `preflight` 전체가 `Err`로
+    /// 막히지 않는다 — 그 레코드만 버려진다.
+    ///
+    /// 이 루프는 공격자가 통제할 수 있는 channel_id를 순회한다. `?`로
+    /// 올리면 아무나 자기 채널의 `channel_owner` 조회 하나를 실패하게 만드는
+    /// 것만으로 관리자의 preflight 전체를 영구히 막을 수 있다 — 25줄 위
+    /// 채널 결합 검사가 명시적으로 피하는 바로 그 지렛대다. `Ok(None)`과
+    /// 같은 방향으로 버리는 것이 안전한 실패다: 진짜였을 레코드가 버려져도
+    /// 그 항목은 "적용한 적 없음"으로 보일 뿐이고, 재적용은 §8의 캔버스
+    /// 가드를 지나 기존 내용을 지키며 한 번 만에 스스로 복구된다.
+    #[tokio::test]
+    async fn channel_owner_lookup_failure_discards_the_record_without_erroring() {
+        let fx = FakeEffects::new();
+        seed_applied(&fx, "meeting", "메인 회의방", done());
+        fx.fail_next("channel_owner");
+
+        let items = preflight(crate::builtin(), &fx)
+            .await
+            .expect("channel_owner 조회 실패가 preflight 전체를 막았다");
+        // 버려졌다 — "적용한 적 없음"인데 이름이 catalog 값 그대로인 채널이
+        // 있으니 동명 충돌이다.
+        assert_eq!(find(&items, "meeting").decision, Decision::Conflict);
     }
 }
