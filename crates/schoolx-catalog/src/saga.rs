@@ -436,6 +436,12 @@ mod tests {
     /// 번 쓴 ID를 영구히 점유하므로 "채널은 있는데 ID는 비어 있다"는 상태는
     /// 실제로 만들어질 수 없고, 그런 상태로 시드하면 재생성 경로가 테스트에서만
     /// 성공한다. `owned`는 적용자가 만든 방이라는 뜻이다.
+    ///
+    /// owner도 `FAKE_ME`로 심는다 — 「내가 만들고 내가 남긴」 상태이므로
+    /// 서명자(`FAKE_ME`)와 채널 owner가 같아야 preflight §5의 owner 검사를
+    /// 통과한다. 이후 테스트가 `owned`(내가 owner인가)만 바꿔도 이 값은
+    /// 그대로 남는다 — 「채널의 owner가 누구인가」와 「내가 owner인가」는
+    /// 다른 질문이다.
     fn seed_applied(fx: &FakeEffects, item_key: &str, name: &str, steps: StepStates) -> Uuid {
         let channel_id = derive_channel_id("wss://relay.test", "schoolx.default", item_key, 1);
         fx.channels.lock().expect("lock").push(ChannelRef {
@@ -444,6 +450,7 @@ mod tests {
         });
         fx.burned_ids.lock().expect("lock").insert(channel_id);
         fx.owned.lock().expect("lock").insert(channel_id);
+        fx.set_channel_owner(channel_id, FAKE_ME);
         fx.seed_provenance(
             channel_id,
             FAKE_ME,

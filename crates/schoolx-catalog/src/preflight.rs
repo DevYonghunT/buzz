@@ -4,7 +4,7 @@
 
 use crate::catalog::Catalog;
 use crate::channel_id::derive_channel_id;
-use crate::effects::{CatalogEffects, EffectError};
+use crate::effects::{CatalogEffects, EffectError, ProvenanceRecord};
 use crate::provenance::{Provenance, StepStates};
 use serde::Serialize;
 use std::collections::HashSet;
@@ -118,14 +118,13 @@ pub async fn preflight(
     // 채널의 쓰기 권한이 필요하므로, 남의 채널에 레코드를 아무리 쌓아도
     // 판정은 움직이지 않는다.
     //
-    // **이 검사가 막지 못하는 것도 적어 둔다.** 채널 ID는 클라이언트가 정하는
-    // 값이라, 도출식을 계산해 그 ID로 **채널을 먼저 만들어 버린** 공격자는
-    // 자기 채널 안에서 이 검사를 통과하는 레코드를 만들 수 있다(§7
-    // 「`adopted`의 owner 게이트」의 「남는 구멍」). 이벤트 하나를 발행하는
-    // 것과는 값이 다르다 — 항목마다 그 ID를 영구히 태워야 한다. 그 경로까지
-    // 닫으려면 레코드의 **서명자**가 그 채널의 owner인지 확인해야 하는데,
-    // `Provenance`에는 서명자 필드가 없고 이 크레이트는 이벤트가 아니라
-    // 레코드만 본다.
+    // **이 검사 혼자서는 막지 못하는 것도 적어 둔다.** 채널 ID는 클라이언트가
+    // 정하는 값이라, 도출식을 계산해 그 ID로 **채널을 먼저 만들어 버린**
+    // 공격자는 자기 채널 안에서 이 검사를 통과하는 레코드를 만들 수 있다.
+    // 이벤트 하나를 발행하는 것과는 값이 다르다 — 항목마다 그 ID를 영구히
+    // 태워야 한다. 그 경로를 닫는 것은 이 검사가 아니라 아래 §5의 owner
+    // 검사다 — 레코드의 **서명자**가 그 채널의 현재 owner인지 확인한다. 두
+    // 검사는 서로 다른 공격을 막으므로 하나가 다른 하나를 대신하지 않는다.
     //
     // 검사에 걸린 레코드는 "우리와 무관한 레코드"가 아니라 **위조이거나
     // 버그**다. 그런데도 오류로 올리지 않고 애초에 없었던 것처럼 버리는
@@ -134,7 +133,7 @@ pub async fn preflight(
     // 항목은 `create_or_recreate`로 떨어져 정상 경로를 그대로 탄다 — 그
     // ID의 채널이 이미 선점돼 있다면 saga의 owner 게이트(§8)가 그 방에 쓰는
     // 것을 막고 `not_owned`로 사용자에게 넘긴다.
-    let provenance: Vec<Provenance> = fetched
+    let provenance: Vec<ProvenanceRecord> = fetched
         .into_iter()
         .filter(|record| {
             record_sits_in_its_derived_channel(
@@ -144,13 +143,30 @@ pub async fn preflight(
                 &record.provenance,
             )
         })
-        .map(|record| record.provenance)
         .collect();
+
+    // §5: 증명서는 (1) 도출식이 예측하는 채널에 실려 있고 (2) 그 채널의
+    // 현재 owner가 서명한 것만 인정한다. (1)만으로는 그 채널을 선점한
+    // 사람이 자기 채널 안에서 발행한 증명서를 거르지 못한다 — 정말 그
+    // 채널에 있기 때문이다.
+    //
+    // owner를 특정할 수 없으면 버린다. 검증할 수 없는 것을 통과시키지
+    // 않는다.
+    let mut honoured: Vec<&ProvenanceRecord> = Vec::new();
+    for record in &provenance {
+        match effects.channel_owner(record.channel_id).await? {
+            Some(owner) if owner == record.signer => honoured.push(record),
+            _ => {}
+        }
+    }
 
     let mut out = Vec::with_capacity(catalog.items.len());
 
     for item in &catalog.items {
-        let known: Option<&Provenance> = provenance.iter().find(|p| p.item_key == item.item_key);
+        let known: Option<&Provenance> = honoured
+            .iter()
+            .find(|record| record.provenance.item_key == item.item_key)
+            .map(|record| &record.provenance);
 
         match known {
             Some(p) => {
@@ -216,7 +232,8 @@ pub async fn preflight(
     // 것을 고르든 동작은 같다 — 지어내지 않고 실재하는 레코드 하나를 그대로
     // 싣는다는 것만이 중요하다.
     let mut retired_keys: HashSet<&str> = HashSet::new();
-    for p in &provenance {
+    for record in &honoured {
+        let p = &record.provenance;
         if catalog.item(&p.item_key).is_none() && retired_keys.insert(p.item_key.as_str()) {
             out.push(PreflightItem {
                 item_key: p.item_key.clone(),
@@ -299,6 +316,9 @@ mod tests {
     /// 그렇게 동작하므로 — `fetch_provenance`가 `channels`에 살아 있는 채널의
     /// 항목만 돌려준다 — 시딩은 반드시 채널과 짝으로 해야 한다. provenance만
     /// 넣으면 preflight에는 "적용한 적 없음"으로 보인다.
+    ///
+    /// owner도 `FAKE_ME`로 심는다 — 「내가 만들고 내가 남긴」 상태이므로
+    /// 서명자(`FAKE_ME`)와 채널 owner가 같아야 §5의 owner 검사를 통과한다.
     fn seed_applied(fx: &FakeEffects, item_key: &str, name: &str, steps: StepStates) -> Uuid {
         seed_applied_with_generation(fx, item_key, name, steps, 1)
     }
@@ -321,6 +341,7 @@ mod tests {
             id: channel_id,
             name: name.into(),
         });
+        fx.set_channel_owner(channel_id, FAKE_ME);
         fx.seed_provenance(
             channel_id,
             FAKE_ME,
@@ -644,5 +665,56 @@ mod tests {
                 3
             ))
         );
+    }
+
+    /// §5의 두 번째 조건: 도출된 채널에 실려 있어도 서명자가 그 채널의
+    /// owner가 아니면 버린다.
+    ///
+    /// 첫 번째 조건(채널 결합)만으로는 도출된 ID를 먼저 선점한 공격자가
+    /// 자기 채널 안에서 발행한 증명서를 거르지 못한다 — 정말 그 채널에
+    /// 있기 때문이다. 채널 이름이 catalog 값과 같으므로, 증명서가 버려지면
+    /// "적용한 적 없음 + 동명 채널 있음"이 되어 `Conflict`로 떨어진다.
+    #[tokio::test]
+    async fn provenance_signed_by_a_non_owner_is_ignored() {
+        let fx = FakeEffects::new();
+        let channel_id = derive_channel_id("wss://relay.test", "schoolx.default", "meeting", 1);
+        // 채널은 존재하고 owner는 나다.
+        fx.channels.lock().expect("lock").push(ChannelRef {
+            id: channel_id,
+            name: "메인 회의방".into(),
+        });
+        fx.owned.lock().expect("lock").insert(channel_id);
+        // 그런데 증명서는 다른 사람이 서명했다.
+        fx.seed_provenance(
+            channel_id,
+            "someone-else",
+            provenance_with_generation("meeting", 1, done()),
+        );
+
+        let items = preflight(crate::builtin(), &fx).await.expect("preflight");
+        // 그 증명서는 없는 것으로 친다 — 이름이 catalog 값 그대로이므로
+        // 동명 충돌로 떨어진다.
+        assert_eq!(find(&items, "meeting").decision, Decision::Conflict);
+    }
+
+    /// owner가 직접 서명한 증명서는 그대로 인정된다.
+    #[tokio::test]
+    async fn provenance_signed_by_the_owner_is_honoured() {
+        let fx = FakeEffects::new();
+        let channel_id = derive_channel_id("wss://relay.test", "schoolx.default", "meeting", 1);
+        fx.channels.lock().expect("lock").push(ChannelRef {
+            id: channel_id,
+            name: "메인 회의방".into(),
+        });
+        fx.owned.lock().expect("lock").insert(channel_id);
+        fx.set_channel_owner(channel_id, "owner-pubkey");
+        fx.seed_provenance(
+            channel_id,
+            "owner-pubkey",
+            provenance_with_generation("meeting", 1, done()),
+        );
+
+        let items = preflight(crate::builtin(), &fx).await.expect("preflight");
+        assert_eq!(find(&items, "meeting").decision, Decision::NoChange);
     }
 }

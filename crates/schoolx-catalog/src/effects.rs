@@ -123,6 +123,17 @@ pub trait CatalogEffects: Send + Sync {
     /// 현재 사용자가 이 채널의 owner인가.
     async fn is_owner(&self, channel_id: Uuid) -> Result<bool, EffectError>;
 
+    /// 이 채널의 owner pubkey. owner를 알 수 없으면 `None`.
+    ///
+    /// `is_owner`와 다르다. 저쪽은 「내가 owner인가」이고 이쪽은 「owner가
+    /// 누구인가」다. provenance 검증은 후자를 필요로 한다 — 증명서를 남긴
+    /// 사람이 그 채널의 owner였는지 물어야 하기 때문이다.
+    ///
+    /// `Ok(None)`은 「채널은 있는데 owner를 특정할 수 없다」이지 오류가
+    /// 아니다. 그 경우 그 채널의 증명서는 전부 버린다 — 검증할 수 없는 것을
+    /// 통과시키지 않는다.
+    async fn channel_owner(&self, channel_id: Uuid) -> Result<Option<String>, EffectError>;
+
     /// provenance 이벤트를 발행한다 (kind 39500).
     async fn publish_provenance(
         &self,
@@ -214,6 +225,10 @@ pub(crate) mod fake {
         /// `channels` 멤버십만으로는 표현할 수 없는 상태를 테스트가 만들 수
         /// 있다.
         pub owned: Mutex<HashSet<Uuid>>,
+        /// 채널별 owner pubkey. `owned`(내가 owner인 채널)와 분리한다 —
+        /// 「내가 owner다」와 「owner가 누구다」는 다른 질문이고, 선점 공격은
+        /// 그 차이에서 산다.
+        pub owners: Mutex<HashMap<Uuid, String>>,
     }
 
     #[allow(dead_code)]
@@ -299,6 +314,14 @@ pub(crate) mod fake {
                 name: channel_name.to_string(),
             });
             self.seed_provenance(channel_id, "attacker", provenance);
+        }
+
+        /// 이 채널의 owner를 지정한다.
+        pub(crate) fn set_channel_owner(&self, channel_id: Uuid, pubkey: &str) {
+            self.owners
+                .lock()
+                .expect("lock")
+                .insert(channel_id, pubkey.to_string());
         }
 
         /// 지금까지 `op`가 호출된 횟수.
@@ -402,6 +425,10 @@ pub(crate) mod fake {
                 name: spec.name.clone(),
             });
             self.owned.lock().expect("lock").insert(spec.id);
+            self.owners
+                .lock()
+                .expect("lock")
+                .insert(spec.id, FAKE_ME.to_string());
             self.created.lock().expect("lock").push(spec);
             // relay는 커밋했는데 호출자는 오류를 본다. ID는 탄 채로 남고
             // 채널도 남는다 — 재시도가 `Duplicate` + 접근 가능을 만난다.
@@ -436,6 +463,11 @@ pub(crate) mod fake {
         async fn is_owner(&self, channel_id: Uuid) -> Result<bool, EffectError> {
             self.take_failure("is_owner")?;
             Ok(self.owned.lock().expect("lock").contains(&channel_id))
+        }
+
+        async fn channel_owner(&self, channel_id: Uuid) -> Result<Option<String>, EffectError> {
+            self.take_failure("channel_owner")?;
+            Ok(self.owners.lock().expect("lock").get(&channel_id).cloned())
         }
 
         async fn publish_provenance(
