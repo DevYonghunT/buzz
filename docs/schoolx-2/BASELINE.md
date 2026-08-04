@@ -354,6 +354,70 @@ command이고 이미 모킹돼 있어 더 헷갈린다.)
 그러지 않으면 그 화면은 Playwright 범위 밖에 남고, 그 사실은 누군가 스펙을
 쓰려고 할 때까지 드러나지 않는다.
 
+### 세션 D3 (2026-08-04, catalog 재생성)
+
+측정 대상은 `8616362d` 위에 스펙과 문서를 얹은 트리다. 시각은 UTC, 캐시는
+전 구간 warm이다.
+
+| command | 시작(UTC) | exit | passed | failed | 소요 | 분류 |
+|---|---|---:|---:|---:|---:|---|
+| `just fmt-check` | 11:26:15 | 0 | - | - | 4s | 통과 |
+| `just clippy` | 11:26:19 | 0 | - | - | 2m23s | 통과 |
+| `just desktop-check` | 11:28:42 | 0 | - | - | 16s | 통과 |
+| `just desktop-tauri-fmt-check` | 11:28:58 | 0 | - | - | 8s | 통과 |
+| `just web-check` | 11:29:06 | 0 | - | - | 4s | 통과 |
+| `just mobile-check` | 11:29:10 | 0 | - | - | 19s | 통과 |
+| `just desktop-tauri-clippy` | 11:29:29 | 0 | - | - | 30s | 통과 |
+| `just test-unit` | 11:29:59 | 0 | 6 suites | 0 | 38s | 통과 — `schoolx-catalog` **85**/0 |
+| `just desktop-test` | 11:30:45 | 0 | 3,929 | 0 | 1m59s | 통과 (59 suites, skipped 0) |
+| `just desktop-build` | 11:32:44 | 0 | - | - | 49s | 통과 |
+| `just web-build` | 11:33:33 | 0 | - | - | 9s | 통과 |
+| `just desktop-tauri-check` | 11:33:42 | 0 | - | - | 1m12s | 통과 |
+| `just desktop-tauri-test` | 11:34:54 | 0 | 2,077 | 0 | 4m58s | 통과 (14 ignored) |
+| `just mobile-test` | 11:40:54 | 0 | 1,022 | 0 | 1m59s | 통과 (1 skipped) |
+| `just schoolx-upstream-check` | 11:43:01 | 0 | 3/3 | 0 | 2s | 통과 — 범위 312개 파일 |
+| `just test-e2e e2e_workspace_catalog` | 11:43:03 | 0 | 5 | 0 | 83s | 통과 |
+| `just test-e2e e2e_access_matrix` | 11:44:26 | 0 | **17** | 0 | 48s | 통과 — 세션 A 계약 유지 |
+| `pnpm test:e2e:smoke workspace-catalog` | 11:45:22 | 0 | **5** | 0 | 60s | 통과 — 재생성 2개 신규 |
+
+`schoolx-catalog`는 80 → **85**다(세션 D3이 더한 다섯). 데스크톱·Tauri·mobile
+테스트 수는 세션 D2와 같다 — 이번 UI 증거도 Playwright라 그 숫자에 들어가지
+않는다.
+
+**`just ci` 구성 레시피를 한 셸 루프로 묶다가 한도에 걸렸다.** 9–14행을 한
+번에 돌렸더니 `desktop-tauri-test`(4m58s)까지 끝난 뒤 `mobile-test` 도중
+10분 한도에 걸려 exit 143이 났다. 앞의 다섯은 이미 exit 0으로 끝나 있었고
+`mobile-test`만 따로 다시 돌렸다(위 표의 시각이 그것이다). 제품 실패가
+아니며, 세션 D의 「`just ci`가 한 명령으로는 완주하지 못한다」와 같은
+조건이다 — **묶는 개수도 한도에 포함된다**는 것이 이번에 추가된 사실이다.
+
+#### 재주입 결과 — 하나가 예상과 달랐고 테스트를 하나 더 쓰게 했다
+
+| 주입 | 실패한 테스트 | 판정 |
+|---|---|---|
+| 세대 일치 검사를 `is_some()`으로 완화 | `recreating_twice_only_moves_one_generation`, `recreate_from_a_stale_generation_is_ignored` | 예상대로 |
+| `step.steps = StepStates::default()` 제거 | **없음** | 예상과 다름 — 아래 |
+| 같은 주입 + 새 테스트 | `recreating_a_partially_applied_item_starts_the_new_room_from_scratch` 하나 | 단독 방어선 |
+| 카드의 `RECREATABLE_ACTIONS`에서 `request_ownership` 제거 | Playwright `not_owned` 하나 | 단독 방어선 |
+
+두 번째 줄이 이번 세션에서 배운 것이다. 그 줄이 불필요한 것이 아니라
+**커버리지가 없었다**: `deleted`로 오는 항목은 증명서가 읽히지 않아 단계가
+이미 비어 있다. 차 있는 채로 재생성에 도달하는 경로는 따로 있다 — 다른
+관리자가 만들다 만(`resume`) 방을 재적용하면 `not_owned`로 막히고 그 항목의
+단계에는 **그 사람의** 진행이 적혀 있다. 초기화하지 않으면 saga가 채널
+생성을 건너뛰고 있지도 않은 새 세대 방에 그다음 단계를 건다.
+
+**재주입이 아무것도 깨뜨리지 않았을 때 기본 결론을 「그 줄이 불필요하다」로
+두지 않는다.** 먼저 그 줄이 지키는 상태에 도달하는 경로가 테스트에 있는지
+본다.
+
+#### Playwright 스펙에서 문구로 단언하지 않는다
+
+`not_owned` 경고를 한국어 문구로 단언했더니 실패했다 — e2e 하네스는 영어
+로케일로 렌더한다. `catalog-recreate-warning-<item_key>` testid를 붙여
+로케일과 무관하게 고쳤다. 세션 D2의 이름 변경 배지와 같은 판단이고, 이제
+이 파일에 문구 단언은 mock이 직접 넣은 `error` 문자열 하나뿐이다.
+
 ### 검증되지 않은 첫 실행과 그 원인
 
 첫 실행에서 `cargo test --manifest-path desktop/src-tauri/Cargo.toml`이

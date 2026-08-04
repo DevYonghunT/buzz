@@ -8,6 +8,25 @@
 
 **Tech Stack:** Rust 1.95 / `schoolx-catalog` 크레이트 / Tauri 2 / React 19 / Playwright
 
+> **실행 완료 (2026-08-04).** Task 1–3 전부 실행했다. 게이트는
+> [`BASELINE.md`](../BASELINE.md) 세션 D3 절, 결과 서술은
+> [`IMPLEMENTATION_HANDOFF.md`](../IMPLEMENTATION_HANDOFF.md) 세션 D3 절.
+> 커밋 `3dc21256`·`8616362d`·이 문서.
+>
+> **계획과 다르게 한 것 셋.**
+>
+> 1. **Task 2 Step 1(Tauri command 인자)을 Task 1 커밋에 합쳤다.** 크레이트만
+>    바꾸면 데스크톱 크레이트가 컴파일되지 않아 빌드되지 않는 중간 커밋이
+>    남는다.
+> 2. **Task 1 Step 7의 두 번째 재주입이 아무것도 깨뜨리지 않았다.** 계획은
+>    「실패하지 않으면 그 줄이 필요 없다는 뜻이므로 지우라」였는데, 결론이
+>    반대였다 — 그 줄은 필요하고 커버리지가 없었다. `resume`이 `not_owned`로
+>    끝난 항목을 재생성하는 경로를 덮는 테스트를 하나 더 썼고, 그러자 같은
+>    주입이 그 테스트만 깨뜨린다.
+> 3. **Task 3의 문구 단언을 testid로 바꿨다.** 계획은 「여기서는 한국어 문구로
+>    단언하는 것이 맞다」였으나 e2e 하네스가 영어로 렌더해 실패했다.
+>    `catalog-recreate-warning-<item_key>`를 붙여 로케일과 무관하게 만들었다.
+
 ## Global Constraints
 
 - 작업 위치는 **메인 체크아웃** `/Users/kim-yonghun/Development/schoolX_v2.0`, 브랜치 `codex/schoolx-2-foundation`. 워크트리에서는 `just desktop-tauri-fmt`가 실패해 pre-commit이 막힌다.
@@ -60,7 +79,7 @@
   ```
   그리고 `pub async fn apply(catalog: &Catalog, effects: &dyn CatalogEffects, selected: &[Selection]) -> Result<Ledger, EffectError>`
 
-- [ ] **Step 1: 실패하는 테스트를 쓴다**
+- [x] **Step 1: 실패하는 테스트를 쓴다**
 
 `saga.rs` 테스트 모듈에 넷을 더한다. 기존 테스트가 쓰는 `both()`와 문자열 벡터는 Step 4에서 함께 고친다.
 
@@ -182,12 +201,12 @@
     }
 ```
 
-- [ ] **Step 2: 테스트가 실패하는지 확인한다**
+- [x] **Step 2: 테스트가 실패하는지 확인한다**
 
 Run: `cd /Users/kim-yonghun/Development/schoolX_v2.0 && . ./bin/activate-hermit && cargo test -p schoolx-catalog recreate`
 Expected: FAIL — `Selection`도 `burn_channel_id`도 없어 컴파일 에러
 
-- [ ] **Step 3: fake에 「탄 ID」 시더를 더한다**
+- [x] **Step 3: fake에 「탄 ID」 시더를 더한다**
 
 `effects.rs`의 `mod fake`에 추가한다. `created` 로그에만 넣고 `channels`에는 넣지 않는 것이 곧 "점유됐지만 접근 불가"다.
 
@@ -207,7 +226,7 @@ fake는 이미 `burned_ids: Mutex<HashSet<Uuid>>`로 이것을 모델링한다 �
 같은 이유로 Step 1의 `make_then_delete`가 `channels`만 비우면 된다 —
 `burned_ids`는 그대로 남아 다음 생성이 `Duplicate`가 된다.
 
-- [ ] **Step 4: `Selection`을 만들고 `apply`를 바꾼다**
+- [x] **Step 4: `Selection`을 만들고 `apply`를 바꾼다**
 
 `saga.rs`의 `apply` 위에 추가한다.
 
@@ -293,7 +312,7 @@ doc comment에 한 문단 더한다.
 /// 채널 ID이고, 이 함수는 그 ID에만 쓴다.
 ```
 
-- [ ] **Step 5: 기존 테스트의 인자를 고친다**
+- [x] **Step 5: 기존 테스트의 인자를 고친다**
 
 `both()`와 `&["meeting".to_string()]` 형태를 전부 `Selection`으로 바꾼다.
 `both()`는 이렇게 둔다.
@@ -310,12 +329,12 @@ doc comment에 한 문단 더한다.
 **의미를 바꾸지 않는다** — 지금까지의 모든 호출은 평소 적용이었다.
 컴파일러가 남은 자리를 전부 알려준다.
 
-- [ ] **Step 6: 테스트가 통과하는지 확인한다**
+- [x] **Step 6: 테스트가 통과하는지 확인한다**
 
 Run: `cd /Users/kim-yonghun/Development/schoolX_v2.0 && . ./bin/activate-hermit && cargo test -p schoolx-catalog`
 Expected: PASS — 기존 80개 + 새 4개
 
-- [ ] **Step 7: 판별력을 실증한다**
+- [x] **Step 7: 판별력을 실증한다**
 
 두 번 재주입하고 각각 되돌린다.
 
@@ -324,7 +343,7 @@ Expected: PASS — 기존 80개 + 새 4개
 
 각 결과를 보고서에 적는다. 두 번째가 실패하지 않으면 그 줄이 필요 없다는 뜻이므로 지우고 왜인지 적는다.
 
-- [ ] **Step 8: 커밋한다**
+- [x] **Step 8: 커밋한다**
 
 ```bash
 git add crates/schoolx-catalog
@@ -342,7 +361,7 @@ git commit -s -m "feat(schoolx-2): 세션 D3 — 재생성이 항목을 다음 �
 - Modify: `desktop/src/features/settings/ui/WorkspaceCatalogSettingsCard.tsx`
 - Modify: `desktop/src/shared/i18n/locales/{en,ko}.ts`
 
-- [ ] **Step 1: Tauri command 인자를 넓힌다**
+- [x] **Step 1: Tauri command 인자를 넓힌다**
 
 `apply_workspace_catalog`의 인자를 바꾼다. `Selection`은 크레이트 타입이므로
 serde 유도가 필요하다 — Task 1의 `Selection`에 `#[derive(Deserialize)]`를
@@ -361,7 +380,7 @@ pub async fn apply_workspace_catalog(
 }
 ```
 
-- [ ] **Step 2: TS 타입과 호출을 맞춘다**
+- [x] **Step 2: TS 타입과 호출을 맞춘다**
 
 `tauriWorkspaceCatalog.ts`:
 
@@ -387,7 +406,7 @@ export async function applyWorkspaceCatalog(
 
 `Option<u32>`는 serde에서 `null`을 받으므로 TS의 `number | null`과 맞는다.
 
-- [ ] **Step 3: i18n 키를 양쪽에 더한다**
+- [x] **Step 3: i18n 키를 양쪽에 더한다**
 
 `en.ts`의 `catalog` 블록:
 
@@ -411,7 +430,7 @@ export async function applyWorkspaceCatalog(
     },
 ```
 
-- [ ] **Step 4: 카드에 컨트롤을 단다**
+- [x] **Step 4: 카드에 컨트롤을 단다**
 
 `WorkspaceCatalogSettingsCard.tsx`. 지금 `handleApply`가 `[...selected]`를
 넘기는 자리를 `CatalogSelection[]`으로 바꾸고, 재생성 제출을 더한다.
@@ -498,12 +517,12 @@ const RECREATABLE_ACTIONS = new Set<CatalogUserAction>([
 
 버튼 전체를 `RECREATABLE_ACTIONS.has(ledgerItem.user_action)`로 감싼다.
 
-- [ ] **Step 5: 검증한다**
+- [x] **Step 5: 검증한다**
 
 Run: `cd /Users/kim-yonghun/Development/schoolX_v2.0 && . ./bin/activate-hermit && cargo test --manifest-path desktop/src-tauri/Cargo.toml workspace_catalog && pnpm --dir desktop typecheck && pnpm --dir desktop check && pnpm --dir desktop test`
 Expected: 전부 PASS. i18n parity 테스트가 `en`/`ko` 키 구조 일치를 확인한다.
 
-- [ ] **Step 6: 커밋한다**
+- [x] **Step 6: 커밋한다**
 
 ```bash
 git add desktop/src desktop/src-tauri
@@ -518,7 +537,7 @@ git commit -s -m "feat(schoolx-2): 세션 D3 — 막힌 항목을 다시 만들 
 - Modify: `desktop/tests/e2e/workspace-catalog.spec.ts`
 - Modify: `docs/schoolx-2/{IMPLEMENTATION_HANDOFF,WORKSPACE_CATALOG,BASELINE}.md`
 
-- [ ] **Step 1: 스펙 둘을 더한다**
+- [x] **Step 1: 스펙 둘을 더한다**
 
 기존 파일에 더한다. mock bridge의 `workspaceCatalogLedger`로 `deleted`와
 `not_owned` 상태를 세운다 — 두 상태가 다르게 그려지는 것이 §4의 핵심이다.
@@ -609,19 +628,19 @@ test("not_owned warns that recreating makes a second room", async ({
 유무이고, testid로는 그 차이를 표현할 자리가 없다. 로케일이 영어로 바뀌면 이
 두 줄을 영어 문구로 바꾼다 — 그때 이 테스트가 실패하는 것이 옳다.
 
-- [ ] **Step 2: 스펙을 돌린다**
+- [x] **Step 2: 스펙을 돌린다**
 
 Run: `cd /Users/kim-yonghun/Development/schoolX_v2.0/desktop && . ../bin/activate-hermit && pnpm test:e2e:smoke workspace-catalog`
 Expected: 5 passed
 
 포트 4173에 이전 빌드의 서버가 살아 있으면 죽인 뒤 다시 돌린다.
 
-- [ ] **Step 3: 판별력을 실증한다**
+- [x] **Step 3: 판별력을 실증한다**
 
 `RECREATABLE_ACTIONS`에서 `request_ownership`을 빼고 두 번째 스펙이 실패하는지
 확인한 뒤 되돌린다. 보고서에 적는다.
 
-- [ ] **Step 4: 문서를 갱신한다**
+- [x] **Step 4: 문서를 갱신한다**
 
 - `WORKSPACE_CATALOG.md` §6의 「구현 상태 — 프롬프트는 뜨지만 답할 방법이 없다」
   문단을 닫힌 것으로 바꾼다. `generation`을 올리는 경로가 무엇이고 어디까지만
@@ -634,7 +653,7 @@ Expected: 5 passed
 - `SECURITY_CONTRACT.md` §5의 「남는 조건」 2번(선점의 약한 형태)을 갱신한다 —
   복구 경로가 생겼으나 선점 자체는 여전히 막지 못한다.
 
-- [ ] **Step 5: 전체 게이트를 돌린다**
+- [x] **Step 5: 전체 게이트를 돌린다**
 
 구성 레시피 14개를 하나씩 포그라운드로 돌리고, 이어서:
 
@@ -647,12 +666,12 @@ pnpm --dir desktop test:e2e:smoke workspace-catalog   # 5/5
 
 각각의 시작 시각·exit·소요를 적는다.
 
-- [ ] **Step 6: BASELINE에 기록한다**
+- [x] **Step 6: BASELINE에 기록한다**
 
 `### 세션 D3 (2026-08-04, catalog 재생성)` 절을 세션 D2와 같은 표 형식으로
 더한다. 재주입 셋의 결과도 함께 적는다.
 
-- [ ] **Step 7: 커밋한다**
+- [x] **Step 7: 커밋한다**
 
 ```bash
 git add desktop/tests docs/schoolx-2

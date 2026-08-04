@@ -441,7 +441,10 @@ function CatalogItemRow({
                   the two situations apart (`CATALOG_RECREATE.md` §4).
                 */}
                 {ledgerItem.user_action === "request_ownership" ? (
-                  <p className="text-xs">
+                  <p
+                    className="text-xs"
+                    data-testid={`catalog-recreate-warning-${item.item_key}`}
+                  >
                     {t("catalog.recreate.ownedByOther")}
                   </p>
                 ) : null}

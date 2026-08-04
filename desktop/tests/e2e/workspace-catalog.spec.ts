@@ -13,8 +13,12 @@ import { openSettings } from "../helpers/settings";
  * "넘긴 것" #1). The machine-readable half of that criterion was already
  * covered by `ledger_serializes_for_ui_and_cli`; this is the UI half.
  *
- * The three tests are three different render branches — item list, apply
- * result, gate refusal — so one breaking leaves the others green.
+ * Each test is a different render branch — item list, apply result, the two
+ * recreate verdicts, gate refusal — so one breaking leaves the others green.
+ * The two recreate tests are a pair: `deleted` has one sensible answer, while
+ * `not_owned` cannot tell a squatter from a co-administrator and so must state
+ * the consequence before offering the same control (`CATALOG_RECREATE.md` §4).
+ * Their difference is the assertion, not either one alone.
  *
  * Navigation goes through `openSettings` rather than a direct URL on purpose.
  * The section is role-gated in `SettingsView`'s `visibleSections`, so walking
@@ -121,6 +125,90 @@ test("apply paints outcome, user action, and canvas notes from the ledger", asyn
   await expect(page.getByTestId("catalog-error-planning")).toContainText(
     "이 방은 다른 사람이 만들었습니다",
   );
+
+  await waitForAnimations(page);
+});
+
+/** A ledger with `meeting` blocked on the given verdict, everything else same. */
+function blockedLedger(
+  decision: "deleted" | "not_owned",
+  user_action: "confirm_recreate" | "request_ownership",
+) {
+  return {
+    catalog_id: "schoolx.default",
+    catalog_version: 1,
+    items: [
+      {
+        item_key: "meeting",
+        name: "메인 회의방",
+        decision,
+        channel_id: "33333333-4444-4555-8666-777777777777",
+        generation: 1,
+        steps: {
+          channel: decision === "not_owned" ? "done" : "pending",
+          canvas: "pending",
+          membership: "pending",
+        },
+        outcome: "blocked",
+        user_action,
+        renamed: false,
+        error: null,
+      },
+    ],
+  };
+}
+
+test("a deleted item offers the recreate control as its answer", async ({
+  page,
+}) => {
+  await installMockBridge(page, {
+    workspaceCatalogPreflight: PREFLIGHT_ITEMS,
+    workspaceCatalogLedger: blockedLedger("deleted", "confirm_recreate"),
+  });
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await openSettings(page, "workspace-catalog");
+
+  await page.locator("#workspace-catalog-item-meeting").click();
+  await page.getByTestId("catalog-apply").click();
+
+  const alert = page.getByTestId("catalog-user-action-meeting");
+  await expect(alert).toBeVisible();
+  await expect(page.getByTestId("catalog-recreate-meeting")).toBeVisible();
+  // `deleted` carries no co-management risk — the room is gone, so there is
+  // nothing a second one could duplicate. The warning belongs only to
+  // `not_owned` and must not leak here.
+  await expect(
+    page.getByTestId("catalog-recreate-warning-meeting"),
+  ).toHaveCount(0);
+
+  await waitForAnimations(page);
+});
+
+test("not_owned warns that recreating makes a second room", async ({
+  page,
+}) => {
+  await installMockBridge(page, {
+    workspaceCatalogPreflight: PREFLIGHT_ITEMS,
+    workspaceCatalogLedger: blockedLedger("not_owned", "request_ownership"),
+  });
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await openSettings(page, "workspace-catalog");
+
+  await page.locator("#workspace-catalog-item-meeting").click();
+  await page.getByTestId("catalog-apply").click();
+
+  const alert = page.getByTestId("catalog-user-action-meeting");
+  await expect(alert).toBeVisible();
+  // The first line stays "ask whoever created it". Recreating is the way out
+  // when that person is a squatter, and the consequence is stated before the
+  // control rather than after (`CATALOG_RECREATE.md` §4).
+  //
+  // Asserted by test id, not by copy: the harness renders in English, and
+  // pinning either translation would make a copy edit look like a regression.
+  await expect(
+    page.getByTestId("catalog-recreate-warning-meeting"),
+  ).toBeVisible();
+  await expect(page.getByTestId("catalog-recreate-meeting")).toBeVisible();
 
   await waitForAnimations(page);
 });
