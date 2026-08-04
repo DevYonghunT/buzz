@@ -424,9 +424,15 @@ pub async fn preflight_workspace_catalog(
 }
 
 /// 선택한 catalog 항목을 적용하고 result ledger를 돌려준다.
+///
+/// 각 항목은 `{ item_key, recreate_from }`이다. `recreate_from`이 preflight가
+/// 지금 보고하는 세대와 같으면 그 항목만 한 세대 위에서 적용한다 — 막힌
+/// 항목을 다시 만드는 경로다. 자세한 규칙은
+/// [`schoolx_catalog_pkg::saga::Selection`], 설계는
+/// `docs/schoolx-2/CATALOG_RECREATE.md`.
 #[tauri::command]
 pub async fn apply_workspace_catalog(
-    selected: Vec<String>,
+    selected: Vec<schoolx_catalog_pkg::saga::Selection>,
     state: State<'_, AppState>,
 ) -> Result<Ledger, String> {
     require_community_admin(&state).await?;

@@ -288,6 +288,16 @@ pub(crate) mod fake {
         /// 않았다"를 호출 횟수로 관측할 수 없게 된다. 그래서 저장소에 직접
         /// 넣는다 — `channels`·`owners`를 직접 채워 이전 실행의 흔적을 만드는
         /// 다른 시딩과 같은 방식이다.
+        /// 이 ID를 이미 쓴 것으로 만든다 — `create_channel`이 `Duplicate`를
+        /// 돌려주고 `channels`에는 없으므로 접근 불가다.
+        ///
+        /// relay의 soft delete가 남기는 상태와 같은 모양이다: 행이
+        /// `(community_id, id)`를 계속 점유해 같은 ID의 재생성이 거부되지만
+        /// 채널 조회는 그것을 보여주지 않는다 (`WORKSPACE_CATALOG.md` §6).
+        pub(crate) fn burn_channel_id(&self, channel_id: Uuid) {
+            self.burned_ids.lock().expect("lock").insert(channel_id);
+        }
+
         pub(crate) fn seed_canvas(&self, channel_id: Uuid, content: &str) {
             self.canvases
                 .lock()

@@ -19,14 +19,41 @@ use crate::ledger::{
 use crate::preflight::{preflight, Decision, PreflightItem};
 use crate::provenance::{Provenance, StepStates, StepStatus};
 
+/// 적용할 항목 하나와, 그 항목에 대한 사용자의 재생성 결정.
+///
+/// `item_key`만 있던 이전 인자를 넓힌 것이다. 재생성이 별도 command가 아니라
+/// 같은 적용의 한 필드인 이유: 재생성은 새 동작이 아니라 **어느 세대에**
+/// 평소 적용을 거는가의 문제이고, 두 경로로 나누면 멱등성 규칙도 둘이 된다.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+pub struct Selection {
+    /// catalog 항목 키.
+    pub item_key: String,
+    /// 「세대 `g`가 막힌 것을 보았다. 다음 것을 만들어라」.
+    ///
+    /// `None`이면 평소 적용이다. `Some(g)`는 **preflight가 지금 보고하는
+    /// 세대가 `g`일 때만** 효력이 있다 — 다르면 사용자가 본 화면이 낡았거나
+    /// 다른 관리자가 이미 처리한 것이므로 무시하고 평소 적용을 한다. 그
+    /// 규칙이 같은 요청을 두 번 내도 세대가 한 번만 오르게 한다.
+    ///
+    /// 한 번에 한 칸만 올린다. `g + 1`도 막혀 있으면 그 실행이 다시
+    /// `g + 1`을 보고하고 사용자가 다시 누른다 — 화면에 보이는 것과 일어나는
+    /// 일을 같게 두기 위해서다. 설계 근거:
+    /// `docs/schoolx-2/CATALOG_RECREATE.md` §3.
+    pub recreate_from: Option<u32>,
+}
+
 /// 선택한 항목을 적용한다.
 ///
 /// `selected`에 없는 항목은 건드리지 않는다. 한 항목의 실패가 다른 항목을
 /// 막지 않는다.
+///
+/// [`Selection::recreate_from`]이 지금 세대와 일치하는 항목은 한 세대 위에서
+/// 적용한다. 이전 세대의 방·캔버스·증명서는 건드리지 않는다 — 새 세대는 새
+/// 채널 ID이고, 이 함수는 그 ID에만 쓴다.
 pub async fn apply(
     catalog: &Catalog,
     effects: &dyn CatalogEffects,
-    selected: &[String],
+    selected: &[Selection],
 ) -> Result<Ledger, EffectError> {
     let plan = preflight(catalog, effects).await?;
     let relay_scope = effects.relay_scope().await;
@@ -34,9 +61,28 @@ pub async fn apply(
 
     let mut items = Vec::new();
 
-    for step in plan {
-        if !selected.contains(&step.item_key) {
+    for mut step in plan {
+        let Some(choice) = selected.iter().find(|s| s.item_key == step.item_key) else {
             continue;
+        };
+        // 사용자가 본 세대가 지금 세대와 같을 때만 한 칸 올린다. 낡은 화면의
+        // 요청은 무시하고 평소 적용을 한다 — 그래야 같은 요청을 두 번 내도
+        // 세대가 한 번만 오른다.
+        if choice.recreate_from == Some(step.generation) {
+            step.generation += 1;
+            // 새 세대는 새 방이다. 이전 세대에서 읽어 온 단계 상태를 그대로
+            // 두면 saga가 채널 생성을 건너뛴다 — 그 상태는 **이전** 방의
+            // 진행이지 이 방의 것이 아니다. `deleted`로 온 항목은 증명서가
+            // 읽히지 않아 어차피 비어 있지만, `resume`이 `not_owned`로 끝난
+            // 항목은 차 있는 채로 여기 온다.
+            step.steps = StepStates::default();
+            step.channel_present = false;
+            step.channel_id = Some(derive_channel_id(
+                &relay_scope,
+                &catalog.catalog_id,
+                &step.item_key,
+                step.generation,
+            ));
         }
         items.push(apply_item(catalog, effects, &relay_scope, &now, step).await);
     }
@@ -384,8 +430,44 @@ mod tests {
     use crate::ledger::Outcome;
     use uuid::Uuid;
 
-    fn both() -> Vec<String> {
-        vec!["meeting".to_string(), "planning".to_string()]
+    fn both() -> Vec<Selection> {
+        vec![pick_one("meeting"), pick_one("planning")]
+    }
+
+    /// 평소 적용 한 항목.
+    fn pick_one(item_key: &str) -> Selection {
+        Selection {
+            item_key: item_key.to_string(),
+            recreate_from: None,
+        }
+    }
+
+    fn pick(item_key: &str) -> Vec<Selection> {
+        vec![pick_one(item_key)]
+    }
+
+    /// 세대 `from`이 막힌 것을 보고 누른 재생성.
+    fn recreate(item_key: &str, from: u32) -> Vec<Selection> {
+        vec![Selection {
+            item_key: item_key.to_string(),
+            recreate_from: Some(from),
+        }]
+    }
+
+    /// 방을 만든 뒤 relay에서 지워 `deleted`가 나오는 상태를 만든다.
+    ///
+    /// `channels`에서만 뺀다. `burned_ids`는 남으므로 다음 생성이
+    /// `Duplicate`가 되고, 증명서는 fake의 `fetch_provenance`가 살아 있는
+    /// 채널로 거르기 때문에 지우지 않아도 읽히지 않는다 — relay에서도 39500
+    /// 행은 살아남지만 채널 조회가 `deleted_at IS NULL`로 걸러 닿을 수 없다
+    /// (`WORKSPACE_CATALOG.md` §6). 그 모양을 그대로 흉내 낸다.
+    async fn make_then_delete(fx: &FakeEffects) -> Uuid {
+        apply(crate::builtin(), fx, &pick("meeting"))
+            .await
+            .expect("first apply");
+        let id = fx.channels.lock().expect("lock")[0].id;
+        fx.channels.lock().expect("lock").clear();
+        id
     }
 
     fn item<'a>(ledger: &'a Ledger, key: &str) -> &'a LedgerItem {
@@ -551,7 +633,7 @@ mod tests {
     #[tokio::test]
     async fn only_selected_items_are_applied() {
         let fx = FakeEffects::new();
-        let ledger = apply(crate::builtin(), &fx, &["meeting".to_string()])
+        let ledger = apply(crate::builtin(), &fx, &pick("meeting"))
             .await
             .expect("apply");
 
@@ -565,7 +647,7 @@ mod tests {
         let fx = FakeEffects::new();
         fx.fail_next("set_canvas");
 
-        let first = apply(crate::builtin(), &fx, &["meeting".to_string()])
+        let first = apply(crate::builtin(), &fx, &pick("meeting"))
             .await
             .expect("first");
         let entry = item(&first, "meeting");
@@ -575,7 +657,7 @@ mod tests {
         // 보상하지 않는다 — 채널은 그대로 있다.
         assert_eq!(fx.channels.lock().expect("lock").len(), 1);
 
-        let second = apply(crate::builtin(), &fx, &["meeting".to_string()])
+        let second = apply(crate::builtin(), &fx, &pick("meeting"))
             .await
             .expect("retry");
         let entry = item(&second, "meeting");
@@ -605,7 +687,7 @@ mod tests {
         let fx = FakeEffects::new();
         fx.fail_next("create_channel");
 
-        let first = apply(crate::builtin(), &fx, &["meeting".to_string()])
+        let first = apply(crate::builtin(), &fx, &pick("meeting"))
             .await
             .expect("first");
         let entry = item(&first, "meeting");
@@ -625,7 +707,7 @@ mod tests {
         // 시도다. 이 사실이 위 doc comment가 말하는 전제다.
         assert!(fx.burned_ids.lock().expect("lock").is_empty());
 
-        let second = apply(crate::builtin(), &fx, &["meeting".to_string()])
+        let second = apply(crate::builtin(), &fx, &pick("meeting"))
             .await
             .expect("retry");
         let entry = item(&second, "meeting");
@@ -647,7 +729,7 @@ mod tests {
         let fx = FakeEffects::new();
         fx.fail_next_after_commit("create_channel");
 
-        let first = apply(crate::builtin(), &fx, &["meeting".to_string()])
+        let first = apply(crate::builtin(), &fx, &pick("meeting"))
             .await
             .expect("first");
         let entry = item(&first, "meeting");
@@ -665,7 +747,7 @@ mod tests {
         // 막아서 생성 시도 자체를 하지 않는다.
         fx.channels.lock().expect("lock")[0].name = "2026 전체회의".into();
 
-        let second = apply(crate::builtin(), &fx, &["meeting".to_string()])
+        let second = apply(crate::builtin(), &fx, &pick("meeting"))
             .await
             .expect("retry");
         let entry = item(&second, "meeting");
@@ -692,7 +774,7 @@ mod tests {
     #[tokio::test]
     async fn renamed_survives_into_the_ledger() {
         let fx = FakeEffects::new();
-        apply(crate::builtin(), &fx, &["meeting".to_string()])
+        apply(crate::builtin(), &fx, &pick("meeting"))
             .await
             .expect("first apply");
 
@@ -700,7 +782,7 @@ mod tests {
         // 남는다 — `renamed`는 판정이 아니라 플래그이기 때문이다.
         fx.channels.lock().expect("lock")[0].name = "월요 정례".into();
 
-        let ledger = apply(crate::builtin(), &fx, &["meeting".to_string()])
+        let ledger = apply(crate::builtin(), &fx, &pick("meeting"))
             .await
             .expect("second apply");
 
@@ -758,7 +840,7 @@ mod tests {
     #[tokio::test]
     async fn catalog_v2_over_applied_v1_does_not_touch_the_canvas() {
         let fx = FakeEffects::new();
-        let first = apply(crate::builtin(), &fx, &["meeting".to_string()])
+        let first = apply(crate::builtin(), &fx, &pick("meeting"))
             .await
             .expect("v1 apply");
         let channel_id = item(&first, "meeting").channel_id.expect("channel id");
@@ -768,7 +850,7 @@ mod tests {
         fx.seed_canvas(channel_id, "팀이 직접 쓴 회의록");
         let writes_before = fx.call_count("set_canvas");
 
-        let ledger = apply(&catalog_v2(), &fx, &["meeting".to_string()])
+        let ledger = apply(&catalog_v2(), &fx, &pick("meeting"))
             .await
             .expect("v2 apply");
 
@@ -799,6 +881,167 @@ mod tests {
         );
     }
 
+    // ── 재생성 (`CATALOG_RECREATE.md` §3) ────────────────────────────────
+
+    /// 확인을 받은 항목이 다음 세대의 **새 방**에 만들어진다.
+    #[tokio::test]
+    async fn recreate_moves_the_item_to_the_next_generation() {
+        let fx = FakeEffects::new();
+        let gone = make_then_delete(&fx).await;
+
+        // 재생성 없이는 막힌다 — 이 줄이 없으면 아래 성공이 무엇을 푼
+        // 것인지 이 테스트 안에서 알 수 없다.
+        let blocked = apply(crate::builtin(), &fx, &pick("meeting"))
+            .await
+            .expect("blocked apply");
+        assert_eq!(item(&blocked, "meeting").decision, "deleted");
+        assert_eq!(item(&blocked, "meeting").generation, 1);
+
+        let ledger = apply(crate::builtin(), &fx, &recreate("meeting", 1))
+            .await
+            .expect("recreate");
+
+        let entry = item(&ledger, "meeting");
+        assert_eq!(entry.outcome, Outcome::Applied);
+        assert_eq!(entry.generation, 2);
+        let fresh = entry.channel_id.expect("channel id");
+        assert_ne!(fresh, gone, "세대를 올렸는데 같은 방을 다시 썼다");
+        assert_eq!(
+            fresh,
+            derive_channel_id("wss://relay.test", "schoolx.default", "meeting", 2)
+        );
+    }
+
+    /// 같은 재생성을 두 번 제출해도 세대는 한 번만 오른다.
+    ///
+    /// 두 번째 제출 시점의 세대는 이미 2라 `recreate_from: Some(1)`이 지금
+    /// 세대와 어긋나고, 그래서 평소 적용으로 떨어진다. 이 일치 검사가 곧
+    /// 멱등성 장치다.
+    #[tokio::test]
+    async fn recreating_twice_only_moves_one_generation() {
+        let fx = FakeEffects::new();
+        make_then_delete(&fx).await;
+        apply(crate::builtin(), &fx, &recreate("meeting", 1))
+            .await
+            .expect("first recreate");
+
+        let ledger = apply(crate::builtin(), &fx, &recreate("meeting", 1))
+            .await
+            .expect("second recreate");
+
+        let entry = item(&ledger, "meeting");
+        assert_eq!(entry.outcome, Outcome::Unchanged);
+        assert_eq!(entry.generation, 2, "재생성 요청이 세대를 또 올렸다");
+        assert_eq!(fx.channels.lock().expect("lock").len(), 1);
+    }
+
+    /// 낡은 화면에서 온 재생성은 무시하고 평소 적용을 한다.
+    #[tokio::test]
+    async fn recreate_from_a_stale_generation_is_ignored() {
+        let fx = FakeEffects::new();
+        apply(crate::builtin(), &fx, &pick("meeting"))
+            .await
+            .expect("apply");
+
+        // 사용자가 본 세대는 0인데 지금은 1이다.
+        let ledger = apply(crate::builtin(), &fx, &recreate("meeting", 0))
+            .await
+            .expect("stale recreate");
+
+        let entry = item(&ledger, "meeting");
+        assert_eq!(entry.outcome, Outcome::Unchanged);
+        assert_eq!(entry.generation, 1);
+        assert_eq!(fx.channels.lock().expect("lock").len(), 1);
+    }
+
+    /// 올린 세대도 막혀 있으면 **그 세대로** 다시 묻는다.
+    ///
+    /// 한 번 누를 때 한 칸이라는 규칙이 여기서 보인다. 다음 확인이 가리켜야
+    /// 할 값은 방금 시도한 세대이지 처음 본 세대가 아니다.
+    #[tokio::test]
+    async fn a_recreated_generation_that_is_also_burned_reports_the_new_one() {
+        let fx = FakeEffects::new();
+        make_then_delete(&fx).await;
+        let gen2 = derive_channel_id("wss://relay.test", "schoolx.default", "meeting", 2);
+        fx.burn_channel_id(gen2);
+
+        let ledger = apply(crate::builtin(), &fx, &recreate("meeting", 1))
+            .await
+            .expect("recreate");
+
+        let entry = item(&ledger, "meeting");
+        assert_eq!(entry.decision, "deleted");
+        assert_eq!(
+            entry.generation, 2,
+            "다음 확인이 가리켜야 할 세대는 방금 시도한 것이다"
+        );
+        assert_eq!(entry.user_action, Some(UserAction::ConfirmRecreate));
+    }
+
+    /// 단계가 **차 있는** 항목을 재생성해도 새 방이 처음부터 만들어진다.
+    ///
+    /// `deleted`로 온 항목은 증명서가 읽히지 않아 단계가 비어 있다. 그래서
+    /// 위 세 테스트만으로는 「이전 세대의 단계 상태를 초기화한다」가
+    /// 필요한지 보이지 않는다 — 실제로 그 줄을 지워도 통과한다.
+    ///
+    /// 차 있는 채로 오는 경로는 이것이다: 다른 관리자가 만들다 만
+    /// (`resume`) 방을 내가 재적용하면 `not_owned`로 막히고, 그 항목의
+    /// 단계에는 **그 사람의** 진행이 적혀 있다. 초기화하지 않으면 saga가
+    /// 채널 생성을 건너뛰고 있지도 않은 새 세대 방에 그다음 단계를 건다.
+    #[tokio::test]
+    async fn recreating_a_partially_applied_item_starts_the_new_room_from_scratch() {
+        let fx = FakeEffects::new();
+        let theirs = derive_channel_id("wss://relay.test", "schoolx.default", "meeting", 1);
+
+        // 다른 관리자가 방을 만들고 채널 단계까지만 끝냈다.
+        fx.channels.lock().expect("lock").push(ChannelRef {
+            id: theirs,
+            name: "메인 회의방".into(),
+        });
+        fx.set_channel_creator(theirs, "someone-else");
+        fx.seed_provenance(
+            theirs,
+            "someone-else",
+            Provenance {
+                catalog_id: "schoolx.default".into(),
+                catalog_version: 1,
+                item_key: "meeting".into(),
+                generation: 1,
+                steps: StepStates {
+                    channel: StepStatus::Done,
+                    canvas: StepStatus::Pending,
+                    membership: StepStatus::Pending,
+                },
+                applied_at: "2026-08-04T00:00:00Z".into(),
+            },
+        );
+
+        // 내가 적용하면 그 방은 내 것이 아니라 막힌다.
+        let blocked = apply(crate::builtin(), &fx, &pick("meeting"))
+            .await
+            .expect("blocked");
+        assert_eq!(item(&blocked, "meeting").decision, "not_owned");
+
+        let ledger = apply(crate::builtin(), &fx, &recreate("meeting", 1))
+            .await
+            .expect("recreate");
+
+        let entry = item(&ledger, "meeting");
+        assert_eq!(entry.outcome, Outcome::Applied);
+        assert_eq!(entry.generation, 2);
+        // 새 방을 **직접 만들었다**. 단계 상태를 물려받았다면 채널 생성을
+        // 건너뛰고 owner 게이트에서 `not_owned`로 다시 막혔을 것이다.
+        assert_eq!(entry.steps.channel, StepStatus::Done);
+        let fresh = entry.channel_id.expect("channel id");
+        assert_ne!(fresh, theirs);
+        assert_eq!(
+            fx.canvases.lock().expect("lock").get(&fresh),
+            Some(&canvas_of("meeting").to_string())
+        );
+        // 남의 방은 건드리지 않았다.
+        assert!(!fx.canvases.lock().expect("lock").contains_key(&theirs));
+    }
+
     /// owner 확인이 relay 오류로 실패하면 `applied`가 아니다. 재시도가 그
     /// 단계만 이어서 하고, 그때 비로소 desired state에 닿는다.
     #[tokio::test]
@@ -806,7 +1049,7 @@ mod tests {
         let fx = FakeEffects::new();
         fx.fail_next("is_owner");
 
-        let first = apply(crate::builtin(), &fx, &["meeting".to_string()])
+        let first = apply(crate::builtin(), &fx, &pick("meeting"))
             .await
             .expect("first");
         let entry = item(&first, "meeting");
@@ -824,7 +1067,7 @@ mod tests {
             assert_eq!(stored[0].2.steps.membership, StepStatus::Failed);
         }
 
-        let second = apply(crate::builtin(), &fx, &["meeting".to_string()])
+        let second = apply(crate::builtin(), &fx, &pick("meeting"))
             .await
             .expect("retry");
         let entry = item(&second, "meeting");
@@ -873,7 +1116,7 @@ mod tests {
         // 팀이 그 사이 자기 내용을 써 넣었다. 이게 지켜져야 하는 값이다.
         seed_team_canvas(&fx, channel_id);
 
-        let ledger = apply(crate::builtin(), &fx, &["meeting".to_string()])
+        let ledger = apply(crate::builtin(), &fx, &pick("meeting"))
             .await
             .expect("apply");
 
@@ -908,7 +1151,7 @@ mod tests {
         // 그래서 `RequestOwnership`은 「소유권을 넘겨받으면 풀린다」는 뜻이
         // 아니라 「이 방은 저 사람 것이니 저 사람에게 실행을 부탁하라」는
         // 뜻이다. 다시 돌려도 같은 자리에 멈춘다.
-        let second = apply(crate::builtin(), &fx, &["meeting".to_string()])
+        let second = apply(crate::builtin(), &fx, &pick("meeting"))
             .await
             .expect("retry");
         let entry = item(&second, "meeting");
@@ -963,7 +1206,7 @@ mod tests {
         seed_team_canvas(&fx, channel_id);
         fx.fail_next("is_owner");
 
-        let ledger = apply(crate::builtin(), &fx, &["meeting".to_string()])
+        let ledger = apply(crate::builtin(), &fx, &pick("meeting"))
             .await
             .expect("apply");
 
@@ -994,7 +1237,7 @@ mod tests {
         // relay가 돌아오면 재시도가 이어서 끝난다 — 팀이 써 둔 캔버스는
         // 그대로 두고서다. owner 확인이 통과했다는 것과 그 방에 써도 된다는
         // 것은 다른 이야기다.
-        let retry = apply(crate::builtin(), &fx, &["meeting".to_string()])
+        let retry = apply(crate::builtin(), &fx, &pick("meeting"))
             .await
             .expect("retry");
         let entry = item(&retry, "meeting");
@@ -1031,7 +1274,7 @@ mod tests {
         let channel_id = seed_applied(&fx, "meeting", "메인 회의방", steps);
         seed_team_canvas(&fx, channel_id);
 
-        let ledger = apply(crate::builtin(), &fx, &["meeting".to_string()])
+        let ledger = apply(crate::builtin(), &fx, &pick("meeting"))
             .await
             .expect("apply");
 
@@ -1065,7 +1308,7 @@ mod tests {
         // 있는 결론은 "쓰지 않는다" 하나뿐인데도 사용자에게는 끝나지 않는
         // 실패로 보인다.
         let reads_before = fx.call_count("read_canvas");
-        let second = apply(crate::builtin(), &fx, &["meeting".to_string()])
+        let second = apply(crate::builtin(), &fx, &pick("meeting"))
             .await
             .expect("second");
         let entry = item(&second, "meeting");
@@ -1104,7 +1347,7 @@ mod tests {
         );
         seed_team_canvas(&fx, channel_id);
 
-        let ledger = apply(crate::builtin(), &fx, &["meeting".to_string()])
+        let ledger = apply(crate::builtin(), &fx, &pick("meeting"))
             .await
             .expect("apply");
 
@@ -1139,7 +1382,7 @@ mod tests {
         );
         // 캔버스를 심지 않는다 — 방은 있는데 캔버스 이벤트가 없는 상태다.
 
-        let ledger = apply(crate::builtin(), &fx, &["meeting".to_string()])
+        let ledger = apply(crate::builtin(), &fx, &pick("meeting"))
             .await
             .expect("apply");
 
@@ -1175,7 +1418,7 @@ mod tests {
         );
         fx.seed_canvas(channel_id, "   \n\t \n");
 
-        let ledger = apply(crate::builtin(), &fx, &["meeting".to_string()])
+        let ledger = apply(crate::builtin(), &fx, &pick("meeting"))
             .await
             .expect("apply");
 
@@ -1210,7 +1453,7 @@ mod tests {
         seed_team_canvas(&fx, channel_id);
         fx.fail_next("read_canvas");
 
-        let ledger = apply(crate::builtin(), &fx, &["meeting".to_string()])
+        let ledger = apply(crate::builtin(), &fx, &pick("meeting"))
             .await
             .expect("apply");
 
@@ -1230,7 +1473,7 @@ mod tests {
         }
 
         // relay가 돌아오면 재시도가 막히지 않고 끝난다 — 여전히 쓰지 않고서다.
-        let retry = apply(crate::builtin(), &fx, &["meeting".to_string()])
+        let retry = apply(crate::builtin(), &fx, &pick("meeting"))
             .await
             .expect("retry");
         // 되돌릴 수 없는 쪽을 먼저 확인한다 — 단계 상태만 보면 팀의 내용을
@@ -1245,7 +1488,7 @@ mod tests {
     #[tokio::test]
     async fn deleted_channel_is_not_recreated() {
         let fx = FakeEffects::new();
-        apply(crate::builtin(), &fx, &["meeting".to_string()])
+        apply(crate::builtin(), &fx, &pick("meeting"))
             .await
             .expect("first");
 
@@ -1255,7 +1498,7 @@ mod tests {
         // relay가 만들 수 없는 상태를 테스트가 대신 만들어 주는 셈이 된다.
         fx.channels.lock().expect("lock").clear();
 
-        let ledger = apply(crate::builtin(), &fx, &["meeting".to_string()])
+        let ledger = apply(crate::builtin(), &fx, &pick("meeting"))
             .await
             .expect("after delete");
         let entry = item(&ledger, "meeting");
@@ -1274,7 +1517,7 @@ mod tests {
             name: "기획".into(),
         });
 
-        let ledger = apply(crate::builtin(), &fx, &["planning".to_string()])
+        let ledger = apply(crate::builtin(), &fx, &pick("planning"))
             .await
             .expect("apply");
         let entry = item(&ledger, "planning");
@@ -1338,7 +1581,7 @@ mod tests {
         // preflight의 읽기가 1번째다. saga가 또 읽으면 그 2번째가 실패한다.
         fx.fail_nth("fetch_provenance", 2);
 
-        let ledger = apply(crate::builtin(), &fx, &["meeting".to_string()])
+        let ledger = apply(crate::builtin(), &fx, &pick("meeting"))
             .await
             .expect("apply");
         let entry = item(&ledger, "meeting");
@@ -1398,7 +1641,7 @@ mod tests {
         let fx = FakeEffects::new();
         let channel_id = seed_orphaned_channel(&fx, "meeting", true);
 
-        let ledger = apply(crate::builtin(), &fx, &["meeting".to_string()])
+        let ledger = apply(crate::builtin(), &fx, &pick("meeting"))
             .await
             .expect("apply");
         let entry = item(&ledger, "meeting");
@@ -1434,12 +1677,12 @@ mod tests {
         let fx = FakeEffects::new();
         seed_orphaned_channel(&fx, "meeting", true);
 
-        let first = apply(crate::builtin(), &fx, &["meeting".to_string()])
+        let first = apply(crate::builtin(), &fx, &pick("meeting"))
             .await
             .expect("first");
         assert_eq!(item(&first, "meeting").decision, "adopted");
 
-        let second = apply(crate::builtin(), &fx, &["meeting".to_string()])
+        let second = apply(crate::builtin(), &fx, &pick("meeting"))
             .await
             .expect("second");
         let entry = item(&second, "meeting");
@@ -1476,7 +1719,7 @@ mod tests {
         // 팀이 그 방을 쓰고 있다. 이게 지켜져야 하는 값이다.
         seed_team_canvas(&fx, channel_id);
 
-        let ledger = apply(crate::builtin(), &fx, &["meeting".to_string()])
+        let ledger = apply(crate::builtin(), &fx, &pick("meeting"))
             .await
             .expect("apply");
 
@@ -1523,7 +1766,7 @@ mod tests {
         let fx = FakeEffects::new();
         fx.fail_next("publish_provenance");
 
-        let first = apply(crate::builtin(), &fx, &["meeting".to_string()])
+        let first = apply(crate::builtin(), &fx, &pick("meeting"))
             .await
             .expect("first");
         let entry = item(&first, "meeting");
@@ -1540,7 +1783,7 @@ mod tests {
         seed_team_canvas(&fx, channel_id);
         let writes_before = fx.call_count("set_canvas");
 
-        let retry = apply(crate::builtin(), &fx, &["meeting".to_string()])
+        let retry = apply(crate::builtin(), &fx, &pick("meeting"))
             .await
             .expect("retry");
 
@@ -1578,7 +1821,7 @@ mod tests {
         let fx = FakeEffects::new();
         let channel_id = seed_orphaned_channel(&fx, "meeting", false);
 
-        let ledger = apply(crate::builtin(), &fx, &["meeting".to_string()])
+        let ledger = apply(crate::builtin(), &fx, &pick("meeting"))
             .await
             .expect("apply");
 
@@ -1615,7 +1858,7 @@ mod tests {
         seed_orphaned_channel(&fx, "meeting", true);
         fx.fail_next("is_owner");
 
-        let ledger = apply(crate::builtin(), &fx, &["meeting".to_string()])
+        let ledger = apply(crate::builtin(), &fx, &pick("meeting"))
             .await
             .expect("apply");
         let entry = item(&ledger, "meeting");
@@ -1632,7 +1875,7 @@ mod tests {
         );
 
         // relay가 돌아오면 재시도가 채택으로 끝난다.
-        let retry = apply(crate::builtin(), &fx, &["meeting".to_string()])
+        let retry = apply(crate::builtin(), &fx, &pick("meeting"))
             .await
             .expect("retry");
         let entry = item(&retry, "meeting");
@@ -1652,7 +1895,7 @@ mod tests {
         let fx = FakeEffects::new();
         fx.fail_next("publish_provenance");
 
-        let ledger = apply(crate::builtin(), &fx, &["meeting".to_string()])
+        let ledger = apply(crate::builtin(), &fx, &pick("meeting"))
             .await
             .expect("apply");
         let entry = item(&ledger, "meeting");
@@ -1702,7 +1945,7 @@ mod tests {
             },
         );
 
-        let ledger = apply(crate::builtin(), &fx, &["meeting".to_string()])
+        let ledger = apply(crate::builtin(), &fx, &pick("meeting"))
             .await
             .expect("apply");
 
@@ -1759,7 +2002,7 @@ mod tests {
         };
         seed_applied(&fx, "finance", "재무", steps);
 
-        let ledger = apply(crate::builtin(), &fx, &["finance".to_string()])
+        let ledger = apply(crate::builtin(), &fx, &pick("finance"))
             .await
             .expect("apply");
         let entry = item(&ledger, "finance");
