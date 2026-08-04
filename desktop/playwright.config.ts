@@ -52,6 +52,7 @@ export default defineConfig({
         "**/local-archive-screenshots.spec.ts",
         "**/voice-settings.spec.ts",
         "**/workspace-catalog.spec.ts",
+        "**/self-hosted-onboarding.spec.ts",
         "**/agent-readiness-screenshots.spec.ts",
         "**/agent-error-state-screenshots.spec.ts",
         "**/edit-agent.spec.ts",

@@ -20,7 +20,10 @@ import { useSystemColorScheme } from "@/shared/theme/useSystemColorScheme";
 import { Button } from "@/shared/ui/button";
 import { Card } from "@/shared/ui/card";
 import { StartupWindowDragRegion } from "@/shared/ui/StartupWindowDragRegion";
-import { SelfHostedRelayEntry } from "./SelfHostedRelayEntry";
+import {
+  SelfHostedRelayDialog,
+  SelfHostedRelayEntry,
+} from "./SelfHostedRelayEntry";
 
 type WelcomeSetupPage = "welcome" | "existing" | "join" | "member" | "owned";
 type WelcomeTransitionMode = "initial" | OnboardingTransitionDirection;
@@ -46,6 +49,9 @@ export function WelcomeSetup({
   // we only navigate to the hosted stage once sign-in completes, so the page
   // behind the modal never changes out from under the user.
   const [isHostedSignInOpen, setIsHostedSignInOpen] = React.useState(false);
+  // Owned here, not inside the hosted dialog: a dialog rendered under another
+  // dialog's overlay is blurred out and takes no clicks.
+  const [isSelfHostedOpen, setIsSelfHostedOpen] = React.useState(false);
   const [copiedNpub, setCopiedNpub] = React.useState(false);
   const communityOnboarding = useCommunityOnboarding();
   const identityQuery = useIdentityQuery();
@@ -330,17 +336,19 @@ export function WelcomeSetup({
                 setIsHostedSignInOpen(false);
                 showPage("owned");
               }}
+              onSelfHosted={() => {
+                setIsHostedSignInOpen(false);
+                setIsSelfHostedOpen(true);
+              }}
               stageHidden
             />
           ) : null}
-          {isHostedSignInOpen && page !== "owned" ? (
-            <div className="pointer-events-auto fixed inset-x-0 bottom-8 z-50 flex justify-center">
-              <SelfHostedRelayEntry
-                onConnect={startConnection}
-                variant="link"
-              />
-            </div>
-          ) : null}
+
+          <SelfHostedRelayDialog
+            onConnect={startConnection}
+            onOpenChange={setIsSelfHostedOpen}
+            open={isSelfHostedOpen}
+          />
         </div>
       </OnboardingFooterProvider>
     </div>

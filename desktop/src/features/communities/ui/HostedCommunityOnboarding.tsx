@@ -33,6 +33,7 @@ import {
   ONBOARDING_PRIMARY_CTA_CLASS,
 } from "@/features/onboarding/ui/OnboardingChrome";
 import { BuzzMark } from "@/shared/ui/buzz-logo/BuzzMark";
+import { SelfHostedRelayLink } from "./SelfHostedRelayEntry";
 import {
   Dialog,
   DialogContent,
@@ -65,6 +66,15 @@ type HostedCommunityOnboardingProps = {
    */
   onReady?: () => void;
   /**
+   * Offer a way out to a self-hosted relay. Omit to leave the flow as-is.
+   *
+   * The handler is expected to close this dialog and open the relay-URL
+   * dialog from a level above it — a dialog rendered underneath this one's
+   * overlay is blurred out and takes no clicks. SchoolX addition; see
+   * `docs/schoolx-2/SELF_HOSTED_ONBOARDING.md`.
+   */
+  onSelfHosted?: () => void;
+  /**
    * While true, render only the sign-in modal and keep the page scaffolding
    * hidden, so whatever screen launched the flow stays visible behind it.
    */
@@ -74,6 +84,7 @@ type HostedCommunityOnboardingProps = {
 export function HostedCommunityOnboarding({
   onBack,
   onReady,
+  onSelfHosted,
   stageHidden = false,
 }: HostedCommunityOnboardingProps) {
   const onboarding = useCommunityOnboarding();
@@ -509,6 +520,9 @@ export function HostedCommunityOnboarding({
                 Buzz is open source. Builderlab hosts the relay for this
                 account.
               </p>
+              {onSelfHosted ? (
+                <SelfHostedRelayLink onSelect={onSelfHosted} />
+              ) : null}
             </>
           ) : !identity ? (
             <>
