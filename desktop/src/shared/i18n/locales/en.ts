@@ -11,6 +11,29 @@ export const en = {
       settingUpCommunity: "Setting up your community…",
       switchingCommunity: "Switching community…",
     },
+    /**
+     * Onboarding entry for schools that run their own relay.
+     *
+     * Worded around *running a relay*, not around owner/member. The two
+     * choices that already reach this path are labelled "join with an invite"
+     * and "I'm a member" — someone who just started their own relay does not
+     * call themselves either, so they walk past both and pick one of the two
+     * doors that lead to hosted sign-in instead. See
+     * `docs/schoolx-2/SELF_HOSTED_ONBOARDING.md` §2.
+     */
+    selfHostedRelay: {
+      cardTitle: "I run my own relay",
+      cardDescription:
+        "Connect to a relay your school runs. No invite code needed.",
+      link: "Running your own relay?",
+      dialogTitle: "Connect to your relay",
+      // "No invite code" is the load-bearing sentence: an invite can only be
+      // minted by an existing owner or admin, so on a brand-new relay there is
+      // nobody to ask — believing you need one is the dead end itself.
+      dialogDescription:
+        "Enter the address of the relay your school runs. You do not need an invite code — the first administrator to connect is already an owner.",
+      placeholder: "ws://relay.our-school.example",
+    },
   },
   settings: {
     sidebar: {

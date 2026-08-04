@@ -8,6 +8,16 @@ export const ko = {
       settingUpCommunity: "커뮤니티를 준비하고 있습니다…",
       switchingCommunity: "커뮤니티를 전환하고 있습니다…",
     },
+    selfHostedRelay: {
+      cardTitle: "학교 릴레이를 직접 운영합니다",
+      cardDescription:
+        "학교가 직접 띄운 릴레이 주소로 연결합니다. 초대 코드가 필요 없습니다.",
+      link: "직접 운영하는 릴레이가 있나요?",
+      dialogTitle: "릴레이에 연결",
+      dialogDescription:
+        "학교가 운영하는 릴레이 주소를 입력하세요. 초대 코드는 필요 없습니다 — 처음 연결하는 관리자가 이미 소유자입니다.",
+      placeholder: "ws://relay.our-school.example",
+    },
   },
   settings: {
     sidebar: {
