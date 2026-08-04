@@ -19,7 +19,9 @@
 - 브랜치: `codex/schoolx-2-foundation`
 - foundation commit: `a3e1ca4fb5f199b8ade62e14c120967ddab190d9`
 - parent Buzz snapshot: `acfbb1bb6af54cb29cb152496ff43b8285dcb8cf`
-- 마지막 upstream 동기화: `925a9a7b` (2026-07-28, merge, 85커밋)
+- 마지막 upstream 동기화: `5e9e40f3` (2026-08-01, merge, upstream `b1b283cd`).
+  그 동기화가 드러낸 것은 [`BASELINE.md`](BASELINE.md)의 「2026-08-01
+  동기화에서 드러난 것」에 있다
 - 현재 상태: 위 작업이 모두 commit·push됨
 - Phase 상태: **Phase 0 완료**, Phase 1 계약 고정 완료(요약 audience 연결 제외),
   Phase 2 i18n 구조 기반 + **제품 설정·브랜딩 완료**(아이콘·업데이트·서명 제외),
@@ -27,7 +29,9 @@
 
 세션 0(기준선), 세션 A(보안 계약), 세션 B(제품 설정과 브랜딩)는 끝났다.
 세션 C는 진행 중이고, 세션 D(워크스페이스 catalog)는 구현과 게이트를 마쳤으나
-Phase 3을 완료로 표시하지 못했다.
+Phase 3을 완료로 표시하지 못했다. 세션 E1(catalog 적용 권한)은 세션 D가
+남긴 보안 구멍 둘을 닫았고 **Phase 3 판정은 바꾸지 않는다** — 그 둘은
+완료 기준 7개 중 어디에도 걸려 있지 않았다.
 
 ### 구현되어 있는 것
 
@@ -73,6 +77,18 @@ Phase 3을 완료로 표시하지 못했다.
   `decision` 8종 · 단계 상태)와 그 wire format을 바이트 단위로 고정하는 golden
 - 미리보기·적용·결과·재시도를 하는 설정 화면 카드와 Tauri command 2개
 - 내장 catalog를 그대로 출력하는 읽기 전용 `buzz catalog list`
+- catalog 적용의 커뮤니티 관리자 게이트 — `preflight`와 `apply` **양쪽**
+  진입에서 relay-signed 커뮤니티 역할(kind 13534)을 확인하고, 걸리면 부분
+  결과 없이 실패한다
+- 채널 **생성자**(`channels.created_by`)에 건 채택 판정 — relay가 kind:39000에
+  `created_by`를 싣고, `channel_owner`가 그것을 읽고, `is_owner`가 거기서
+  도출된다. 역할 부여로는 판정이 움직이지 않는다
+- 채널 결합에 더해 **그 채널의 생성자가 서명한 provenance만** 인정하는
+  preflight. 생성자를 특정할 수 없으면 그 채널의 증명서는 전부 버린다
+- 클라이언트가 저작한 kind 39000/39001/39002를 ingest에서 거부하는
+  relay-only 강제 — 위 두 항목이 이 불변식 위에 서 있다
+- 권한 없음을 이유와 함께 설명하는 설정 카드(오픈 릴레이의 명부 부재를
+  권한 거부로 읽지 않는 구분 포함)
 
 ### 아직 구현 또는 검증되지 않은 것
 
@@ -92,6 +108,13 @@ Phase 3을 완료로 표시하지 못했다.
 - catalog 적용의 CLI 경로 (`buzz catalog list`는 내장 정의만 출력한다)
 - `open` 공개 범위 경고의 도달 경로 — 문구와 자리는 있으나 게이트가 상수
   `false`다
+- 도출 채널 ID 선점의 **약한 형태** — 강한 형태(선점 채널을 피해자가 자기
+  것으로 채택)는 세션 E1에서 닫혔으나, 먼저 차지해 그 항목을 모든 관리자에게
+  영구히 막는 것은 그대로 가능하다. `generation`을 올리는 코드 경로가 크레이트
+  전체에 없어 복구되지 않는다
+- 생성자에게 **위임 실행을 요청**하는 흐름 — `channels.created_by`가 갱신되지
+  않으므로 다른 관리자는 재적용해도 `not_owned`에 멈춘다. 소유권 이전으로는
+  풀리지 않는 문제이고 UX가 아직 없다
 - SchoolX persona, 관리형 에이전트, coordinator, agent provisioning의
   saga·ledger 편입
 - audience 정책 primitive를 실제 요약 생성·게시 seam에 연결하고 게시 직전
@@ -127,6 +150,20 @@ Phase 3을 완료로 표시하지 못했다.
     private 채널 ACL을 그대로 받는다. 전역 스코프로 바꾸면 비멤버가 private
     채널의 존재를 알게 되므로 1·2와 함께 깨진다. 자동 채택 대신 사용자
     해결을 요구하는 쪽이 안전한 실패다.
+12. **채널이 「우리 것인가」는 역할이 아니라 생성자로 답한다.**
+    `MemberRole::Owner`는 상위 등급이 남에게 줄 수 있는 값이고 개수 상한도
+    없다 — 부여 검사는 「주는 쪽이 elevated인가」만 보고, owner 가드는 전부
+    하한("마지막 owner를 못 뺀다")이다. 따라서 역할로 판정하면 도출 ID를
+    선점한 사람이 피해자에게 `owner`를 주는 것만으로 판정을 뒤집는다.
+    `channels.created_by`는 생성 시 한 번 쓰이고 relay의 어떤 경로도 다시
+    쓰지 않아서 그럴 수 없다. `is_owner`를 `channel_owner`와 별도 근거로
+    답하게 만들면 두 값이 어긋나는 자리가 생기고, 그 틈이 정확히 막으려던
+    것이다.
+13. **kind 39000/39001/39002는 relay만 저작한다.** 12번과 provenance 서명자
+    검증이 모두 이 불변식 위에 서 있다. 이것이 없으면 아무 구성원이나 남의
+    채널 메타데이터·명부를 위조해 자기를 생성자로 적을 수 있다. `open`
+    채널은 비멤버도 읽으므로 **읽힘 자체를 방어선으로 세지 않는다** —
+    relay의 채널 스코프 ACL은 경계가 아니라 1차 필터다.
 
 현재 작업트리 기준 근거 경로:
 
@@ -147,6 +184,22 @@ Phase 3을 완료로 표시하지 못했다.
   `requires_h_channel_scope`, 비멤버 차단 증거는
   `crates/buzz-test-client/tests/e2e_workspace_catalog.rs`의
   `non_member_cannot_read_provenance`
+- 생성자 태그 발행: `crates/buzz-relay/src/handlers/side_effects.rs`의
+  `emit_group_discovery_events`와 buzz-admin reconcile (백필 경로를 빠뜨리면
+  백필된 채널이 생성자 불명이 된다)
+- 생성자 기반 채택 판정: `desktop/src-tauri/src/commands/workspace_catalog.rs`의
+  `channel_owner`·`is_owner`, 서명자 검증은
+  `crates/schoolx-catalog/src/preflight.rs`
+- 관리자 게이트: 같은 파일의 `require_community_admin`·`role_may_apply`,
+  역할 출처는 `desktop/src-tauri/src/commands/relay_members.rs`의
+  `get_my_relay_membership`
+- relay-only 강제: `crates/buzz-core/src/kind.rs`의 `is_relay_only_kind`,
+  회귀는 `crates/buzz-test-client/tests/e2e_relay.rs`의
+  `test_client_submitted_nip29_member_lists_are_rejected`와
+  `test_client_submitted_nip29_group_metadata_and_admins_are_rejected`
+- 선점 시나리오 relay 수준 고정:
+  `crates/buzz-test-client/tests/e2e_workspace_catalog.rs`의
+  `squatted_channel_provenance_is_signed_by_the_squatter`
 
 이 사실을 바꾸려면 일반 Buzz에도 유효한 별도 설계, 서버 강제, 보안 테스트가
 필요하다. 현재 서버 기반도 실제 Postgres·Redis를 사용한 transport matrix가
@@ -189,7 +242,7 @@ relay에서 전부 통과). 실행은 `just test-e2e e2e_access_matrix`.
 **세션 A에서 넘긴 것:** source audience 교집합의 실제 게시 경로 연결.
 `buzz-core::audience`는 primitive와 단위 테스트까지만 있고 어떤 생성·게시
 경로에도 연결돼 있지 않다. 연결 대상인 요약 기능 자체가 아직 없어 검증할
-표면이 없으므로 **세션 E**에서 기능과 함께 구현·검증한다. 그전까지 "출처 기반
+표면이 없으므로 **세션 E3**(지식 승격)에서 기능과 함께 구현·검증한다. 그전까지 "출처 기반
 자동 교차 게시"를 제공한다고 표현하지 않는다.
 
 <details>
@@ -414,7 +467,9 @@ e2e_workspace_catalog` 4 passed, `just schoolx-upstream-check` 3/3 통과.
 세션의 범위다. 8·9는 남은 구현이 아니라 브랜치 전체 리뷰(2026-07-31)에서
 나온 보안 결정이다 — 개별 작업 리뷰로는 보이지 않던 문제였고, 세션
 소유자가 세션 D 범위에서 고치는 대신 세션 E로 넘기기로 정했다. 서로 얽혀
-있어 한 쌍으로 적는다.
+있어 한 쌍으로 적는다. **둘 다 세션 E1에서 처리됐다 (2026-08-04)** — 아래
+각 항목 끝에 무엇이 닫혔고 무엇이 남았는지 적었다. 8번은 완전히 닫혔고,
+9번은 강한 형태만 닫혔다.
 
 1. **설정 카드의 실행 증거** (완료 기준 #7). 카드는 `outcome` 4종,
    `user_action` 3종, `decision` 8종, 캔버스 `skipped`/`unrecognized`를 모두
@@ -440,7 +495,7 @@ e2e_workspace_catalog` 4 passed, `just schoolx-upstream-check` 3/3 통과.
    snapshot test. 스키마와 적용 API가 고정됐으므로 **낮은 추론**으로 나눌 수
    있다. `open` 항목을 넣으려면 `visibility`를 `PreflightItem` →
    `CatalogPreflightItem`까지 실어 보내는 작업이 먼저다 (§9 참조).
-5. **에이전트 provisioning** — 세션 E. ledger 스키마에 자리만 두고
+5. **에이전트 provisioning** — 세션 E2. ledger 스키마에 자리만 두고
    `not_implemented`로 표시하기로 한 부분이다.
 6. **CLI 적용 경로.** 이번 CLI는 `buzz catalog list`뿐이고 preflight도 ledger도
    읽지 않는다. `ledger_serializes_for_ui_and_cli`가 고정한 wire format은 그
@@ -481,6 +536,12 @@ e2e_workspace_catalog` 4 passed, `just schoolx-upstream-check` 3/3 통과.
    `authorize_moderation_action`). "관리자"가 이 커뮤니티 역할을 뜻하는지
    부터 정하는 것이 설계 결정이고, 그 결정 전까지 확정된 사실은 지금 이
    흐름 어디서도 role이 확인되지 않는다는 것뿐이다.
+
+   **세션 E1에서 닫혔다.** 위 설계 결정은 「그렇다」로 정해졌다 — 커뮤니티
+   역할이다. `preflight`와 `apply` 양쪽 진입에서 `require_community_admin`이
+   relay-signed kind 13534의 역할을 확인하고 `owner`/`admin`만 통과시킨다.
+   모르는 역할은 거부한다. `featureGate`도 함께 달았으나 그건 메뉴를 숨길
+   뿐 보안이 아니다.
 9. **도출된 채널 ID 선점.** §5의 채널 ID를 만드는 네 입력(relay scope,
    catalog id, item key, generation)은 모두 공개다 — 네임스페이스는
    오픈소스 코드의 리터럴이고 `item_key`는 `buzz catalog list`가 그대로
@@ -522,6 +583,22 @@ e2e_workspace_catalog` 4 passed, `just schoolx-upstream-check` 3/3 통과.
    있다. `is_owner`가 `owner`뿐 아니라 `admin`도 통과시키는 것이 강한
    형태를 가능하게 하는 지점이므로, 서명자 확인과 함께 재검토한다.
 
+   **세션 E1에서 강한 형태가 닫혔다. 약한 형태는 남는다.** 재검토 결과
+   `admin`만 떼는 것으로는 아무것도 닫히지 않는다는 것이 드러났다 —
+   `MemberRole::Owner` 자체가 부여 가능한 값이고 개수 상한도 없어서,
+   선점자는 `admin` 대신 `owner`를 주면 그만이었다. 그래서 판정 근거를
+   역할이 아니라 불변 생성자(`channels.created_by`)로 옮겼고, provenance는
+   그 채널의 생성자가 서명한 것만 인정한다. 선점자가 무슨 역할을 뿌리든
+   피해자의 `is_owner`는 거짓이다. 근거와 정정 이력은
+   [`CATALOG_SECURITY.md`](CATALOG_SECURITY.md) §5·§6.
+
+   **약한 형태는 설계상 남긴 것이다.** 도출 ID를 먼저 차지해 그 항목을
+   모든 관리자에게 영구히 막는 것은 그대로 가능하다 — 안전한 실패(아무것도
+   쓰지 않고 멈춘다)이지만 복구 경로가 없다. 닫으려면 `generation` 증가
+   경로가 필요하고, 그것은 여전히 미구현이다(위 7번). 같은 성질에서
+   나오는 부작용으로 **공동 관리도 막힌다** — A가 만든 방은 B가 재적용해도
+   `not_owned`이고, 생성자에게 위임 실행을 요청하는 흐름은 아직 없다.
+
 <details>
 <summary>원래 계획 (참고)</summary>
 
@@ -549,9 +626,65 @@ e2e_workspace_catalog` 4 passed, `just schoolx-upstream-check` 3/3 통과.
 
 </details>
 
-### 세션 E — 에이전트와 지식 승격 운영
+### 세션 E1 — catalog 적용 권한 · **완료 (2026-08-04)**
 
-새 고추론 세션으로 시작한다.
+세션 D 「넘긴 것」 8·9를 닫는 것만이 범위였다. 새 기능은 없다. 설계는
+[`CATALOG_SECURITY.md`](CATALOG_SECURITY.md), 계획은
+[`plans/2026-08-01-catalog-security.md`](plans/2026-08-01-catalog-security.md),
+구현은 커밋 `0a2ccada`–`14925137`이다.
+
+게이트 실행 기록은 [`BASELINE.md`](BASELINE.md)의 세션 E1 절에 있다.
+
+세션 E1에서 확인된 사실 중 다음 다섯 가지는 이후 세션이 반드시 전제해야
+한다.
+
+1. **「이 방이 우리 것인가」를 역할로 묻지 않는다.** 처음 설계는
+   `is_owner`에서 `admin`만 떼는 것이었고 근거는 "`owner`는 생성자에게
+   고정되어 남이 줄 수 없다"였다. **그 근거가 사실이 아니었다** —
+   `MemberRole::Owner`는 평범한 부여 가능 값이고 개수 상한도 없다. 선점자가
+   `admin` 대신 `owner`를 주면 비용 없이 같은 공격이 성립한다. 그래서 판정을
+   불변 생성자로 옮겼다. **역할로 소유를 답하는 코드를 새로 만들면 이 구멍이
+   다시 열린다.**
+2. **`is_owner`는 독립 근거를 갖지 않는다.** `channel_owner(id) == Some(나)`로
+   도출된다. 둘을 따로 답하게 하면 두 값이 어긋나는 자리가 생기고, 그 틈이
+   정확히 막으려던 것이다.
+3. **「관리자」는 커뮤니티 역할이다.** `relay_members`의
+   `owner`/`admin`이며 근거는 relay-signed kind 13534다. 채널 레벨
+   `MemberRole`과 혼동하지 않는다. **preflight도 같은 게이트 뒤에 있다** —
+   미리보기만으로도 어떤 항목이 이미 적용됐는지가 드러나고 그것은 private
+   채널의 존재 정보다.
+4. **오픈 릴레이에서는 적용이 아예 막힌다.** `require_relay_membership`는
+   기본값이 `false`이고 그때 relay는 NIP-43을 광고하지도 발행하지도 않는다.
+   `.env.example`도 `just test-e2e`도 그 값을 켜지 않으므로 **기본 개발
+   릴레이가 그 상태다.** 게이트는 「명부 없음」을 「제한 없음」으로 읽지
+   않는다 — 그렇게 읽으면 게이트가 그 릴레이에서 no-op이 된다. 대신
+   `catalog-membership-unavailable`로 거부하고, 이것은
+   `catalog-admin-required`와 **구별되는** 식별자다. 사용자가 할 일이 다르기
+   때문이다(전자는 릴레이 설정 문제, 후자는 관리자에게 요청). catalog 적용을
+   실제로 태우는 세션은 이 설정부터 켜야 한다.
+5. **이 게이트는 클라이언트 측이다.** relay는 catalog를 모르고, 그렇게 두기로
+   했다(§4). 직접 relay에 kind 9007을 쏘아 채널을 만드는 것은 막지 못하며
+   막을 대상도 아니다 — 막는 것은 「catalog 적용으로 기본 업무방 일습을
+   만드는 것」이다.
+
+**세션 E1에서 넘긴 것.**
+
+1. **선점의 약한 형태.** 도출 ID를 먼저 차지해 그 항목을 영구히 막는 것은
+   그대로 가능하다. `generation` 증가 경로가 없어 복구되지 않는다. 안전한
+   실패이지 가용성 보장이 아니다.
+2. **공동 관리와 위임 실행.** `channels.created_by`가 갱신되지 않으므로 A가
+   만든 방은 B가 재적용해도 `not_owned`다. `UserAction::RequestOwnership`은
+   「소유권을 넘겨받으면 풀린다」가 아니라 「저 사람에게 실행을 부탁하라」로
+   읽어야 하고, 그 요청 흐름은 아직 없다. 열거형 이름은 역할 기반 판정
+   시절의 잔재다.
+3. **Phase 3의 남은 세 항목은 그대로다.** 세션 D 「넘긴 것」 1–3(설정 카드
+   실행 증거, `catalog_version` upgrade 경로, `renamed`의 ledger 노출)은
+   E1 범위가 아니었고 여전히 열려 있다.
+
+### 세션 E2·E3 — 에이전트와 지식 승격 운영
+
+새 고추론 세션으로 시작한다. E2는 에이전트 프로비저닝, E3는 지식 승격이며
+서로 별도 설계다.
 
 범위:
 
@@ -562,10 +695,6 @@ e2e_workspace_catalog` 4 passed, `just schoolx-upstream-check` 3/3 통과.
 - 같은 채널의 `AI 초안`과 출처 metadata
 - 사용자가 검토·수정해 canvas에 수동 반영하는 흐름
 - 비활성 agent 비용, 실패, timeout, 권한 상실 상태
-- workspace catalog 적용에 관리자 권한 게이트 추가 (세션 D 「넘긴 것」
-  8번)
-- workspace catalog provenance 서명자 검증으로 도출된 채널 ID 선점을
-  닫고 `is_owner`의 admin 허용 여부 재검토 (세션 D 「넘긴 것」 9번)
 
 완료 조건:
 

@@ -203,6 +203,88 @@ positive control 추가), `042e59db`(provenance를 도출된 채널에 묶는 �
 파일 바깥 이름이 아닌 `#[cfg(test)] mod tests`용 임시 디렉터리)인지는
 확인하지 않았다 — 이번 다섯 항목의 범위 밖이라 별도 세션의 판단에 맡긴다.
 
+### 세션 E1 (2026-08-04, catalog 적용 권한 최종 게이트)
+
+측정 대상은 `14925137` 위에 이번 세션의 변경(신규 E2E 테스트 하나와
+`docs/schoolx-2` 문서 갱신)을 얹은 트리다. 코드 변경은 E2E 파일 하나뿐이고
+Rust 게이트가 그것을 컴파일한다. 시각은 UTC, cargo 캐시는 relay 선빌드로
+전 구간 warm이다.
+
+| command | 시작(UTC) | exit | passed | failed | 소요 | 분류 |
+|---|---|---:|---:|---:|---:|---|
+| `just fmt-check` | 05:13:26 | 0 | - | - | 6s | 통과 |
+| `just clippy` | 05:13:39 | 0 | - | - | 2m02s | 통과 (warm) |
+| `just desktop-check` | 05:15:47 | 0 | - | - | 15s | 통과 |
+| `just desktop-tauri-fmt-check` | 05:16:02 | 0 | - | - | 7s | 통과 |
+| `just web-check` | 05:16:09 | 0 | - | - | 4s | 통과 |
+| `just mobile-check` | 05:16:13 | 0 | - | - | 38s | 통과 |
+| `just desktop-tauri-clippy` | 05:16:57 | 0 | - | - | 51s | 통과 |
+| `just test-unit` | 05:17:54 | 0 | 6 suites | 0 | 36s | 통과 — `schoolx-catalog` **78**/0 |
+| `just desktop-test` | 05:18:36 | 0 | **3,929** | 0 | 5m25s | 통과 (59 suites, skipped 0) |
+| `just desktop-build` | 05:24:18 | 0 | - | - | 53s | 통과 |
+| `just web-build` | 05:25:11 | 0 | - | - | 11s | 통과 |
+| `just desktop-tauri-check` | 05:25:28 | 0 | - | - | 1m46s | 통과 |
+| `just desktop-tauri-test` | 05:27:20 | 0 | **2,077** | 0 | 7m14s | 통과 (14 ignored) |
+| `just mobile-test` | 05:34:41 | 0 | 1,022 | 0 | 3m01s | 통과 (1 skipped) |
+| `just schoolx-upstream-check` | 05:37:49 | 0 | 3/3 | 0 | 2s | 통과 — 범위 310개 파일 |
+| `just test-e2e e2e_workspace_catalog` | 05:38:12 | 0 | **5** | 0 | 41s | 통과 — 신규 1개 포함 |
+| `just test-e2e e2e_access_matrix` | 05:38:53 | 0 | **17** | 0 | 57s | 통과 — 세션 A 계약 유지 |
+
+`just ci`는 세션 D와 같은 이유로 한 명령으로 돌리지 않았다(하네스 10분
+한도). 위 1–14행이 `just ci`의 구성 레시피 전체이며, 실행 순서만
+`desktop-build`·`web-build`를 `desktop-tauri-*`보다 앞에 두어 묶었다. 전부
+exit 0이다.
+
+로그는 세션 로컬 `/tmp/g-*.log`에 있었고 repo에 보존하지 않았다. 위 명령을
+그대로 재실행하면 같은 값을 얻는다.
+
+#### 세션 D 이후 늘어난 테스트 수
+
+| 게이트 | 세션 D (2026-07-30) | 세션 E1 (2026-08-04) |
+|---|---:|---:|
+| `schoolx-catalog` | 66 | 78 |
+| `desktop-test` | 3,756 (58 suites) | 3,929 (59 suites) |
+| `desktop-tauri-test` | 1,834 | 2,077 |
+| `e2e_workspace_catalog` | 4 | 5 |
+
+세션 D 이후의 브랜치 리뷰 수정과 세션 E1이 함께 만든 증가분이며, 세션 E1
+단독 기여분은 아니다. 증가한 숫자 자체를 근거로 쓰지 않는다 — 어느 테스트가
+무엇을 고정하는지는 각 세션 절이 이름으로 적는다.
+
+#### 새 E2E의 판별력을 재주입으로 확인했다
+
+`squatted_channel_provenance_is_signed_by_the_squatter`가 실제로 무언가를
+지키는지 확인하려고, `emit_group_discovery_events`의 `created_by` 태그
+push를 주석 처리하고 같은 스위트를 다시 돌렸다.
+
+```text
+running 5 tests
+test deleted_channel_id_is_burned ... ok
+test non_member_cannot_read_provenance ... ok
+test provenance_round_trips_through_the_relay ... ok
+test second_publish_replaces_the_first ... ok
+test squatted_channel_provenance_is_signed_by_the_squatter ... FAILED
+  left: None
+ right: Some("2506401153...")
+```
+
+목표한 테스트 **하나만** 실패했고 나머지 넷은 통과했다. 되돌린 뒤
+`git diff crates/buzz-relay`가 비었음을 확인하고 5/5를 다시 얻었다.
+`CATALOG_SECURITY.md` §7이 요구하는 절차다.
+
+이 주입이 고른 회귀는 임의의 것이 아니다 — 커밋 `14925137`이 relay와
+buzz-admin reconcile **양쪽**에 같은 태그를 넣어야 했던 이유가 "빠뜨리면
+백필된 채널이 생성자 불명이 된다"이므로, 태그 누락이 이 값의 실제 실패
+모양이다.
+
+#### Node.js가 기준선 기록보다 한 단계 올라 있다
+
+「도구 버전」 표는 2026-07-25 기준 `v24.14.0`인데 이번 실행 환경은
+`v24.15.0`이다. rustc(`1.95.0`)와 pnpm(`11.4.0`)은 표와 같다. 이번 게이트는
+전부 통과했으므로 이 차이가 만든 실패는 없다. 표를 고치지 않고 여기 적어
+두는 이유는, 표가 「그 날짜에 확인한 값」이라는 기록이기 때문이다 — 다음
+세션이 Node를 다시 확인하고 표를 갱신할지 결정한다.
+
 ### 검증되지 않은 첫 실행과 그 원인
 
 첫 실행에서 `cargo test --manifest-path desktop/src-tauri/Cargo.toml`이

@@ -151,12 +151,14 @@ cache:
 
 ## 5. 이 계약이 아직 덮지 않는 것
 
-정직하게 남긴다. 아래는 세션 A 범위 밖이며, 완료로 표시하지 않는다.
+정직하게 남긴다. 바로 아래 넷은 세션 A 범위 밖이며 **여전히** 완료로
+표시하지 않는다. 세션 D가 이 계약 위에 얹은 workspace catalog gap 둘은
+세션 E1에서 닫혔고, 무엇이 닫혔고 무엇이 남았는지는 이 절 끝에 따로 적었다.
 
 **derived content의 audience 교집합.** `crates/buzz-core/src/audience.rs`는
 I/O 없는 정책 primitive로 존재하고 단위 테스트도 있으나, **어떤 생성·게시
 경로에도 연결돼 있지 않다.** 연결 대상인 요약 기능 자체가 아직 없으므로
-검증할 표면이 없다. 세션 E에서 기능과 함께 연결하며, 그때 게시 직전
+검증할 표면이 없다. 세션 E3(지식 승격)에서 기능과 함께 연결하며, 그때 게시 직전
 membership 재확인과 생성-게시 사이 race까지 함께 테스트한다. 그전까지
 "출처 기반 자동 교차 게시"를 제공한다고 표현하지 않는다.
 
@@ -171,43 +173,60 @@ membership 재확인과 생성-게시 사이 race까지 함께 테스트한다. 
 없다. 이 매트릭스는 회귀를 자동으로 잡아주지 못하며, 각 세션 시작 전에 수동
 실행이 필요하다. CI 연결은 세션 F(패키징) 범위로 둔다.
 
-다음 둘은 세션 A 이후 세션 D가 이 계약 위에 얹은 workspace catalog
-표면에서 나온 gap이다 — 위 접근 매트릭스가 다루는 채널 read/write 축이
-아니라 *누가 적용을 실행할 수 있는가*, *도출된 채널 ID를 누가 선점할 수
-있는가*라는 별도 축이다.
+### 세션 D가 남긴 workspace catalog gap 둘 — 세션 E1에서 닫힘 (2026-08-04)
 
-**workspace catalog 적용에 관리자 역할 검사가 없다.** catalog는 계획서
-전반에서 관리자의 동작으로 서술되지만
-([`DEVELOPMENT_PLAN.md`](DEVELOPMENT_PLAN.md) Phase 3의 첫 완료 기준),
-`preflight_workspace_catalog`·`apply_workspace_catalog`
-(`desktop/src-tauri/src/commands/workspace_catalog.rs`)는 서명 키가
-유효한 워크스페이스 멤버라는 것 말고는 호출자에게 아무것도 요구하지
-않는다. 인증된 멤버 누구나 적용을 돌려 표준 업무방의 owner가 될 수 있고,
-실제 관리자는 그 방에서 `not_owned`를 받는다. **이번 실행이 만들지 않은
-방을 함부로 채택하지 못하게 막는 owner
-게이트([`WORKSPACE_CATALOG.md`](WORKSPACE_CATALOG.md) §8)는 그대로
-유효하다** — owner 확인 전에는 캔버스도 증명서도 쓰지 않는다. 막지 못하는
-것은 *새 방을 누가 먼저 만들 수 있는가*뿐이다. 세션 E로 넘어간다
-([`IMPLEMENTATION_HANDOFF.md`](IMPLEMENTATION_HANDOFF.md) 세션 D 「넘긴
-것」 8번).
+둘 다 위 접근 매트릭스가 다루는 채널 read/write 축이 아니라 *누가 적용을
+실행할 수 있는가*, *도출된 채널 ID를 누가 선점할 수 있는가*라는 별도
+축이었다. 설계는 [`CATALOG_SECURITY.md`](CATALOG_SECURITY.md),
+구현은 커밋 `0a2ccada`–`14925137`이다.
 
-**도출된 workspace catalog 채널 ID는 공개·예측 가능해서 선점할 수 있다.**
-[`WORKSPACE_CATALOG.md`](WORKSPACE_CATALOG.md) §5의 채널 ID를 만드는 네
-입력(relay scope, catalog id, item key, generation)은 모두 공개다. 인증된
-사용자는 관리자가 적용하기 전에 그 ID로 채널을 먼저 만들어 둘 수 있다.
-약한 형태는 이름만 다른 채널을 선점해 모든 관리자의 적용을
-`deleted`·`not_owned`로 영구히 막는 것이다 — `generation`을 올리는 경로가
-없어 복구가 안 된다. 강한 형태는 선점한 채널에서 피해 관리자에게 `admin`
-role을 주는 것이다 — 그 role 부여에 대상의 동의는 필요 없고, `is_owner`가
-`owner`와 `admin`을 동일하게 취급해 saga가 공격자의 채널을 그대로
-채택한다. **도출된 채널에 실리지 않은 증명서를 버리는 결합 검사는 이미
-있다** (`record_sits_in_its_derived_channel`,
-[`WORKSPACE_CATALOG.md`](WORKSPACE_CATALOG.md) §7) — 아무 채널에나 위조
-증명서를 발행해 다른 사람의 preflight를 잠그는 경로는 막는다. 막지 못하는
-것은 선점한 **자기 채널 안에서** 그 결합 검사를 통과하는 데이터를 만드는
-경로다. 세션 E로 넘어간다
-([`IMPLEMENTATION_HANDOFF.md`](IMPLEMENTATION_HANDOFF.md) 세션 D 「넘긴
-것」 9번).
+**적용은 커뮤니티 관리자만 할 수 있다.** `preflight_workspace_catalog`와
+`apply_workspace_catalog`(`desktop/src-tauri/src/commands/workspace_catalog.rs`)
+가 진입에서 `require_community_admin`을 통과해야 한다. 근거가 되는 역할은
+`relay_members`의 커뮤니티 스코프 역할이고, 그 값은 relay가 서명한
+kind 13534에서 온다 — 클라이언트가 만드는 값이 아니라 위조할 수 없다.
+`owner`와 `admin`만 통과하고 모르는 역할은 거부한다
+(`role_may_apply`). **preflight도 막는다** — 미리보기만으로도 어떤 항목이
+이미 적용됐는지가 드러나고 그것은 private 채널의 존재 정보다. 게이트에
+걸리면 두 command 모두 부분 결과 없이 실패한다.
+
+**선점한 채널을 남의 것으로 채택하지 않는다.** 도출식의 네 입력은 여전히
+공개이므로 선점 자체는 막지 못한다. 막는 것은 그 채널이 *우리 것으로
+읽히는* 경로다. 판정 근거를 가변 역할에서 불변 생성자로 옮겼다 —
+`channel_owner`는 relay가 kind:39000에 싣는 `created_by`를 읽고
+(`side_effects.rs::emit_group_discovery_events`, backfill 경로인 buzz-admin
+reconcile도 같은 태그를 낸다), `is_owner`는 `channel_owner(id) == Some(나)`
+로 **도출**된다. provenance는 채널 결합(세션 D)에 더해 **그 채널의 생성자가
+서명한 것만** 인정하고, 생성자를 특정할 수 없으면 그 채널의 증명서는 전부
+버린다. 그래서 선점자가 피해자에게 `admin`이든 `owner`든 무엇을 뿌려도
+판정이 움직이지 않는다. 이 불변식은 kind:39000/39001/39002가 relay-only라는
+사실 위에 서 있다(`is_relay_only_kind`, 회귀 테스트는 `e2e_relay.rs`의
+`test_client_submitted_nip29_member_lists_are_rejected`와
+`test_client_submitted_nip29_group_metadata_and_admins_are_rejected`).
+
+증거: `just test-e2e e2e_workspace_catalog` 5/5 — 신규
+`squatted_channel_provenance_is_signed_by_the_squatter`가 선점자가 피해
+관리자에게 `owner`를 준 **뒤에도** provenance 서명자와 `created_by`가 둘 다
+선점자를 가리킨다는 것을 살아있는 relay에서 고정한다. `just test-e2e
+e2e_access_matrix` 17/17 유지.
+
+**남는 조건 셋.** 닫힌 것을 과장하지 않기 위해 함께 적는다.
+
+1. **이 게이트는 클라이언트 측이다.** 직접 relay에 kind 9007을 쏘아 채널을
+   만드는 것은 막지 못하며, 막으려는 대상도 아니다 — 채널 생성은 모든
+   구성원의 정상 권한이다. 막는 것은 「catalog 적용으로 기본 업무방 일습을
+   만드는 것」이다. relay에 catalog 인식을 넣지 않은 이유는
+   [`CATALOG_SECURITY.md`](CATALOG_SECURITY.md) §4에 있다.
+2. **선점의 약한 형태는 여전히 열려 있다.** 닫힌 것은 강한 형태(선점 채널을
+   피해자가 자기 것으로 채택하는 것)뿐이다. 도출 ID를 먼저 차지해 그 catalog
+   항목을 모든 관리자에게 `not_owned`·`deleted`로 **영구히** 막는 것은 그대로
+   가능하다 — `generation`을 올리는 코드 경로가 크레이트 전체에 없어 복구되지
+   않는다. 안전한 실패(아무것도 쓰지 않고 멈춘다)이지 가용성 보장은 아니다.
+3. **공동 관리가 막힌다.** `channels.created_by`는 갱신되지 않으므로 관리자
+   A가 만든 방은 관리자 B가 몇 번을 재적용해도 `not_owned`다. 역할을 넘겨받아도
+   풀리지 않는다. `UserAction::RequestOwnership`은 「소유권을 넘겨받으면
+   풀린다」가 아니라 「저 사람에게 실행을 부탁하라」로 읽어야 하고, 그 위임
+   실행을 요청하는 흐름은 아직 없다.
 
 ## 6. 관련 문서
 

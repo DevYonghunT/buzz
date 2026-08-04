@@ -6,7 +6,7 @@
 //! idempotent apply saga, Tauri commands, the settings screen, and the CLI —
 //! is built and unit-tested against an in-memory fake
 //! (`cargo test -p schoolx-catalog`). A fake cannot prove properties of the
-//! *real* relay. Three such properties are exactly what everything upstream
+//! *real* relay. Four such properties are exactly what everything upstream
 //! assumes, and nothing else confirms them:
 //!
 //! 1. **The relay accepts kind 39500 at all.** Nothing upstream has ever sent
@@ -34,6 +34,17 @@
 //!    the relay's exact rejection string, `"duplicate: channel already
 //!    exists"`. `deleted_channel_id_is_burned` proves the relay still says
 //!    exactly that after a soft delete.
+//! 4. **A squatted channel does not read back as the victim's own.** Per
+//!    `docs/schoolx-2/CATALOG_SECURITY.md` §5·§6, adoption asks two questions
+//!    of the relay, and both answers must name the squatter rather than the
+//!    admin who arrives second: *who signed this provenance record*
+//!    (`ProvenanceRecord::signer`, the event's own `pubkey`) and *who created
+//!    this channel* (`channel_owner`, the `created_by` tag on kind:39000).
+//!    Anchoring on the creator is what makes the strong form of the squat
+//!    unreachable — the squatter can grant the victim any role, including
+//!    `owner`, but cannot rewrite who created the room.
+//!    `squatted_channel_provenance_is_signed_by_the_squatter` fixes both
+//!    answers at the relay level.
 //!
 //! # Harness reuse
 //!
@@ -73,6 +84,13 @@ const WORKSPACE_PROVENANCE_KIND: u16 = 39500;
 const CREATE_GROUP_KIND: u16 = 9007;
 const DELETE_GROUP_KIND: u16 = 9008;
 const PUT_USER_KIND: u16 = 9000;
+/// NIP-29 group metadata, relay-signed. Carries the `created_by` tag that
+/// `channel_owner` (`desktop/src-tauri/src/commands/workspace_catalog.rs`)
+/// reads to decide whether a channel is ours. Relay-only authorship is what
+/// makes that tag trustworthy; `e2e_relay.rs`'s
+/// `test_client_submitted_nip29_group_metadata_and_admins_are_rejected` is
+/// the regression test for the invariant itself, so this file only reads.
+const GROUP_METADATA_KIND: u16 = 39000;
 
 /// `<catalog_id>:<item_key>` from the brief, reused verbatim across every
 /// test. Safe to repeat: NIP-33 replacement keys on `(kind, pubkey, d_tag)`,
@@ -180,6 +198,71 @@ async fn add_member(owner: &Keys, channel_id: uuid::Uuid, target: &Keys) {
         body["accepted"].as_bool().unwrap_or(false),
         "add_member not accepted: {body}"
     );
+}
+
+/// Add `target` at an explicit `role`, signed by an elevated member.
+///
+/// Same kind:9000 as `add_member`, with the `role` tag the relay's PUT_USER
+/// handler reads (`side_effects.rs`). Split out rather than folded into
+/// `add_member` because the two say different things: `add_member` grants
+/// access, this grants *standing*. Only `squatted_channel_provenance_is_signed_by_the_squatter`
+/// needs the latter, and it needs it to hand out the one role that used to
+/// defeat adoption.
+async fn grant_role(granter: &Keys, channel_id: uuid::Uuid, target: &Keys, role: &str) {
+    let event = EventBuilder::new(Kind::Custom(PUT_USER_KIND), "")
+        .tags(vec![
+            Tag::parse(["h", &channel_id.to_string()]).unwrap(),
+            Tag::parse(["p", &target.public_key().to_hex()]).unwrap(),
+            Tag::parse(["role", role]).unwrap(),
+        ])
+        .sign_with_keys(granter)
+        .unwrap();
+    let body = post_event_as(granter, &event).await;
+    assert!(
+        body["accepted"].as_bool().unwrap_or(false),
+        "grant_role({role}) not accepted: {body}"
+    );
+}
+
+/// First value of the named tag, or `None`. Mirrors the desktop adapter's
+/// `first_tag_value` (`nostr_convert.rs`) so this test reads the event the
+/// same way production does.
+fn first_tag_value(event: &nostr::Event, name: &str) -> Option<String> {
+    event.tags.iter().find_map(|t| {
+        let s = t.as_slice();
+        (s.len() >= 2 && s[0] == name).then(|| s[1].clone())
+    })
+}
+
+/// Read a channel's relay-signed kind:39000 by its `d` tag (the channel id).
+///
+/// Filters by `#d` rather than `#h` for the reason spelled out on
+/// `read_provenance`: an `#h` filter takes the relay's per-channel REQ branch,
+/// which can answer `CLOSED` where `collect_until_eose` cannot tell that apart
+/// from a hang. kind:39000 keys its own `d` tag to the channel id
+/// (`emit_group_discovery_events`), so `#d` addresses one channel exactly.
+async fn read_group_metadata(
+    client: &mut BuzzTestClient,
+    channel_id: uuid::Uuid,
+    name: &str,
+) -> Vec<nostr::Event> {
+    let sid = sub_id(name);
+    let filter = Filter::new()
+        .kind(Kind::Custom(GROUP_METADATA_KIND))
+        .custom_tags(
+            SingleLetterTag::lowercase(Alphabet::D),
+            [channel_id.to_string()],
+        );
+    client
+        .subscribe(&sid, vec![filter])
+        .await
+        .expect("subscribe group metadata");
+    let events = client
+        .collect_until_eose(&sid, EOSE_WAIT)
+        .await
+        .expect("collect group metadata");
+    client.close_subscription(&sid).await.ok();
+    events
 }
 
 // ─── provenance publish + read (WS, mirrors e2e_team.rs / e2e_persona.rs) ──
@@ -502,4 +585,119 @@ async fn deleted_channel_id_is_burned() {
         "duplicate: channel already exists",
         "unexpected rejection reason (saga deletion-detection matches this exact string): {body}"
     );
+}
+
+// ─── fact 4: a squatted channel reads back as the squatter's, not ours ─────
+
+/// Plays out the squat from `docs/schoolx-2/CATALOG_SECURITY.md` §1 against a
+/// live relay and fixes the two values adoption decides on.
+///
+/// The squatter gets to a derived channel id first — every input to the
+/// derivation is public (§1), so this needs no privilege at all. They publish
+/// a complete-looking provenance record inside their own channel, which means
+/// the channel-binding check session D added (`record_sits_in_its_derived_channel`)
+/// passes: the record really is in the channel the derivation predicts. Then
+/// they pull the admin in and hand them `owner`, which kind:9000 PUT_USER
+/// permits without the target's consent.
+///
+/// That last move is the whole point of the design correction in §6. Adoption
+/// used to ask the role table "am I an owner here?", and the answer the
+/// squatter just manufactured was *yes*. So this test asserts what adoption
+/// asks now instead:
+///
+/// - **The record's signer is the squatter.** `ProvenanceRecord::signer` is
+///   `ev.pubkey.to_hex()`, and `preflight` keeps a record only when the signer
+///   equals the channel's creator (§5). Fixing the signer here is what lets
+///   that comparison mean anything.
+/// - **`created_by` on kind:39000 is the squatter, even after the `owner`
+///   grant.** This is the value `channel_owner` reads, and the whole reason
+///   adoption moved off roles: `channels.created_by` is written once at
+///   creation and no relay path rewrites it, so no role the squatter hands out
+///   can change the answer.
+///
+/// Both are read by the *admin's* connection, from inside the channel they
+/// were just given `owner` in — the exact vantage point the attack creates.
+/// Their `to_hex()`/`hex::encode` encodings must match byte for byte, since
+/// `preflight` compares them with `==`; asserting on the hex strings is what
+/// catches an encoding drift that would silently make every comparison false.
+///
+/// What this does *not* do is call preflight or the saga. That the crate then
+/// discards the record is already covered by
+/// `provenance_signed_by_a_non_owner_is_ignored` against the fake. What only a
+/// live relay can show is that the relay hands back these two answers in the
+/// first place, and names the squatter in both.
+#[tokio::test]
+#[ignore]
+async fn squatted_channel_provenance_is_signed_by_the_squatter() {
+    let squatter = Keys::generate();
+    let admin = Keys::generate();
+
+    // The squatter creates the channel, so the relay writes *their* pubkey
+    // into `channels.created_by`. In the real attack this is a derived catalog
+    // id; the derivation is irrelevant to what the relay reports, so a fresh
+    // uuid stands in and keeps this file free of a `schoolx-catalog` dep.
+    let channel_id = create_channel(&squatter, "private").await;
+
+    // A record that looks finished, so an unguarded preflight would read it as
+    // "already applied" and adopt the room rather than create one.
+    let content = provenance_content(serde_json::json!({
+        "channel": "done",
+        "canvas": "done",
+        "membership": "done"
+    }));
+
+    let mut squatter_client = BuzzTestClient::connect(&relay_url(), &squatter)
+        .await
+        .expect("squatter connect");
+    let ok = squatter_client
+        .send_event(provenance_event(&squatter, channel_id, &content))
+        .await
+        .expect("publish provenance");
+    assert!(ok.accepted, "relay rejected kind 39500: {}", ok.message);
+    squatter_client.disconnect().await.ok();
+
+    // The strong form: hand the victim `owner`. No consent is asked of them,
+    // and the relay caps neither the number of owners nor who may be granted
+    // one — only the last owner is protected from removal.
+    grant_role(&squatter, channel_id, &admin, "owner").await;
+
+    let mut admin_client = BuzzTestClient::connect(&relay_url(), &admin)
+        .await
+        .expect("admin connect");
+
+    let events = read_provenance(&mut admin_client, "squatted").await;
+    assert_eq!(
+        events.len(),
+        1,
+        "admin should see exactly the squatter's record: {events:?}"
+    );
+    assert_eq!(
+        events[0].pubkey.to_hex(),
+        squatter.public_key().to_hex(),
+        "provenance signer must be the squatter — the admin's preflight has to \
+         be able to tell this record is not its own"
+    );
+    assert_ne!(
+        events[0].pubkey.to_hex(),
+        admin.public_key().to_hex(),
+        "provenance signer must not be attributable to the admin"
+    );
+
+    let metadata = read_group_metadata(&mut admin_client, channel_id, "squatted-metadata").await;
+    assert_eq!(
+        metadata.len(),
+        1,
+        "expected exactly one relay-signed kind:39000 for {channel_id} \
+         (NIP-33 replacement keys on kind+pubkey+d): {metadata:?}"
+    );
+    assert_eq!(
+        first_tag_value(&metadata[0], "created_by").as_deref(),
+        Some(squatter.public_key().to_hex().as_str()),
+        "created_by must still name the squatter after they granted the admin \
+         `owner` — this is the value adoption anchors on, and a role grant must \
+         not be able to move it. tags: {:?}",
+        metadata[0].tags
+    );
+
+    admin_client.disconnect().await.ok();
 }

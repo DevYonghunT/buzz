@@ -1,5 +1,31 @@
 # catalog 적용 권한 구현 계획 (세션 E1)
 
+> **실행 완료 (2026-08-04).** Task 1–6 전부 실행했다. 게이트 결과는
+> [`BASELINE.md`](../BASELINE.md) 세션 E1 절, 결과 서술은
+> [`IMPLEMENTATION_HANDOFF.md`](../IMPLEMENTATION_HANDOFF.md) 세션 E1 절에
+> 있다. **아래 두 곳은 계획대로 하지 않았다** — 계획서는 당시 판단의 기록으로
+> 그대로 두고 무엇이 달랐는지만 여기 적는다.
+>
+> 1. **Task 2·3의 근거가 실행 중에 뒤집혔다.** 「`is_owner`에서 `admin`을
+>    뗀다」의 근거였던 *"`owner`는 채널 생성자에게 고정되어 남이 줄 수 없다"*
+>    가 사실이 아니었다 — `MemberRole::Owner`는 부여 가능한 값이고 개수 상한도
+>    없어서, 선점자가 `admin` 대신 `owner`를 주면 같은 공격이 그대로
+>    성립했다. 그래서 판정 근거를 역할이 아니라 불변 생성자
+>    (`channels.created_by`, relay가 kind:39000에 싣는 `created_by` 태그)로
+>    옮겼다(커밋 `4c8be34b`·`14925137`). Task 3 Step 2·3의 코드 스니펫은
+>    이 정정 이전 모양이다. 정정 이력은
+>    [`CATALOG_SECURITY.md`](../CATALOG_SECURITY.md) §5·§6.
+> 2. **Task 6 Step 1의 E2E가 계획보다 넓다.** 계획은 provenance 이벤트의
+>    `pubkey`만 단언했는데, 위 정정으로 판정이 실제로 읽는 값이 kind:39000의
+>    `created_by`가 되었다. 그래서 신규 테스트는 선점자가 피해 관리자에게
+>    **`owner`를 준 뒤에도** 두 값이 모두 선점자를 가리킨다는 것을 함께
+>    고정한다.
+>
+> 계획에 없던 것도 하나 있다. 오픈 릴레이(`require_relay_membership=false`,
+> 기본값)에서는 kind 13534가 아예 없어 명부 조회가 항상 비므로, 그것을 권한
+> 거부로 읽으면 커뮤니티 소유자 본인이 잠긴다. 통과시키지도 않는다 — 구별되는
+> 식별자 `catalog-membership-unavailable`로 거부한다(커밋 `f3dc2137`).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** catalog 적용을 커뮤니티 관리자로 제한하고, provenance를 그 채널 owner가 서명한 것만 인정하게 한다.
@@ -55,7 +81,7 @@
 
 튜플이 3개가 되는 순간 위치 인자가 읽히지 않는다. 이름 있는 구조체로 바꾼다.
 
-- [ ] **Step 1: 실패하는 테스트를 쓴다**
+- [x] **Step 1: 실패하는 테스트를 쓴다**
 
 `crates/schoolx-catalog/src/effects.rs`의 기존 `#[cfg(test)] mod fake` 아래 테스트 모듈이 없으면 파일 끝에 만든다.
 
@@ -85,12 +111,12 @@ mod tests {
 }
 ```
 
-- [ ] **Step 2: 테스트가 실패하는지 확인한다**
+- [x] **Step 2: 테스트가 실패하는지 확인한다**
 
 Run: `cd /Users/kim-yonghun/Development/schoolX_v2.0 && . ./bin/activate-hermit && cargo test -p schoolx-catalog provenance_record_carries`
 Expected: FAIL — `ProvenanceRecord` 가 없어 컴파일 에러
 
-- [ ] **Step 3: 타입을 만들고 trait을 바꾼다**
+- [x] **Step 3: 타입을 만들고 trait을 바꾼다**
 
 `effects.rs`의 `CatalogEffects` trait 위에 추가한다.
 
@@ -128,7 +154,7 @@ pub struct ProvenanceRecord {
     ) -> Result<Vec<ProvenanceRecord>, EffectError>;
 ```
 
-- [ ] **Step 4: fake를 맞춘다**
+- [x] **Step 4: fake를 맞춘다**
 
 `mod fake` 안에서 `provenance` 필드의 타입을 바꾼다.
 
@@ -206,7 +232,7 @@ pub struct ProvenanceRecord {
         }
 ```
 
-- [ ] **Step 5: preflight의 호출부를 맞춘다**
+- [x] **Step 5: preflight의 호출부를 맞춘다**
 
 `preflight.rs`에서 `fetch_provenance`의 결과를 쓰는 곳을 새 타입에 맞춘다. 이 단계에서는 **동작을 바꾸지 않는다** — 튜플 분해를 필드 접근으로 바꾸기만 한다. 서명자 검사는 Task 2에서 더한다.
 
@@ -216,12 +242,12 @@ pub struct ProvenanceRecord {
 
 **컴파일러가 남은 자리를 전부 알려준다.** 반환 타입이 바뀌었으므로 고치지 않은 호출부는 빌드가 실패한다. 경고를 무시하고 넘어갈 수 있는 자리가 없다.
 
-- [ ] **Step 6: 테스트가 통과하는지 확인한다**
+- [x] **Step 6: 테스트가 통과하는지 확인한다**
 
 Run: `cd /Users/kim-yonghun/Development/schoolX_v2.0 && . ./bin/activate-hermit && cargo test -p schoolx-catalog`
 Expected: PASS — 기존 테스트 전부 + 새 테스트 1개. 동작은 아직 안 바뀌었으므로 어떤 기존 단언도 깨지면 안 된다.
 
-- [ ] **Step 7: 커밋한다**
+- [x] **Step 7: 커밋한다**
 
 ```bash
 git add crates/schoolx-catalog
@@ -242,7 +268,7 @@ git commit -m "refactor(schoolx-2): 세션 E1 — provenance 레코드에 서명
 
 `is_owner`는 「내가 owner인가」만 답한다. 여기서 필요한 것은 「이 채널의 owner가 **누구인가**」다.
 
-- [ ] **Step 1: 실패하는 테스트를 쓴다**
+- [x] **Step 1: 실패하는 테스트를 쓴다**
 
 `preflight.rs`의 테스트 모듈에 추가한다.
 
@@ -293,12 +319,12 @@ git commit -m "refactor(schoolx-2): 세션 E1 — provenance 레코드에 서명
     }
 ```
 
-- [ ] **Step 2: 테스트가 실패하는지 확인한다**
+- [x] **Step 2: 테스트가 실패하는지 확인한다**
 
 Run: `cd /Users/kim-yonghun/Development/schoolX_v2.0 && . ./bin/activate-hermit && cargo test -p schoolx-catalog provenance_signed_by`
 Expected: FAIL — `set_channel_owner`가 없어 컴파일 에러
 
-- [ ] **Step 3: trait에 owner 조회를 더한다**
+- [x] **Step 3: trait에 owner 조회를 더한다**
 
 `effects.rs`의 `CatalogEffects`에 추가한다.
 
@@ -315,7 +341,7 @@ Expected: FAIL — `set_channel_owner`가 없어 컴파일 에러
     async fn channel_owner(&self, channel_id: Uuid) -> Result<Option<String>, EffectError>;
 ```
 
-- [ ] **Step 4: fake에 owner 저장소와 시더를 더한다**
+- [x] **Step 4: fake에 owner 저장소와 시더를 더한다**
 
 `FakeEffects`에 필드를 더한다.
 
@@ -347,7 +373,7 @@ Expected: FAIL — `set_channel_owner`가 없어 컴파일 에러
 
 `create_channel`이 성공할 때 `owners`에도 `FAKE_ME`를 넣는다 — 만든 사람이 owner이므로.
 
-- [ ] **Step 5: preflight에서 검사한다**
+- [x] **Step 5: preflight에서 검사한다**
 
 `preflight.rs`에서 provenance를 쓰기 전에 서명자를 확인한다.
 
@@ -370,18 +396,18 @@ Expected: FAIL — `set_channel_owner`가 없어 컴파일 에러
 
 이후 판정 로직은 `provenance` 대신 `honoured`를 본다. 채널 결합 검사(세션 D)는 그대로 둔다 — 두 조건은 각자 다른 공격을 막으므로 하나가 다른 하나를 대신하지 않는다.
 
-- [ ] **Step 6: 테스트가 통과하는지 확인한다**
+- [x] **Step 6: 테스트가 통과하는지 확인한다**
 
 Run: `cd /Users/kim-yonghun/Development/schoolX_v2.0 && . ./bin/activate-hermit && cargo test -p schoolx-catalog`
 Expected: PASS — 새 테스트 2개 포함 전부
 
 기존 테스트가 깨지면 그 테스트의 시딩이 owner를 지정하지 않아서다. `set_channel_owner(channel_id, FAKE_ME)`를 더한다 — 지금까지의 모든 시딩은 「내가 만들고 내가 남긴」 상태를 뜻했다.
 
-- [ ] **Step 7: 판별력을 실증한다**
+- [x] **Step 7: 판별력을 실증한다**
 
 `preflight.rs`에서 서명자 검사를 임시로 지우고 (`honoured`를 `provenance` 전체로) 테스트를 돌려 `provenance_signed_by_a_non_owner_is_ignored`가 실패하는지 확인한 뒤 정확히 되돌린다. 보고서에 기록한다.
 
-- [ ] **Step 8: 커밋한다**
+- [x] **Step 8: 커밋한다**
 
 ```bash
 git add crates/schoolx-catalog
@@ -399,13 +425,13 @@ git commit -m "fix(schoolx-2): 세션 E1 — 채널 owner가 서명한 증명서
 - Consumes: `ProvenanceRecord`, `CatalogEffects::channel_owner`
 - Produces: 없음 (기존 command 시그니처 유지)
 
-- [ ] **Step 1: `fetch_provenance`가 서명자를 싣게 한다**
+- [x] **Step 1: `fetch_provenance`가 서명자를 싣게 한다**
 
 이 어댑터는 이미 `h` 태그를 뽑고 있다. 같은 자리에서 `ev.pubkey`를 함께 담는다. 이벤트에서 `h` 태그를 뽑는 기존 헬퍼를 찾아 그 반환에 서명자를 더하고, `ProvenanceRecord`를 만들어 돌려준다. 서명자는 `ev.pubkey.to_hex()`다.
 
 `h` 태그가 없거나 파싱되지 않는 이벤트는 지금처럼 버린다.
 
-- [ ] **Step 2: `channel_owner`를 구현한다**
+- [x] **Step 2: `channel_owner`를 구현한다**
 
 `is_owner`가 이미 `get_channel_members`를 부른다. 같은 응답에서 `role == "owner"`인 첫 멤버의 pubkey를 돌려준다.
 
@@ -425,7 +451,7 @@ git commit -m "fix(schoolx-2): 세션 E1 — 채널 owner가 서명한 증명서
     }
 ```
 
-- [ ] **Step 3: `is_owner`에서 admin을 뗀다**
+- [x] **Step 3: `is_owner`에서 admin을 뗀다**
 
 현재 구현은 `m.role == "owner" || m.role == "admin"`이다. `owner`만 남기고, 왜 바뀌었는지 주석으로 남긴다.
 
@@ -452,7 +478,7 @@ git commit -m "fix(schoolx-2): 세션 E1 — 채널 owner가 서명한 증명서
     }
 ```
 
-- [ ] **Step 4: 검증한다**
+- [x] **Step 4: 검증한다**
 
 Run: `cd /Users/kim-yonghun/Development/schoolX_v2.0 && . ./bin/activate-hermit && cargo test --manifest-path desktop/src-tauri/Cargo.toml`
 Expected: PASS
@@ -462,7 +488,7 @@ Expected: 둘 다 exit 0
 
 포그라운드로 돌린다. 데스크톱 빌드는 10~15분 걸린다 — 백그라운드로 던지고 알림을 기다리지 않는다.
 
-- [ ] **Step 5: 커밋한다**
+- [x] **Step 5: 커밋한다**
 
 ```bash
 git add desktop/src-tauri
@@ -480,7 +506,7 @@ git commit -m "fix(schoolx-2): 세션 E1 — 채택 게이트에서 admin을 떼
 - Consumes: `crate::commands::relay_members::get_my_relay_membership`
 - Produces: 두 command가 관리자가 아니면 실패
 
-- [ ] **Step 1: 게이트 함수를 쓴다**
+- [x] **Step 1: 게이트 함수를 쓴다**
 
 `get_my_relay_membership`은 `{"member": {...}}` 또는 `{"member": null}`을 돌려준다. 멤버 객체에 `role` 필드가 있다.
 
@@ -525,7 +551,7 @@ fn role_may_apply(role: Option<&str>) -> bool {
 
 에러 문자열은 **문구가 아니라 식별자**다. 사용자에게 보일 문장은 프론트엔드가 지역화한다 — 어댑터의 한국어 하드코딩이 영어 로케일 사용자에게 새는 기존 문제를 되풀이하지 않는다.
 
-- [ ] **Step 2: 두 command에 건다**
+- [x] **Step 2: 두 command에 건다**
 
 `preflight_workspace_catalog`와 `apply_workspace_catalog` 각각의 첫 줄에서 부른다.
 
@@ -535,7 +561,7 @@ fn role_may_apply(role: Option<&str>) -> bool {
 
 게이트가 실패하면 `?`가 즉시 반환하므로 어떤 부분 결과도 나가지 않는다.
 
-- [ ] **Step 3: 테스트를 더한다**
+- [x] **Step 3: 테스트를 더한다**
 
 같은 파일의 테스트 모듈에 역할 판정만 떼어 검사하는 테스트를 더한다. `get_my_relay_membership`은 relay를 타므로 여기서는 판정 부분을 순수 함수로 분리해 시험한다 — `require_community_admin`에서 role 문자열을 받아 판정하는 부분을 `fn role_may_apply(role: Option<&str>) -> bool`로 빼고 그것을 시험한다.
 
@@ -552,7 +578,7 @@ fn role_may_apply(role: Option<&str>) -> bool {
     }
 ```
 
-- [ ] **Step 4: 검증한다**
+- [x] **Step 4: 검증한다**
 
 Run: `cd /Users/kim-yonghun/Development/schoolX_v2.0 && . ./bin/activate-hermit && cargo test --manifest-path desktop/src-tauri/Cargo.toml workspace_catalog`
 Expected: PASS
@@ -560,7 +586,7 @@ Expected: PASS
 Run: `cd /Users/kim-yonghun/Development/schoolX_v2.0 && . ./bin/activate-hermit && just desktop-tauri-fmt && cargo clippy --manifest-path desktop/src-tauri/Cargo.toml --all-targets -- -D warnings`
 Expected: 둘 다 exit 0
 
-- [ ] **Step 5: 커밋한다**
+- [x] **Step 5: 커밋한다**
 
 ```bash
 git add desktop/src-tauri
@@ -577,7 +603,7 @@ git commit -m "feat(schoolx-2): 세션 E1 — catalog 적용을 커뮤니티 관
 - Modify: `desktop/src/shared/i18n/locales/ko.ts`
 - Modify: `desktop/src/features/settings/ui/WorkspaceCatalogSettingsCard.tsx`
 
-- [ ] **Step 1: i18n 키를 양쪽에 더한다**
+- [x] **Step 1: i18n 키를 양쪽에 더한다**
 
 `en.ts`의 `catalog` 블록에 추가한다.
 
@@ -595,7 +621,7 @@ git commit -m "feat(schoolx-2): 세션 E1 — catalog 적용을 커뮤니티 관
 
 `catalog`는 이미 등록된 네임스페이스이므로 `APP_I18N_NAMESPACES`는 바꾸지 않는다.
 
-- [ ] **Step 2: 섹션에 featureGate를 건다**
+- [x] **Step 2: 섹션에 featureGate를 건다**
 
 `SettingsPanels.tsx`의 `workspace-catalog` 서술자에 추가한다.
 
@@ -605,7 +631,7 @@ git commit -m "feat(schoolx-2): 세션 E1 — catalog 적용을 커뮤니티 관
 
 이건 메뉴를 숨길 뿐 보안이 아니다 — 실제 게이트는 Task 4의 command 쪽이다. 그 사실을 서술자 근처 주석으로 남긴다.
 
-- [ ] **Step 3: 카드가 게이트 실패를 설명한다**
+- [x] **Step 3: 카드가 게이트 실패를 설명한다**
 
 `WorkspaceCatalogSettingsCard.tsx`에서 preflight 쿼리의 에러가 `catalog-admin-required`이면 `t("catalog.adminRequired")`를 띄우고 항목 목록과 적용 버튼을 감춘다. 다른 에러는 지금처럼 원문을 보여준다.
 
@@ -616,14 +642,14 @@ const isAdminRequired = (error: unknown) =>
 
 경고 스타일은 같은 파일의 `user_action` alert가 쓰는 amber 처리(`border-amber-500/30 bg-amber-500/10`)를 그대로 쓴다. 텍스트 크기는 rem 토큰만 쓴다.
 
-- [ ] **Step 4: 검증한다**
+- [x] **Step 4: 검증한다**
 
 Run: `cd /Users/kim-yonghun/Development/schoolX_v2.0 && . ./bin/activate-hermit && pnpm --dir desktop typecheck && pnpm --dir desktop check && pnpm --dir desktop test`
 Expected: 전부 PASS. i18n parity 테스트가 `en`/`ko` 키 구조 일치를 확인한다.
 
 포그라운드로 돌린다.
 
-- [ ] **Step 5: 커밋한다**
+- [x] **Step 5: 커밋한다**
 
 ```bash
 git add desktop/src
@@ -640,7 +666,7 @@ git commit -m "feat(schoolx-2): 세션 E1 — 권한이 없으면 카드가 이�
 - Modify: `docs/schoolx-2/SECURITY_CONTRACT.md`
 - Modify: `docs/schoolx-2/BASELINE.md`
 
-- [ ] **Step 1: 선점 시나리오 E2E를 더한다**
+- [x] **Step 1: 선점 시나리오 E2E를 더한다**
 
 `e2e_workspace_catalog.rs`에 테스트를 더한다. 기존 하네스를 그대로 재사용한다 — 새 하네스를 만들지 않는다.
 
@@ -648,21 +674,21 @@ git commit -m "feat(schoolx-2): 세션 E1 — 권한이 없으면 카드가 이�
 
 이 테스트는 relay 동작만 검증한다. 「그래서 B의 preflight가 그걸 버린다」는 크레이트 단위 테스트가 이미 덮는다 — 여기서 saga를 부르지 않는다.
 
-- [ ] **Step 2: E2E를 돌린다**
+- [x] **Step 2: E2E를 돌린다**
 
 Run: `cd /Users/kim-yonghun/Development/schoolX_v2.0 && . ./bin/activate-hermit && just test-e2e e2e_workspace_catalog`
 Expected: PASS
 
 포그라운드로 돌린다. Postgres·Redis·MinIO가 필요하고 `just test-e2e`가 띄운다. 포트 3000이 다른 프로세스에 잡혀 relay가 bind에 실패하면, 그 프로세스를 죽이지 말고 `BUZZ_BIND_ADDR`와 `RELAY_URL`을 **함께** 빈 포트로 덮어 같은 순서를 다시 돌린 뒤 무엇을 돌렸는지 정확히 적는다.
 
-- [ ] **Step 3: 보안 계약 회귀를 확인한다**
+- [x] **Step 3: 보안 계약 회귀를 확인한다**
 
 Run: `cd /Users/kim-yonghun/Development/schoolX_v2.0 && . ./bin/activate-hermit && just test-e2e e2e_access_matrix`
 Expected: PASS — 17/17
 
 이 계약에는 CI job이 없어 사람이 돌릴 때만 돈다.
 
-- [ ] **Step 4: 문서를 갱신한다**
+- [x] **Step 4: 문서를 갱신한다**
 
 `SECURITY_CONTRACT.md` §5에 세션 D가 기록한 두 gap을 **닫힌 것으로** 바꾼다. 무엇이 닫혔고 무엇이 남았는지 정확히 적는다 — 클라이언트 측 게이트라 직접 relay 호출은 여전히 막지 못한다는 사실(스펙 §4)이 남는 조건이다.
 
@@ -670,18 +696,18 @@ Expected: PASS — 17/17
 
 `BASELINE.md`에 이번에 돌린 명령과 결과, 실행 시각을 기록한다.
 
-- [ ] **Step 5: 전체 게이트를 돌린다**
+- [x] **Step 5: 전체 게이트를 돌린다**
 
 `just ci`는 하네스의 10분 제한에 걸리므로 구성 레시피를 하나씩 포그라운드로 돌린다: `fmt-check`, `clippy`, `desktop-check`, `desktop-tauri-fmt-check`, `desktop-tauri-clippy`, `web-check`, `mobile-check`, `test-unit`, `desktop-test`, `desktop-build`, `desktop-tauri-check`, `desktop-tauri-test`, `web-build`, `mobile-test`.
 
 각각의 결과를 보고서에 적는다. 실패하면 원인이 이번 변경인지 기존 조건인지 판별해 밝힌다.
 
-- [ ] **Step 6: 제품 식별자 검사를 돌린다**
+- [x] **Step 6: 제품 식별자 검사를 돌린다**
 
 Run: `cd /Users/kim-yonghun/Development/schoolX_v2.0 && . ./bin/activate-hermit && just schoolx-upstream-check`
 Expected: 3/3 PASS
 
-- [ ] **Step 7: 커밋한다**
+- [x] **Step 7: 커밋한다**
 
 ```bash
 git add crates/buzz-test-client docs/schoolx-2
