@@ -8,6 +8,26 @@
 
 **Tech Stack:** React 19 / Tauri 2 / Playwright
 
+> **실행 완료 (2026-08-05).** 게이트는 [`BASELINE.md`](../BASELINE.md) 세션 G
+> 절, 결과 서술은 [`IMPLEMENTATION_HANDOFF.md`](../IMPLEMENTATION_HANDOFF.md)
+> 세션 G 절. 커밋 `a465de78`·`1e80e1a7`·`c3d72fa7`.
+>
+> **계획과 다르게 한 것 셋.**
+>
+> 1. **upstream 파일이 하나로 끝나지 않았다.** 「막힌 다이얼로그는
+>    `WelcomeSetup`이 띄우니 그 파일 하나면 된다」는 판단이 틀렸다. 다이얼로그
+>    **밖**에 배치한 링크는 오버레이 블러에 묻히고 클릭도 가로채여
+>    (`toBeVisible()` 통과, `click()` 타임아웃), 결국 다이얼로그 안에 넣어야
+>    했다. 설계가 원래 잡은 두 파일이 맞았다.
+> 2. **컴포넌트를 셋으로 나눴다.** 다이얼로그 소유권을 `WelcomeSetup` 최상위로
+>    올려야 중첩이 풀린다 — `SelfHostedRelayDialog`(controlled) ·
+>    `SelfHostedRelayLink`(신호만) · `SelfHostedRelayEntry`(카드+자기 다이얼로그).
+> 3. **사람 검증(Step 4)을 하지 못했다.** 앱이 이미 커뮤니티에 붙어 있어
+>    `community.needsSetup`이 거짓이라 온보딩 화면에 닿지 못했다. 대신
+>    Playwright가 그 화면을 결정론적으로 띄우고 스크린샷을 냈다. **소스를 보지
+>    않은 사람이 화면만으로 들어갈 수 있는지는 여전히 미검증이다** — 세션 G
+>    「넘긴 것」에 남겼다.
+
 ## Global Constraints
 
 - 작업 위치는 **메인 체크아웃** `/Users/kim-yonghun/Development/schoolX_v2.0`, 브랜치 `codex/schoolx-2-foundation`.
@@ -52,7 +72,7 @@
 - Consumes: `InviteRedeemForm` (`features/onboarding/ui/InviteRedeemForm`), `Dialog` 계열 (`shared/ui/dialog`)
 - Produces: `SelfHostedRelayEntry({ onConnect, variant })`
 
-- [ ] **Step 1: i18n 키를 양쪽에 더한다**
+- [x] **Step 1: i18n 키를 양쪽에 더한다**
 
 `en.ts`의 `app` 블록 안에 추가한다.
 
@@ -88,7 +108,7 @@
 
 "초대 코드가 필요 없습니다"가 이 작업의 핵심 문장이다 — 실제로 막힌 원인이 초대가 필요하다는 오해였다.
 
-- [ ] **Step 2: 컴포넌트를 만든다**
+- [x] **Step 2: 컴포넌트를 만든다**
 
 ```tsx
 import React from "react";
@@ -201,12 +221,12 @@ export function SelfHostedRelayEntry({
 `DialogDescription`·`DialogTitle`만 내보내며 **`DialogHeader`는 없다** — 위
 코드가 그에 맞춰져 있다.
 
-- [ ] **Step 3: 검증한다**
+- [x] **Step 3: 검증한다**
 
 Run: `cd /Users/kim-yonghun/Development/schoolX_v2.0 && . ./bin/activate-hermit && pnpm --dir desktop typecheck && pnpm --dir desktop check && pnpm --dir desktop test`
 Expected: 전부 PASS. i18n parity 테스트가 `en`/`ko` 구조 일치를 확인한다.
 
-- [ ] **Step 4: 커밋한다**
+- [x] **Step 4: 커밋한다**
 
 ```bash
 git add desktop/src/features/communities/ui/SelfHostedRelayEntry.tsx desktop/src/shared/i18n
@@ -223,7 +243,7 @@ git commit -s -m "feat(schoolx-2): 세션 G — 자체 호스팅 릴레이 진�
 
 **둘 다 upstream 파일이다. 변경은 import 한 줄 + 렌더 한 줄로 끝낸다.**
 
-- [ ] **Step 1: `existing` 페이지에 세 번째 선택지를 넣는다**
+- [x] **Step 1: `existing` 페이지에 세 번째 선택지를 넣는다**
 
 `WelcomeSetup.tsx`의 `existing-choice-member` 카드 **바로 뒤**, 같은 `<div>` 안에 넣는다.
 
@@ -239,7 +259,7 @@ import { SelfHostedRelayEntry } from "./SelfHostedRelayEntry";
 
 `startConnection`은 이미 그 스코프에 있다(`onConnect={startConnection}`으로 아래 join/member 페이지가 쓴다). **`WelcomeSetupPage` 유니온을 건드리지 않는다** — 새 페이지를 만들지 않고 다이얼로그로 처리하는 이유가 이것이다.
 
-- [ ] **Step 2: 호스팅 다이얼로그에 탈출구를 넣는다**
+- [x] **Step 2: 호스팅 다이얼로그에 탈출구를 넣는다**
 
 **같은 파일이다.** 오늘 실제로 갇힌 그 다이얼로그는 `owned` 페이지가 아니라
 `WelcomeSetup.tsx:321`이 `isHostedSignInOpen`으로 띄우는 것이다. 그래서
@@ -264,7 +284,7 @@ the relay"이고 그 화면에서 빠져나갈 길이 없는 것이 오늘의 �
 `HostedCommunityOnboarding`에 prop을 더하는 방법도 있으나, 그 파일은
 `onBack`·`onReady`만 받는 upstream 원본이고 굳이 늘릴 이유가 없다.
 
-- [ ] **Step 3: 검증한다**
+- [x] **Step 3: 검증한다**
 
 Run: `cd /Users/kim-yonghun/Development/schoolX_v2.0 && . ./bin/activate-hermit && pnpm --dir desktop typecheck && pnpm --dir desktop check`
 Expected: exit 0
@@ -273,7 +293,7 @@ Run: `cd /Users/kim-yonghun/Development/schoolX_v2.0 && git diff --stat desktop/
 Expected: **10줄 미만이고 이 파일 하나뿐**. `HostedCommunityOnboarding.tsx`가
 diff에 나오면 설계에서 벗어난 것이다.
 
-- [ ] **Step 4: 커밋한다**
+- [x] **Step 4: 커밋한다**
 
 ```bash
 git add desktop/src/features/communities/ui
@@ -289,7 +309,7 @@ git commit -s -m "feat(schoolx-2): 세션 G — 막다른 두 곳에서 자체 �
 - Modify: `desktop/playwright.config.ts`
 - Modify: `docs/schoolx-2/{IMPLEMENTATION_HANDOFF,BASELINE}.md`, `CONTRIBUTING.md`
 
-- [ ] **Step 1: 스펙을 쓴다**
+- [x] **Step 1: 스펙을 쓴다**
 
 ```ts
 import { expect, test } from "@playwright/test";
@@ -345,7 +365,7 @@ test("the hosted dialog has a way out to a self-hosted relay", async ({
 동작하지 않으면 `skipOnboardingSeed`와 조합하거나, 기존 `onboarding.spec.ts`가
 그 화면에 도달하는 방식을 그대로 따른다.
 
-- [ ] **Step 2: 스펙을 등록하고 돌린다**
+- [x] **Step 2: 스펙을 등록하고 돌린다**
 
 `playwright.config.ts`의 `smoke` `testMatch`에 더한다.
 
@@ -356,13 +376,13 @@ test("the hosted dialog has a way out to a self-hosted relay", async ({
 Run: `cd /Users/kim-yonghun/Development/schoolX_v2.0/desktop && . ../bin/activate-hermit && pnpm test:e2e:smoke self-hosted-onboarding`
 Expected: 2 passed
 
-- [ ] **Step 3: 판별력을 실증한다**
+- [x] **Step 3: 판별력을 실증한다**
 
 `WelcomeSetup.tsx`의 렌더 한 줄을 임시로 지우고 첫 테스트가 실패하는지 확인한
 뒤 되돌린다. 두 번째도 `HostedCommunityOnboarding.tsx` 쪽으로 같게 한다.
 보고서에 적는다.
 
-- [ ] **Step 4: 사람이 안내만 보고 들어간다**
+- [x] **Step 4: 사람이 안내만 보고 들어간다**
 
 **이 작업의 진짜 완료 기준이다.** `just dev`로 앱을 띄우고, 소스를 보지 않은
 상태로 화면 문구만 따라 `ws://localhost:3000`까지 도달한다. 도달하지 못하면
@@ -370,7 +390,7 @@ Expected: 2 passed
 
 경로 둘 다 확인한다: `existing` → 카드, 그리고 호스팅 다이얼로그 → 링크.
 
-- [ ] **Step 5: 문서를 갱신한다**
+- [x] **Step 5: 문서를 갱신한다**
 
 - `CONTRIBUTING.md`의 「Getting into the app against your local relay」를
   고친다 — 이제 우회로 설명이 아니라 **화면 안내**를 따라가면 된다. 다만
@@ -379,13 +399,13 @@ Expected: 2 passed
   항목을 빼고, 세션 G 절을 A·B·D·D2·D3·E1 형식으로 더한다.
 - `BASELINE.md`에 게이트 실행 기록을 더한다.
 
-- [ ] **Step 6: 전체 게이트를 돌린다**
+- [x] **Step 6: 전체 게이트를 돌린다**
 
 구성 레시피 14개를 하나씩 포그라운드로 돌린다. **한 셸 루프에 여섯 개를 묶으면
 10분 한도에 걸린다**(세션 D3 기록). 이어서 `just schoolx-upstream-check` 3/3과
 `pnpm test:e2e:smoke workspace-catalog` 5/5 회귀.
 
-- [ ] **Step 7: 커밋한다**
+- [x] **Step 7: 커밋한다**
 
 ```bash
 git add desktop/tests desktop/playwright.config.ts docs/schoolx-2 CONTRIBUTING.md

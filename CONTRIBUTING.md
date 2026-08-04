@@ -176,22 +176,25 @@ just desktop-dev  # terminal 2 — Vite dev server only (no Tauri shell)
 
 ### Getting into the app against your local relay
 
-`just dev` starts the relay, but onboarding does **not** offer a "point me at
-my own relay" door. Of the three choices on *Join or create a community*, two
-(`Create a community`, `I already have a community → I own it`) open the
-Builderlab hosted sign-in, and the rest expect an invite code — which only an
-existing owner or admin can mint (`POST /api/invites`, NIP-98 signed, no
-`X-Pubkey` dev fallback). Nothing tells you what to do with a relay you just
-started yourself.
+On the *Join or create a community* screen, take **I already have a
+community** → **I run my own relay**, and enter the address:
 
-The way through is that the invite field also accepts a bare relay URL
-(`normalizeRelayUrl` in `features/communities/relayProbe.ts`; `canSubmit` is
-true on a relay URL alone):
+```text
+ws://localhost:3000
+```
 
-1. **Join a community**
-2. Type `ws://localhost:3000` and submit — no invite code needed.
+`http://` and `https://` work too and are normalized to `ws://`/`wss://`. No
+invite code is involved — the relay's `RELAY_OWNER_PUBKEY` (below) is already
+an owner.
 
-`http://` and `https://` are accepted too and normalized to `ws://`/`wss://`.
+If you took **Create a community** and landed in the Builderlab sign-in
+dialog, *Running your own relay?* at the bottom of that dialog gets you to the
+same place.
+
+> Before this door existed, both routes a self-hoster naturally picks led to
+> hosted sign-in, and the two that did work were labelled "join with an
+> invite" and "I'm a member" — see
+> `docs/schoolx-2/SELF_HOSTED_ONBOARDING.md`.
 
 ### Running with relay membership enforced
 

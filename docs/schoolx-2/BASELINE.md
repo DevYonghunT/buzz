@@ -483,6 +483,79 @@ SchoolX 워크스페이스 → 두 항목 적용. 판정은 화면이 아니라 
 파일만 훑으므로 이 421줄을 보지 못한다 — 「전체 트리 스캔은 이 범위 밖에서
 실패한다」로 이미 적어 둔 성질이 무엇을 가리고 있었는지가 이번에 구체화됐다.
 
+### 세션 G (2026-08-05, 자체 호스팅 온보딩)
+
+**이번 실행의 소요 시간은 기록하지 않는다.** 측정 중 머신이 과부하였다 —
+프로세스 1,251개, 부하 평균 315. 상위 소비자는 이 저장소 작업이 아니었고
+(`desktop-test`가 평소 2–5분에서 10분 초과, `desktop-tauri-test`가 426초),
+그 시간을 세션 D2·D3 표와 나란히 두면 회귀처럼 읽힌다. **exit 코드와 통과
+수만 남긴다.**
+
+| command | exit | passed |
+|---|---:|---|
+| `just fmt-check` | 0 | - |
+| `just clippy` | 0 | - |
+| `just desktop-check` | 0 | - |
+| `just desktop-tauri-fmt-check` | 0 | - |
+| `just web-check` | 0 | - |
+| `just mobile-check` | 0 | - |
+| `just desktop-tauri-clippy` | 0 | - |
+| `just test-unit` | 0 | 6 suites, `schoolx-catalog` 85/0 |
+| `just desktop-test` | 0 | 3,929 / 0 fail / 0 skip |
+| `just desktop-build` | 0 | - |
+| `just web-build` | 0 | - |
+| `just desktop-tauri-check` | 0 | - |
+| `just desktop-tauri-test` | 0 | 2,077 / 0 fail / 14 ignored |
+| `just mobile-test` | 0 | 1,022 / 1 skipped |
+| `just schoolx-upstream-check` | 0 | 3/3, 범위 315개 파일 |
+| `just test-e2e e2e_workspace_catalog` | 0 | 5 |
+| `just test-e2e e2e_access_matrix` | 0 | **17** — 세션 A 계약 유지 |
+| `pnpm test:e2e:smoke workspace-catalog self-hosted-onboarding` | 0 | **7** (5 + 신규 2) |
+
+#### `.env`에 멤버십을 켜 두면 E2E가 통째로 깨진다
+
+세션 D3의 앱 검증을 위해 `.env`에
+`BUZZ_REQUIRE_RELAY_MEMBERSHIP=true`·`RELAY_OWNER_PUBKEY`·`BUZZ_RELAY_PRIVATE_KEY`
+셋을 넣어 뒀는데, 이번 회귀에서 `e2e_workspace_catalog` 5개가 **전부** 0.24초
+만에 실패했다.
+
+```text
+channel creation not accepted (private):
+{"error":"relay_membership_required","message":"You must be a relay member to access this relay"}
+```
+
+`just`는 `set dotenv-load := true`라 `.env`를 **모든 레시피**에 먹인다.
+`just test-e2e`가 띄우는 릴레이도 멤버십을 강제하게 되고, 매번 새
+`Keys::generate()`로 채널을 만드는 스위트들은 전부 비회원이라 거부된다.
+**회귀가 아니라 환경 오염이었고, 증상만 보면 구별되지 않는다** — 즉시
+전멸하는 실패는 제품 결함보다 환경을 먼저 의심할 신호다.
+
+그래서 `.env`의 세 줄을 **주석으로 되돌리고** 사용법을 그 자리에 적었다. 앱
+검증이 필요할 때만 그 실행에 얹는다:
+
+```bash
+BUZZ_REQUIRE_RELAY_MEMBERSHIP=true \
+RELAY_OWNER_PUBKEY=<앱이 첫 실행에 찍는 pubkey> \
+BUZZ_RELAY_PRIVATE_KEY=<고정 키> just dev
+```
+
+**멤버십을 켠 릴레이는 E2E와 공존할 수 없다**는 것이 이번에 확인된 사실이다.
+`just test-e2e`는 열린 릴레이를 전제한다.
+
+#### 온보딩 스펙이 사람보다 먼저 가림을 잡았다
+
+자체 호스팅 탈출구를 호스팅 다이얼로그 **밖에** `fixed`로 배치했더니
+`toBeVisible()`은 통과하고 `click()`이 타임아웃 났다 — 오버레이의 블러에
+묻히고 포인터도 가로채인 상태다. 스크린샷으로 확인하니 링크가 화면에 아예
+읽히지 않았다.
+
+**존재 단언만으로는 이 상태를 잡지 못한다.** 다이얼로그 위에 무언가를 얹어야
+하면 그 다이얼로그의 자식이어야 하고, 그래서 설계가 원래 잡았던 대로
+`HostedCommunityOnboarding.tsx`도 건드리게 됐다(줄이려던 최적화가 틀렸다).
+
+판별력: 두 진입점의 `data-testid`를 하나씩 깨면 대응하는 테스트 하나씩만
+실패한다.
+
 ### 검증되지 않은 첫 실행과 그 원인
 
 첫 실행에서 `cargo test --manifest-path desktop/src-tauri/Cargo.toml`이
