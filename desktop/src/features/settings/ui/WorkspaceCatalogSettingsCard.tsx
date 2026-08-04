@@ -327,7 +327,10 @@ function CatalogItemRow({
             </p>
           ) : null}
           {item.renamed ? (
-            <p className="text-2xs text-muted-foreground">
+            <p
+              className="text-2xs text-muted-foreground"
+              data-testid={`catalog-renamed-${item.item_key}`}
+            >
               {t("catalog.renamed")}
             </p>
           ) : null}

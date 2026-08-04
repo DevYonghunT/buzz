@@ -51,6 +51,7 @@ export default defineConfig({
         "**/welcome-agent-modal-screenshots.spec.ts",
         "**/local-archive-screenshots.spec.ts",
         "**/voice-settings.spec.ts",
+        "**/workspace-catalog.spec.ts",
         "**/agent-readiness-screenshots.spec.ts",
         "**/agent-error-state-screenshots.spec.ts",
         "**/edit-agent.spec.ts",

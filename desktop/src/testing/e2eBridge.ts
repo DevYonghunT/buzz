@@ -14,6 +14,10 @@ import { relayClient } from "@/shared/api/relayClient";
 import { activateRateLimit } from "@/shared/api/relayRateLimitGate";
 import type { ConnectionState } from "@/shared/api/relayClientShared";
 import type { ChannelTemplate, RelayEvent } from "@/shared/api/types";
+import type {
+  CatalogLedger,
+  CatalogPreflightItem,
+} from "@/shared/api/tauriWorkspaceCatalog";
 import { getMarkdownParseCount } from "@/shared/ui/markdown/nodeCache";
 import { syncAgentTurnsFromEvents } from "@/features/agents/activeAgentTurnsStore";
 import { recordTimeoutFromRejection } from "@/features/moderation/lib/timeoutStore";
@@ -291,6 +295,19 @@ type E2eConfig = {
     deepHistoryMessageCount?: number;
     feedReadError?: string;
     canvasReadError?: string;
+    /** Items `preflight_workspace_catalog` returns. Defaults to none. */
+    workspaceCatalogPreflight?: CatalogPreflightItem[];
+    /** Ledger `apply_workspace_catalog` returns. Defaults to an empty run. */
+    workspaceCatalogLedger?: CatalogLedger;
+    /**
+     * Reject `preflight_workspace_catalog` with this string.
+     *
+     * Needed to paint either gate refusal (`catalog-admin-required`,
+     * `catalog-membership-unavailable`): the card tells them apart by the
+     * error *string*, not by a status code
+     * (`features/workspace-catalog/catalogError.ts`).
+     */
+    workspaceCatalogPreflightError?: string;
     /** Delay (ms) for `apply_workspace` so e2e tests can observe the
      *  community-switch gate. 0/undefined = instant. */
     applyCommunityDelayMs?: number;
@@ -10471,6 +10488,22 @@ export function maybeInstallE2eTauriMocks() {
         return;
       case "fetch_join_policy":
         return activeConfig?.mock?.joinPolicy ?? null;
+      case "preflight_workspace_catalog": {
+        const refusal = activeConfig?.mock?.workspaceCatalogPreflightError;
+        // `invokeTauri` rejects with the command's bare `Err(String)`, and the
+        // card matches on that string. Rejecting with a string here rather
+        // than an `Error` keeps the mock on the same shape as the real IPC.
+        if (refusal) return Promise.reject(refusal);
+        return activeConfig?.mock?.workspaceCatalogPreflight ?? [];
+      }
+      case "apply_workspace_catalog":
+        return (
+          activeConfig?.mock?.workspaceCatalogLedger ?? {
+            catalog_id: "schoolx.default",
+            catalog_version: 1,
+            items: [],
+          }
+        );
       case "apply_workspace": {
         const applyDelayMs = activeConfig?.mock?.applyCommunityDelayMs ?? 0;
         if (applyDelayMs > 0) {

@@ -278,6 +278,12 @@ type MockBridgeOptions = {
   deepHistoryMessageCount?: number;
   feedReadError?: string;
   canvasReadError?: string;
+  /** Items `preflight_workspace_catalog` returns; see e2eBridge mock config. */
+  workspaceCatalogPreflight?: unknown[];
+  /** Ledger `apply_workspace_catalog` returns; see e2eBridge mock config. */
+  workspaceCatalogLedger?: unknown;
+  /** Reject `preflight_workspace_catalog` with this string. */
+  workspaceCatalogPreflightError?: string;
   /** Delay (ms) for `apply_workspace`; see e2eBridge mock config. */
   applyCommunityDelayMs?: number;
   openDmDelayMs?: number;
