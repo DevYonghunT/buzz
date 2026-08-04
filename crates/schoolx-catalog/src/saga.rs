@@ -83,6 +83,7 @@ async fn apply_item(
         steps: StepStates::default(),
         outcome: Outcome::Blocked,
         user_action: Some(action),
+        renamed: plan.renamed,
         error: None,
     };
 
@@ -105,6 +106,7 @@ async fn apply_item(
                 steps: plan.steps,
                 outcome: Outcome::Unchanged,
                 user_action: None,
+                renamed: plan.renamed,
                 error: None,
             };
         }
@@ -175,6 +177,7 @@ async fn apply_item(
                     steps: provenance.steps,
                     outcome: Outcome::Blocked,
                     user_action: Some(UserAction::ConfirmRecreate),
+                    renamed: plan.renamed,
                     error: None,
                 };
             }
@@ -242,6 +245,7 @@ async fn apply_item(
                     steps: provenance.steps,
                     outcome: Outcome::Blocked,
                     user_action: Some(UserAction::RequestOwnership),
+                    renamed: plan.renamed,
                     error: None,
                 };
             }
@@ -363,6 +367,7 @@ async fn apply_item(
             Outcome::Partial
         },
         user_action,
+        renamed: plan.renamed,
         error,
     }
 }
@@ -672,6 +677,39 @@ mod tests {
             fx.canvases.lock().expect("lock").get(&channel_id),
             Some(&canvas_of("meeting").to_string())
         );
+    }
+
+    /// 이름이 바뀐 사실이 preflight에서 ledger까지 살아 온다.
+    ///
+    /// preflight 쪽은 `rename_is_a_flag_not_a_decision`과
+    /// `renamed_complete_item_is_no_change`가 이미 덮는다. 여기서 보는 것은
+    /// 그 값이 **ledger에도 실리는가**다 — §7이 요구했으나 세션 D가 넘긴
+    /// 부분이고, `LedgerItem::name`은 언제나 catalog 표시 이름이라(§10)
+    /// ledger만 읽는 소비자에게는 이 플래그가 유일한 단서다.
+    #[tokio::test]
+    async fn renamed_survives_into_the_ledger() {
+        let fx = FakeEffects::new();
+        apply(crate::builtin(), &fx, &["meeting".to_string()])
+            .await
+            .expect("first apply");
+
+        // 팀이 방 이름을 바꿨다. 항목은 이미 완료라 판정은 `no_change`로
+        // 남는다 — `renamed`는 판정이 아니라 플래그이기 때문이다.
+        fx.channels.lock().expect("lock")[0].name = "월요 정례".into();
+
+        let ledger = apply(crate::builtin(), &fx, &["meeting".to_string()])
+            .await
+            .expect("second apply");
+
+        let entry = item(&ledger, "meeting");
+        assert_eq!(entry.decision, "no_change");
+        assert!(
+            entry.renamed,
+            "이름이 바뀐 방인데 ledger가 그 사실을 싣지 않았다"
+        );
+        // 그리고 `name`은 여전히 catalog 표시 이름이다. 이 둘이 함께여야
+        // 소비자가 "표시 이름은 이것이고 실제 이름은 다르다"를 알 수 있다.
+        assert_eq!(entry.name.as_deref(), Some("메인 회의방"));
     }
 
     /// owner 확인이 relay 오류로 실패하면 `applied`가 아니다. 재시도가 그
@@ -1715,6 +1753,7 @@ mod tests {
                     },
                     outcome: Outcome::Applied,
                     user_action: None,
+                    renamed: false,
                     error: None,
                 },
                 LedgerItem {
@@ -1730,6 +1769,7 @@ mod tests {
                     },
                     outcome: Outcome::Partial,
                     user_action: None,
+                    renamed: false,
                     error: Some("캔버스 적용 실패".into()),
                 },
                 LedgerItem {
@@ -1741,6 +1781,7 @@ mod tests {
                     steps: StepStates::default(),
                     outcome: Outcome::Blocked,
                     user_action: Some(UserAction::ConfirmRecreate),
+                    renamed: false,
                     error: None,
                 },
                 LedgerItem {
@@ -1752,6 +1793,7 @@ mod tests {
                     steps: StepStates::default(),
                     outcome: Outcome::Blocked,
                     user_action: Some(UserAction::ResolveConflict),
+                    renamed: false,
                     error: None,
                 },
                 LedgerItem {
@@ -1767,6 +1809,7 @@ mod tests {
                     },
                     outcome: Outcome::Unchanged,
                     user_action: None,
+                    renamed: false,
                     error: None,
                 },
                 LedgerItem {
@@ -1782,6 +1825,7 @@ mod tests {
                     },
                     outcome: Outcome::Applied,
                     user_action: None,
+                    renamed: true,
                     error: None,
                 },
                 LedgerItem {
@@ -1793,6 +1837,7 @@ mod tests {
                     steps: StepStates::default(),
                     outcome: Outcome::Blocked,
                     user_action: Some(UserAction::RequestOwnership),
+                    renamed: false,
                     error: None,
                 },
                 // 캔버스에 이미 내용이 있어 쓰지 않은 항목. `applied`인데
@@ -1811,6 +1856,7 @@ mod tests {
                     },
                     outcome: Outcome::Applied,
                     user_action: None,
+                    renamed: false,
                     error: None,
                 },
                 // catalog에서 빠진 항목. `name`이 `null`인 유일한 자리이고,
@@ -1831,6 +1877,7 @@ mod tests {
                     },
                     outcome: Outcome::Unchanged,
                     user_action: None,
+                    renamed: false,
                     error: None,
                 },
             ],
@@ -1850,6 +1897,7 @@ mod tests {
                     "steps": { "channel": "done", "canvas": "done", "membership": "done" },
                     "outcome": "applied",
                     "user_action": null,
+                    "renamed": false,
                     "error": null
                 },
                 {
@@ -1861,6 +1909,7 @@ mod tests {
                     "steps": { "channel": "done", "canvas": "failed", "membership": "pending" },
                     "outcome": "partial",
                     "user_action": null,
+                    "renamed": false,
                     "error": "캔버스 적용 실패"
                 },
                 {
@@ -1872,6 +1921,7 @@ mod tests {
                     "steps": { "channel": "pending", "canvas": "pending", "membership": "pending" },
                     "outcome": "blocked",
                     "user_action": "confirm_recreate",
+                    "renamed": false,
                     "error": null
                 },
                 {
@@ -1883,6 +1933,7 @@ mod tests {
                     "steps": { "channel": "pending", "canvas": "pending", "membership": "pending" },
                     "outcome": "blocked",
                     "user_action": "resolve_conflict",
+                    "renamed": false,
                     "error": null
                 },
                 {
@@ -1894,6 +1945,7 @@ mod tests {
                     "steps": { "channel": "done", "canvas": "done", "membership": "done" },
                     "outcome": "unchanged",
                     "user_action": null,
+                    "renamed": false,
                     "error": null
                 },
                 {
@@ -1905,6 +1957,7 @@ mod tests {
                     "steps": { "channel": "done", "canvas": "done", "membership": "done" },
                     "outcome": "applied",
                     "user_action": null,
+                    "renamed": true,
                     "error": null
                 },
                 {
@@ -1916,6 +1969,7 @@ mod tests {
                     "steps": { "channel": "pending", "canvas": "pending", "membership": "pending" },
                     "outcome": "blocked",
                     "user_action": "request_ownership",
+                    "renamed": false,
                     "error": null
                 },
                 {
@@ -1927,6 +1981,7 @@ mod tests {
                     "steps": { "channel": "done", "canvas": "skipped", "membership": "done" },
                     "outcome": "applied",
                     "user_action": null,
+                    "renamed": false,
                     "error": null
                 },
                 {
@@ -1938,6 +1993,7 @@ mod tests {
                     "steps": { "channel": "done", "canvas": "done", "membership": "done" },
                     "outcome": "unchanged",
                     "user_action": null,
+                    "renamed": false,
                     "error": null
                 }
             ]

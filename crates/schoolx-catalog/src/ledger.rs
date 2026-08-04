@@ -63,6 +63,17 @@ pub struct LedgerItem {
     pub outcome: Outcome,
     /// 필요한 사용자 조치.
     pub user_action: Option<UserAction>,
+    /// 이 방의 현재 이름이 catalog 표시 이름과 다르다.
+    ///
+    /// [`LedgerItem::name`]은 언제나 catalog가 정한 표시 이름이다 — 그 방의
+    /// 실제 이름이 아니다. 그래서 ledger만 읽는 소비자는 이 플래그 없이는
+    /// `name`이 현재 이름인지 알 방법이 없다. 이름이 바뀐 방은 `adopted`로
+    /// 끝나므로 실제로 도달하는 상태다.
+    ///
+    /// 판정이 아니라 표시용 플래그다 — 이름이 바뀌었다는 사실만으로
+    /// `decision`이 달라지지는 않는다
+    /// ([`crate::preflight::PreflightItem::renamed`]에 그 계약이 있다).
+    pub renamed: bool,
     /// 실패 사유.
     pub error: Option<String>,
 }

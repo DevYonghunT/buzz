@@ -91,6 +91,14 @@ export type CatalogLedgerItem = {
   steps: CatalogStepStates;
   outcome: CatalogOutcome;
   user_action: CatalogUserAction | null;
+  /**
+   * 이 방의 현재 이름이 catalog 표시 이름과 다르다. `name`은 언제나 catalog
+   * 표시 이름이므로 ledger만 읽는 소비자에게는 이 값이 유일한 단서다.
+   *
+   * 카드는 이 값을 쓰지 않는다 — 카드의 각 행은 preflight 항목을 쥐고 있고
+   * 거기의 `renamed`로 이미 배지를 그린다. 같은 사실을 두 번 그리지 않는다.
+   */
+  renamed: boolean;
   error: string | null;
 };
 
