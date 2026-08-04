@@ -375,7 +375,10 @@ async fn apply_item(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::catalog::Visibility;
+    // `Catalog`는 `use super::*`가 이미 들여온다 — saga가 시그니처에 쓰기
+    // 때문이다. `CatalogItem`은 프로덕션 코드가 직접 짓지 않아 여기서만
+    // 필요하다.
+    use crate::catalog::{CatalogItem, Visibility};
     use crate::effects::fake::{FakeEffects, FAKE_ME};
     use crate::effects::ChannelRef;
     use crate::ledger::Outcome;
@@ -710,6 +713,90 @@ mod tests {
         // 그리고 `name`은 여전히 catalog 표시 이름이다. 이 둘이 함께여야
         // 소비자가 "표시 이름은 이것이고 실제 이름은 다르다"를 알 수 있다.
         assert_eq!(entry.name.as_deref(), Some("메인 회의방"));
+    }
+
+    /// v1과 같은 `catalog_id`·`item_key`를 쓰되 버전과 본문이 다른 catalog.
+    ///
+    /// upgrade가 실제로 무엇을 하는지 보려면 v2가 **다른 캔버스**를 들고
+    /// 와야 한다 — 같은 내용이면 덮어썼는지 아닌지 구별되지 않는다.
+    fn catalog_v2() -> Catalog {
+        Catalog {
+            catalog_id: "schoolx.default".into(),
+            catalog_version: 2,
+            items: vec![CatalogItem {
+                item_key: "meeting".into(),
+                name: "메인 회의방".into(),
+                description: "v2 설명".into(),
+                channel_type: "stream".into(),
+                visibility: Visibility::Private,
+                canvas: "v2 시작 캔버스".into(),
+            }],
+        }
+    }
+
+    /// 이미 적용된 v1 위에 v2를 돌려도 같은 방을 이어 쓰고 캔버스를 다시
+    /// 쓰지 않는다.
+    ///
+    /// `catalog_version`은 `Provenance`와 `Ledger`에 기록되지만 판정에서는
+    /// 읽히지 않는다. preflight는 `item_key` 존재와 단계 완료도로만 판정하고,
+    /// 채널 ID 도출식은 버전을 입력에서 **제외한다**(`channel_id.rs`) — 그래서
+    /// v2를 v1 위에 돌리는 것은 v1을 다시 돌리는 것과 같다. 세션 D는 그
+    /// 동작이 옳다고 판단했지만 확인하는 테스트를 남기지 않았다.
+    ///
+    /// **이 테스트가 단독으로 지키는 것은 채널 동일성이다.** 도출식 입력에
+    /// 버전이 섞이면 upgrade가 "같은 방을 이어 쓴다"에서 "버전마다 새 방을
+    /// 만든다"로 조용히 바뀌는데, 버전이 다를 때만 무는 형태로 그것을
+    /// 주입하면 이 크레이트에서 실패하는 테스트는 이것 하나다.
+    ///
+    /// 캔버스 단언은 그렇지 않다 — 여기서는 판정이 `no_change`라 saga가
+    /// 캔버스 단계에 **도달하기 전에** 반환한다. 두 캔버스 가드
+    /// (`is_settled()` 단락과 내용 검사)를 둘 다 열어도 이 테스트는 초록으로
+    /// 남고, 대신 `adoption_does_not_overwrite_a_canvas_that_has_content`
+    /// 계열 여섯 개가 실패한다. 그래도 단언을 두는 이유는 upgrade의 **결과
+    /// 상태**를 문서로 남기고, 훗날 v2가 단계를 다시 실행하도록 바뀌면 그때
+    /// 이 자리에서 걸리게 하기 위해서다.
+    #[tokio::test]
+    async fn catalog_v2_over_applied_v1_does_not_touch_the_canvas() {
+        let fx = FakeEffects::new();
+        let first = apply(crate::builtin(), &fx, &["meeting".to_string()])
+            .await
+            .expect("v1 apply");
+        let channel_id = item(&first, "meeting").channel_id.expect("channel id");
+
+        // 팀이 시작 캔버스를 자기 내용으로 바꿨다. `seed_canvas`를 쓴다 —
+        // `set_canvas`를 부르면 호출 횟수가 올라가 아래 단언이 의미를 잃는다.
+        fx.seed_canvas(channel_id, "팀이 직접 쓴 회의록");
+        let writes_before = fx.call_count("set_canvas");
+
+        let ledger = apply(&catalog_v2(), &fx, &["meeting".to_string()])
+            .await
+            .expect("v2 apply");
+
+        // ledger는 v2를 돌렸다고 적는다.
+        assert_eq!(ledger.catalog_version, 2);
+        // 그런데 방은 같은 방이다 — 도출식이 버전을 입력에서 뺐기 때문이다.
+        assert_eq!(item(&ledger, "meeting").channel_id, Some(channel_id));
+        assert_eq!(
+            fx.channels.lock().expect("lock").len(),
+            1,
+            "v2가 새 방을 만들었다 — 도출식이 버전을 입력에 넣었을 때의 모양이다"
+        );
+        // 그리고 아무것도 다시 쓰지 않았다.
+        assert_eq!(item(&ledger, "meeting").outcome, Outcome::Unchanged);
+        assert_eq!(
+            fx.call_count("set_canvas"),
+            writes_before,
+            "v2 upgrade가 캔버스를 다시 썼다"
+        );
+        assert_eq!(
+            fx.canvases
+                .lock()
+                .expect("lock")
+                .get(&channel_id)
+                .map(String::as_str),
+            Some("팀이 직접 쓴 회의록"),
+            "팀이 쓴 내용이 v2 캔버스로 덮였다"
+        );
     }
 
     /// owner 확인이 relay 오류로 실패하면 `applied`가 아니다. 재시도가 그
