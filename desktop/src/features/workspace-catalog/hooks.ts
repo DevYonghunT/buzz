@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   applyWorkspaceCatalog,
+  type CatalogSelection,
   preflightWorkspaceCatalog,
 } from "@/shared/api/tauriWorkspaceCatalog";
 import { isCatalogGateRefusalError } from "./catalogError";
@@ -36,7 +37,8 @@ export function useApplyWorkspaceCatalogMutation() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (selected: string[]) => applyWorkspaceCatalog(selected),
+    mutationFn: (selected: CatalogSelection[]) =>
+      applyWorkspaceCatalog(selected),
     onSettled: async () => {
       await queryClient.invalidateQueries({
         queryKey: workspaceCatalogPreflightQueryKey,

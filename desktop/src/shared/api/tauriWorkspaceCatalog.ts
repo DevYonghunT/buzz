@@ -114,8 +114,25 @@ export async function preflightWorkspaceCatalog(): Promise<
   return invokeTauri<CatalogPreflightItem[]>("preflight_workspace_catalog");
 }
 
+/**
+ * 적용할 항목 하나.
+ *
+ * `recreate_from`은 「이 세대가 막힌 것을 **보았다**」는 뜻이다. 백엔드는
+ * preflight가 지금 보고하는 세대가 그 값과 같을 때만 한 칸 올린다
+ * (`crates/schoolx-catalog/src/saga.rs`의 `Selection`) — 그 일치 검사가
+ * 화면이 낡았거나 다른 관리자가 이미 처리한 경우를 걸러내고, 같은 요청을 두
+ * 번 내도 세대가 한 번만 오르게 한다. 그래서 여기서 보내는 값은 **화면이
+ * 보여준 값 그대로**여야 하고, 클라이언트가 +1 해서 보내면 안 된다.
+ *
+ * `null`이면 평소 적용이다. Rust 쪽 `Option<u32>`와 맞는다.
+ */
+export type CatalogSelection = {
+  item_key: string;
+  recreate_from: number | null;
+};
+
 export async function applyWorkspaceCatalog(
-  selected: string[],
+  selected: CatalogSelection[],
 ): Promise<CatalogLedger> {
   return invokeTauri<CatalogLedger>("apply_workspace_catalog", { selected });
 }

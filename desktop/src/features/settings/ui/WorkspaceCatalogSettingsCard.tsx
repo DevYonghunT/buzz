@@ -17,6 +17,7 @@ import type {
   CatalogOutcome,
   CatalogPreflightItem,
   CatalogStepStatus,
+  CatalogUserAction,
 } from "@/shared/api/tauriWorkspaceCatalog";
 import { cn } from "@/shared/lib/cn";
 import { Alert, AlertDescription } from "@/shared/ui/alert";
@@ -37,6 +38,25 @@ import { SettingsSectionHeader } from "./SettingsSectionHeader";
  * and is how they discover the blocker.
  */
 const LOCKED_DECISIONS = new Set<CatalogDecision>(["no_change", "retired"]);
+
+/**
+ * The two `user_action`s that "create it again" can answer.
+ *
+ * `resolve_conflict` is deliberately absent: that item is blocked by a
+ * same-named room the catalog did not create, and moving to the next
+ * generation would leave that room in place while adding a second one — the
+ * conflict is what the administrator has to resolve, not route around.
+ *
+ * The two included cases are not equal. `confirm_recreate` has exactly one
+ * sensible answer, so the button is the primary control. `request_ownership`
+ * cannot tell a squatted derived id apart from an ordinary co-administrator's
+ * room (`CATALOG_RECREATE.md` §4), so there the button is secondary and the
+ * consequence is spelled out first.
+ */
+const RECREATABLE_ACTIONS = new Set<CatalogUserAction>([
+  "confirm_recreate",
+  "request_ownership",
+]);
 
 type BadgeVariant = NonNullable<BadgeProps["variant"]>;
 
@@ -169,12 +189,37 @@ export function WorkspaceCatalogSettingsCard() {
   }
 
   function handleApply() {
-    apply.mutate([...selected], {
-      onSuccess: (result) => {
-        setLedger(result);
-        setSelected(new Set());
+    apply.mutate(
+      [...selected].map((item_key) => ({ item_key, recreate_from: null })),
+      {
+        onSuccess: (result) => {
+          setLedger(result);
+          setSelected(new Set());
+        },
       },
-    });
+    );
+  }
+
+  /**
+   * "Create it again" for an item the last run could not touch.
+   *
+   * Sends back the generation the user was **shown**, not that plus one. The
+   * backend only moves when its own preflight still reports that same
+   * generation (`Selection::recreate_from` in `saga.rs`), which is what makes
+   * a stale screen — or a second click, or another administrator who already
+   * handled it — a no-op instead of an extra room. Incrementing here would
+   * defeat that check.
+   *
+   * The selection checkboxes are left alone: this acts on one item and is not
+   * the bulk "apply selected" path.
+   */
+  function handleRecreate(entry: CatalogLedgerItem) {
+    apply.mutate(
+      [{ item_key: entry.item_key, recreate_from: entry.generation }],
+      {
+        onSuccess: (result) => setLedger(result),
+      },
+    );
   }
 
   return (
@@ -233,7 +278,9 @@ export function WorkspaceCatalogSettingsCard() {
                 (entry) => entry.item_key === item.item_key,
               )}
               locked={LOCKED_DECISIONS.has(item.decision)}
+              onRecreate={handleRecreate}
               onToggle={toggle}
+              pending={apply.isPending}
               selected={selected.has(item.item_key)}
             />
           ))}
@@ -270,13 +317,18 @@ function CatalogItemRow({
   item,
   ledgerItem,
   locked,
+  onRecreate,
   onToggle,
+  pending,
   selected,
 }: {
   item: CatalogPreflightItem;
   ledgerItem: CatalogLedgerItem | undefined;
   locked: boolean;
+  onRecreate: (entry: CatalogLedgerItem) => void;
   onToggle: (item: CatalogPreflightItem) => void;
+  /** An apply (or recreate) is in flight — every row's button waits it out. */
+  pending: boolean;
   selected: boolean;
 }) {
   const { t } = useTranslation();
@@ -378,8 +430,39 @@ function CatalogItemRow({
               className="border-amber-500/30 bg-amber-500/10"
               data-testid={`catalog-user-action-${item.item_key}`}
             >
-              <AlertDescription className="text-amber-800 dark:text-amber-300">
-                {t(`catalog.userAction.${ledgerItem.user_action}`)}
+              <AlertDescription className="space-y-2 text-amber-800 dark:text-amber-300">
+                <p>{t(`catalog.userAction.${ledgerItem.user_action}`)}</p>
+                {/*
+                  `request_ownership` keeps "ask the person who made it" as its
+                  first line; the button below is the secondary way out, for
+                  the case where that person does not exist because the derived
+                  id was squatted. Stating the consequence before the control
+                  is the whole safeguard here — the verdict itself cannot tell
+                  the two situations apart (`CATALOG_RECREATE.md` §4).
+                */}
+                {ledgerItem.user_action === "request_ownership" ? (
+                  <p className="text-xs">
+                    {t("catalog.recreate.ownedByOther")}
+                  </p>
+                ) : null}
+                {RECREATABLE_ACTIONS.has(ledgerItem.user_action) ? (
+                  <Button
+                    data-testid={`catalog-recreate-${item.item_key}`}
+                    disabled={pending}
+                    onClick={() => onRecreate(ledgerItem)}
+                    size="sm"
+                    type="button"
+                    variant={
+                      ledgerItem.user_action === "request_ownership"
+                        ? "ghost"
+                        : "default"
+                    }
+                  >
+                    {pending
+                      ? t("catalog.recreate.pending")
+                      : t("catalog.recreate.action")}
+                  </Button>
+                ) : null}
               </AlertDescription>
             </Alert>
           ) : null}

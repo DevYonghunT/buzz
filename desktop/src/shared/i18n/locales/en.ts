@@ -130,6 +130,15 @@ export const en = {
       request_ownership:
         "This room was created by someone else. Nothing was changed — ask whoever created it to apply this item.",
     },
+    recreate: {
+      action: "Create it again",
+      pending: "Creating…",
+      // Shown only for `request_ownership`. That verdict cannot tell a squatter
+      // apart from an ordinary co-administrator, so the consequence is stated
+      // before the button rather than after.
+      ownedByOther:
+        "Creating it again makes a new, separate room and leaves the existing one alone. Undoing that means deleting the new room yourself.",
+    },
     renamed: "Renamed by a member",
     // Shown instead of a room name for `retired` items: the catalog entry is
     // gone, so no name survives anywhere. The internal key is shown beneath
