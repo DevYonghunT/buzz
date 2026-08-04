@@ -20,6 +20,7 @@ import { useSystemColorScheme } from "@/shared/theme/useSystemColorScheme";
 import { Button } from "@/shared/ui/button";
 import { Card } from "@/shared/ui/card";
 import { StartupWindowDragRegion } from "@/shared/ui/StartupWindowDragRegion";
+import { SelfHostedRelayEntry } from "./SelfHostedRelayEntry";
 
 type WelcomeSetupPage = "welcome" | "existing" | "join" | "member" | "owned";
 type WelcomeTransitionMode = "initial" | OnboardingTransitionDirection;
@@ -218,6 +219,10 @@ export function WelcomeSetup({
                     I’m a member or admin
                   </button>
                 </Card>
+                <SelfHostedRelayEntry
+                  cardClassName={COMMUNITY_OPTION_CARD_CLASS}
+                  onConnect={startConnection}
+                />
               </div>
               <OnboardingFooter>
                 <Button
@@ -327,6 +332,14 @@ export function WelcomeSetup({
               }}
               stageHidden
             />
+          ) : null}
+          {isHostedSignInOpen && page !== "owned" ? (
+            <div className="pointer-events-auto fixed inset-x-0 bottom-8 z-50 flex justify-center">
+              <SelfHostedRelayEntry
+                onConnect={startConnection}
+                variant="link"
+              />
+            </div>
           ) : null}
         </div>
       </OnboardingFooterProvider>

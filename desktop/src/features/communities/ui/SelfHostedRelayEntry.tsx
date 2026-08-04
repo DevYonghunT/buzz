@@ -27,9 +27,19 @@ import {
  * or two, so an upstream sync has almost nothing to conflict with (§3).
  */
 export function SelfHostedRelayEntry({
+  cardClassName,
   onConnect,
   variant = "card",
 }: {
+  /**
+   * Sizing for the `card` variant, so it matches the cards it sits beside.
+   *
+   * Passed in rather than imported: the sibling cards' class lives in an
+   * unexported const inside `WelcomeSetup.tsx`, and importing from upstream
+   * files is exactly the coupling this component exists to avoid. The caller
+   * already spells it on the same render line.
+   */
+  cardClassName?: string;
   /** Relay URL submit. Takes `WelcomeSetup`'s `startConnection` as-is. */
   onConnect: (relayWsUrl: string) => void;
   /**
@@ -46,9 +56,9 @@ export function SelfHostedRelayEntry({
   return (
     <>
       {variant === "card" ? (
-        <Card asChild variant="textured">
+        <Card asChild className={cardClassName} variant="textured">
           <button
-            className="flex w-full flex-col items-start gap-1 p-6 text-left"
+            className="flex w-full flex-col items-start gap-1 text-left"
             data-testid="self-hosted-relay-card"
             onClick={() => setIsOpen(true)}
             type="button"
