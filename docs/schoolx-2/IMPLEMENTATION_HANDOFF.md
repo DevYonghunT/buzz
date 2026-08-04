@@ -112,6 +112,17 @@ Phase 3을 완료로 표시하지 못했다. 세션 E1(catalog 적용 권한)은
   (`desktop/scripts/check-i18n-formatters.mjs`의 `PENDING_CONVERSION`이 목록)
 - 한글 IME 조합, 멘션, 자동완성, 검색 회귀 테스트
 - 나머지 8개 업무방의 이름·설명·시작 canvas·운영 규칙 (낮은 추론 가능)
+- **온보딩에 자체 호스팅 릴레이로 붙는 경로** — 「Join or create a community」의
+  세 갈래 중 둘이 Builderlab 호스팅 로그인으로 가고 나머지는 초대 코드를
+  요구하는데, 초대는 owner/admin만 발행할 수 있어 처음 들어가려면 이미 안에
+  있어야 한다. 초대 입력창이 릴레이 URL도 받는 우회로가 있으나 어디에도
+  안내가 없다. 학교가 자기 릴레이를 돌린다는 전제에서 **파일럿 차단 요인**이다.
+  근거와 재현은 [`BASELINE.md`](BASELINE.md)의 「실제 앱에서의 catalog 적용
+  확인」
+- 앱 전반의 사용자 노출 문구가 아직 "Buzz"다 — `desktop/src` 기준 421줄 /
+  120파일. `just schoolx-upstream-check`의 검사 3은 마지막 동기화 이후 **변경된**
+  파일만 훑어 이것을 보지 못한다. 한국어 번역과 같은 문자열을 건드리므로 함께
+  하는 것이 맞다
 - catalog 적용의 CLI 경로 (`buzz catalog list`는 내장 정의만 출력한다)
 - 도출 채널 ID 선점 **자체** — 세션 D3이 복구 경로를 열었으나 공격자가 다음
   세대를 미리 차지하는 것은 막지 못한다. 닫으려면 도출식에 비공개 salt가

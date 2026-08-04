@@ -174,6 +174,58 @@ just relay        # terminal 1 — relay on ws://localhost:3000
 just desktop-dev  # terminal 2 — Vite dev server only (no Tauri shell)
 ```
 
+### Getting into the app against your local relay
+
+`just dev` starts the relay, but onboarding does **not** offer a "point me at
+my own relay" door. Of the three choices on *Join or create a community*, two
+(`Create a community`, `I already have a community → I own it`) open the
+Builderlab hosted sign-in, and the rest expect an invite code — which only an
+existing owner or admin can mint (`POST /api/invites`, NIP-98 signed, no
+`X-Pubkey` dev fallback). Nothing tells you what to do with a relay you just
+started yourself.
+
+The way through is that the invite field also accepts a bare relay URL
+(`normalizeRelayUrl` in `features/communities/relayProbe.ts`; `canSubmit` is
+true on a relay URL alone):
+
+1. **Join a community**
+2. Type `ws://localhost:3000` and submit — no invite code needed.
+
+`http://` and `https://` are accepted too and normalized to `ws://`/`wss://`.
+
+### Running with relay membership enforced
+
+SchoolX features that check community roles — the workspace catalog is the
+first — need NIP-43 membership turned on. **Three settings are one bundle;
+the relay refuses to start if any is missing**, and each failure only names
+its own variable, so you meet them one at a time unless you set all three up
+front:
+
+| Variable | Why the relay demands it |
+|---|---|
+| `BUZZ_REQUIRE_RELAY_MEMBERSHIP=true` | Turns on role enforcement |
+| `RELAY_OWNER_PUBKEY=<64-char hex>` | Without an owner nobody could administer the relay, so it fails fast rather than starting in a broken state |
+| `BUZZ_RELAY_PRIVATE_KEY=<64-char hex>` | The relay signs the kind:13534 roster; an ephemeral key makes those events unverifiable after a restart |
+
+`RELAY_OWNER_PUBKEY` is bootstrapped into `relay_members` as `owner` on every
+start (`main.rs`, `bootstrap_owner`), so put **your desktop identity's pubkey**
+there and you are an administrator from first connect. The app prints it on
+first run:
+
+```text
+buzz-desktop: imported identity pubkey 4e45e03eb77bb01e95bd3b5081621761b3b63ccfe6f5dbc3232fa1a3d7ab5c28
+```
+
+Generate the relay's own key with `cargo run -p buzz-admin -- generate-key`.
+`just` loads `.env` (`set dotenv-load := true`), so putting the three there
+persists them across runs — and keeping `BUZZ_RELAY_PRIVATE_KEY` stable is the
+point, not an incidental convenience.
+
+Without membership enforced the catalog card still renders but every apply is
+refused with `catalog-membership-unavailable` — an open relay publishes no
+roles at all, and the gate deliberately does not read that absence as
+"unrestricted".
+
 ### Stopping / Resetting
 
 ```bash

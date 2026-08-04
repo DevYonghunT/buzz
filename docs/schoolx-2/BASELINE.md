@@ -418,6 +418,71 @@ command이고 이미 모킹돼 있어 더 헷갈린다.)
 로케일과 무관하게 고쳤다. 세션 D2의 이름 변경 배지와 같은 판단이고, 이제
 이 파일에 문구 단언은 mock이 직접 넣은 `error` 문자열 하나뿐이다.
 
+### 실제 앱에서의 catalog 적용 확인 (2026-08-04, 세션 D3 이후)
+
+세션 D–D3이 만든 것을 **조립된 상태로** 한 번에 태운 첫 실행이다. 지금까지의
+증거는 크레이트 단위 테스트(fake), Tauri 단위 테스트, Playwright(mock bridge),
+relay E2E(테스트 클라이언트)로 나뉘어 있었고 **그 넷을 잇는 경로 —
+실제 앱 → 실제 Tauri 커맨드 → 실제 릴레이 → 실제 Postgres — 는 한 번도 돈 적이
+없었다.**
+
+실행 방법은 `just dev`에 아래 「멤버십 강제」 설정을 얹고, 앱에서 설정 →
+SchoolX 워크스페이스 → 두 항목 적용. 판정은 화면이 아니라 **Postgres 직접
+조회**로 했다 — UI가 그렇게 그린 것과 실제로 그렇게 된 것을 구별하기 위해서다.
+
+| 확인 대상 | 결과 |
+|---|---|
+| 관리자 게이트(세션 E1) | `relay_members`에 `owner`로 부트스트랩 → 카드 정상 동작 |
+| 채널 생성 | `메인 회의방`·`기획`, 둘 다 `private` |
+| 결정론적 채널 ID | `3d23a5aa-fd25-**5**502-…`, `4f53595b-a134-**5**2b2-…` (UUIDv5) |
+| 생성자 기반 채택(§6) | 두 채널의 `created_by`가 적용자 pubkey |
+| 시작 캔버스 | kind 40100에 한국어 본문 기록 |
+| 증명서 | kind 39500 2건, `steps` 3단계 전부 `done`, 각자 자기 도출 채널에 `h` 스코프, 서명자 = 적용자 |
+| **멱등성** | 재적용 시 preflight가 `no_change` → 체크박스 잠김. 채널 271, 증명서 48 **둘 다 불변** |
+
+수치: 적용 전 채널 269 / 증명서 46 → 적용 후 **271 / 48** → 재방문 후에도
+**271 / 48**.
+
+멱등성은 「적용을 두 번 누른다」가 아니라 **preflight 단계에서** 드러났다.
+카드가 릴레이에서 방금 쓴 증명서를 다시 읽어 `no_change`로 판정하고,
+`LOCKED_DECISIONS`가 그 항목의 체크박스를 잠근다. 두 번째 적용이 애초에
+불가능하다는 것이 `second_apply_changes_nothing`보다 한 단계 앞선 증거다.
+
+#### 문서에 없던 실행 조건 셋
+
+전부 실행해 보지 않으면 알 수 없었던 것이고, `CONTRIBUTING.md`에 절차로
+옮겼다.
+
+1. **멤버십 강제는 환경변수 셋이 한 묶음이다.**
+   `BUZZ_REQUIRE_RELAY_MEMBERSHIP` + `RELAY_OWNER_PUBKEY` +
+   `BUZZ_RELAY_PRIVATE_KEY`. 하나라도 빠지면 릴레이가 **기동을 거부한다.**
+   각 오류는 자기 변수만 지목하므로 미리 셋을 다 채우지 않으면 한 번에 하나씩
+   만나게 된다(이번에 실제로 두 번 튕겼다). 셋 다 타당한 가드다 — owner가
+   없으면 아무도 릴레이를 관리할 수 없고, 임시 키로 서명한 kind:13534는
+   재기동 후 검증 불가다.
+2. **온보딩에 자체 릴레이 문이 없다.** 「Join or create a community」의 세
+   갈래 중 `Create a community`와 `I already have a community → I own it`은
+   **둘 다** Builderlab 호스팅 로그인으로 가고(`setIsHostedSignInOpen(true)`),
+   나머지는 초대 코드를 요구한다. 초대는 owner/admin만 발행할 수 있으므로
+   (`api/invites.rs`, NIP-98 필수, `X-Pubkey` 우회 없음) **처음 들어가려면 이미
+   안에 있어야 한다.** 우회로는 초대 입력창이 릴레이 URL도 받는다는 것이다
+   (`canSubmit`이 `normalizedRelayUrl !== null`만으로 참) — 안내는 어디에도
+   없다. 학교가 자기 릴레이를 돌린다는 전제에서 이건 개발 편의가 아니라
+   **파일럿에서 학교마다 부딪히는 제품 공백**이다.
+3. **`~/.schoolx/`가 실제로 쓰인다.** Pocket TTS·STT 모델 캐시가 거기 잡혔다
+   (`~/.schoolx/models/pocket-tts`). 세션 B의 전용 데이터 디렉터리가 동작한다는
+   첫 실행 증거다.
+
+#### 화면에서 함께 드러난 것 — 번역은 구조만 있다
+
+설정 사이드바는 한국어인데(프로필·화면 및 언어·알림…) 본문은 영어다
+("Update how your name, avatar, and bio appear across **Buzz**"). catalog
+카드만 전부 한국어다 — 세션 D·E1이 그 키를 en·ko 양쪽에 넣었기 때문이다.
+`desktop/src`에서 "Buzz"를 담은 줄은 **421줄 / 120파일**이다(테스트·mock
+제외). `just schoolx-upstream-check`의 검사 3은 마지막 동기화 이후 **변경된**
+파일만 훑으므로 이 421줄을 보지 못한다 — 「전체 트리 스캔은 이 범위 밖에서
+실패한다」로 이미 적어 둔 성질이 무엇을 가리고 있었는지가 이번에 구체화됐다.
+
 ### 검증되지 않은 첫 실행과 그 원인
 
 첫 실행에서 `cargo test --manifest-path desktop/src-tauri/Cargo.toml`이
