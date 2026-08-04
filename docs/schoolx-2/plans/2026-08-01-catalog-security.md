@@ -3,7 +3,7 @@
 > **실행 완료 (2026-08-04).** Task 1–6 전부 실행했다. 게이트 결과는
 > [`BASELINE.md`](../BASELINE.md) 세션 E1 절, 결과 서술은
 > [`IMPLEMENTATION_HANDOFF.md`](../IMPLEMENTATION_HANDOFF.md) 세션 E1 절에
-> 있다. **아래 두 곳은 계획대로 하지 않았다** — 계획서는 당시 판단의 기록으로
+> 있다. **아래 세 곳은 계획대로 하지 않았다** — 계획서는 당시 판단의 기록으로
 > 그대로 두고 무엇이 달랐는지만 여기 적는다.
 >
 > 1. **Task 2·3의 근거가 실행 중에 뒤집혔다.** 「`is_owner`에서 `admin`을
@@ -20,6 +20,14 @@
 >    `created_by`가 되었다. 그래서 신규 테스트는 선점자가 피해 관리자에게
 >    **`owner`를 준 뒤에도** 두 값이 모두 선점자를 가리킨다는 것을 함께
 >    고정한다.
+>
+> 3. **Task 5 Step 2의 「섹션에 `featureGate`를 건다」는 뒤집혔다.**
+>    preview 매니페스트(`preview-features.json`)는 opt-in 전용이라 거기 없는
+>    ID는 fail-open이다 — 게이트가 무음 no-op이 된다. 반대로 매니페스트에
+>    넣으면 관리자에게도 preview opt-in을 요구하게 된다. 둘 다 원하는 것이
+>    아니라서 `featureGate`를 떼고 `SettingsView`의 `visibleSections`에
+>    역할 검사를 뒀다(`community-members`와 같은 자리). 근거는
+>    `SettingsPanels.tsx`의 `workspace-catalog` 서술자 주석에 있다.
 >
 > 계획에 없던 것도 하나 있다. 오픈 릴레이(`require_relay_membership=false`,
 > 기본값)에서는 kind 13534가 아예 없어 명부 조회가 항상 비므로, 그것을 권한

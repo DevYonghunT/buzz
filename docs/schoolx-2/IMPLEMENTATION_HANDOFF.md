@@ -25,13 +25,15 @@
 - 현재 상태: 위 작업이 모두 commit·push됨
 - Phase 상태: **Phase 0 완료**, Phase 1 계약 고정 완료(요약 audience 연결 제외),
   Phase 2 i18n 구조 기반 + **제품 설정·브랜딩 완료**(아이콘·업데이트·서명 제외),
-  **Phase 3 미완료** — 완료 기준 7개 중 4개만 증거가 있다 (아래 세션 D)
+  **Phase 3 완료** — 완료 기준 7개 전부에 증거가 있다. 넷은 세션 D가,
+  나머지 셋은 세션 D2가 채웠다 (아래 세션 D의 판정표)
 
 세션 0(기준선), 세션 A(보안 계약), 세션 B(제품 설정과 브랜딩)는 끝났다.
 세션 C는 진행 중이고, 세션 D(워크스페이스 catalog)는 구현과 게이트를 마쳤으나
 Phase 3을 완료로 표시하지 못했다. 세션 E1(catalog 적용 권한)은 세션 D가
-남긴 보안 구멍 둘을 닫았고 **Phase 3 판정은 바꾸지 않는다** — 그 둘은
-완료 기준 7개 중 어디에도 걸려 있지 않았다.
+남긴 보안 구멍 둘을 닫았고 **Phase 3 판정은 바꾸지 않았다** — 그 둘은
+완료 기준 7개 중 어디에도 걸려 있지 않았다. 세션 D2가 세션 D의 「넘긴 것」
+1–3을 닫아 **Phase 3을 완료로 올렸다.**
 
 ### 구현되어 있는 것
 
@@ -89,6 +91,13 @@ Phase 3을 완료로 표시하지 못했다. 세션 E1(catalog 적용 권한)은
   relay-only 강제 — 위 두 항목이 이 불변식 위에 서 있다
 - 권한 없음을 이유와 함께 설명하는 설정 카드(오픈 릴레이의 명부 부재를
   권한 거부로 읽지 않는 구분 포함)
+- ledger에도 실리는 `renamed` — `LedgerItem::name`은 언제나 catalog 표시
+  이름이므로 ledger만 읽는 소비자에게는 이 플래그가 현재 이름과의 불일치를
+  아는 유일한 단서다
+- v2 catalog fixture로 태운 실제 upgrade 경로 — 같은 방을 이어 쓰고 팀이 쓴
+  캔버스를 덮지 않는다
+- 설정 카드의 Playwright 렌더 증거 3종(항목 목록·적용 결과·게이트 거부)과
+  그것을 세우는 mock bridge command 2개
 
 ### 아직 구현 또는 검증되지 않은 것
 
@@ -100,12 +109,9 @@ Phase 3을 완료로 표시하지 못했다. 세션 E1(catalog 적용 권한)은
   (`desktop/scripts/check-i18n-formatters.mjs`의 `PENDING_CONVERSION`이 목록)
 - 한글 IME 조합, 멘션, 자동완성, 검색 회귀 테스트
 - 나머지 8개 업무방의 이름·설명·시작 canvas·운영 규칙 (낮은 추론 가능)
-- 워크스페이스 catalog 설정 카드의 **실행 증거** — 카드를 렌더하는 단위
-  테스트도 Playwright 스펙도 하나도 없다. 소스와 `tsc`까지만 확인됐다
-- 실제 `catalog_version` upgrade 경로 — 버전은 기록만 되고 어디서도 읽히지
-  않는다. v2를 v1 위에 돌리는 테스트가 없다
-- `renamed` 플래그의 ledger 노출 — preflight에만 있다
 - catalog 적용의 CLI 경로 (`buzz catalog list`는 내장 정의만 출력한다)
+- `deleted` 판정의 재생성 컨트롤 — `generation`을 올리는 코드 경로가 크레이트
+  전체에 없어, 재생성을 묻는 문구는 뜨지만 답할 수단이 없다
 - `open` 공개 범위 경고의 도달 경로 — 문구와 자리는 있으나 게이트가 상수
   `false`다
 - 도출 채널 ID 선점의 **약한 형태** — 강한 형태(선점 채널을 피해자가 자기
@@ -402,18 +408,20 @@ Nostr/CLI/protocol 값은 바꾸지 않는다.
 e2e_workspace_catalog` 4 passed, `just schoolx-upstream-check` 3/3 통과.
 실행 기록은 [`BASELINE.md`](BASELINE.md).
 
-**Phase 3은 완료로 표시하지 않는다.** 계획서 Phase 3의 완료 기준 7개 중
-4개만 증거가 있다.
+**Phase 3은 세션 D 시점에 완료로 표시하지 않았다.** 완료 기준 7개 중 4개만
+증거가 있었다. 나머지 셋은 **세션 D2(2026-08-04)에서 닫혔다** — 아래 표의
+「증거」 칸에 그때 더한 것을 함께 적었다. 세션 D 시점의 판정을 보려면 각
+행의 「세션 D 시점」 문장을 읽는다.
 
 | # | 완료 기준 | 판정 | 증거 / 부족한 것 |
 |---:|---|---|---|
 | 1 | 선택한 private 업무방만 생성 | **충족** | `only_selected_items_are_applied` + `builtin_rooms_are_created_private`(fake의 생성 요청 로그를 읽어 항목별 `visibility`·`description`·`channel_type`을 고정) |
 | 2 | 두 번째 적용은 변경 없음 | **충족** | `second_apply_changes_nothing` — 전 항목 `unchanged` + 채널 수 동일 + **발행 횟수 동일** |
-| 3 | 이름을 바꿔도 추적 | **부분** | 추적 자체는 `rename_is_a_flag_not_a_decision`·`renamed_complete_item_is_no_change`로 증명됐다. 그러나 `LedgerItem`에 `renamed`가 없어 §7이 요구한 "ledger에도 표시"가 성립하지 않는다 |
+| 3 | 이름을 바꿔도 추적 | **충족** (D2) | 추적은 `rename_is_a_flag_not_a_decision`·`renamed_complete_item_is_no_change`. §7이 요구한 "ledger에도 표시"는 `LedgerItem::renamed`와 `renamed_survives_into_the_ledger`, golden의 `ops`(`adopted`) 항목이 `true`로 직렬화되는 것까지. **세션 D 시점**: `LedgerItem`에 필드가 없어 부분이었다 |
 | 4 | provenance 없는 동명 채널 자동 채택 금지 | **충족** | `name_conflict_blocks_without_touching_anything` — 채널 수뿐 아니라 `created`·`canvases`·`published` 세 로그가 모두 비었음을 단언한다 |
 | 5 | 단계 실패 후 재시도 | **충족** | 세 단계 모두 fault injection. 채널 커밋 **전**·**후** 실패, 캔버스 쓰기·읽기 실패, owner 확인 실패, 증명서 발행 실패까지 6종 |
-| 6 | upgrade가 사용자 수정본을 덮어쓰지 않음 | **부분** | 되돌릴 수 없는 사고(팀이 쓴 캔버스 덮어쓰기)는 재개·채택 양쪽에서 막히고 테스트가 있다. 그러나 **실제 `catalog_version` upgrade 경로가 없다** |
-| 7 | 상태가 UI와 machine-readable 결과에 표시 | **부분** | machine-readable 절은 `ledger_serializes_for_ui_and_cli`가 어휘 전체를 바이트 단위로 고정해 충족. **UI 절은 실행 증거가 없다** |
+| 6 | upgrade가 사용자 수정본을 덮어쓰지 않음 | **충족** (D2) | 캔버스 보호는 재개·채택 양쪽에 테스트가 있고, 실제 upgrade는 `catalog_v2_over_applied_v1_does_not_touch_the_canvas`가 v2 fixture로 태운다 — 같은 방을 이어 쓰고 팀이 쓴 캔버스가 그대로다. **세션 D 시점**: upgrade를 실제로 돌리는 테스트가 없었다 |
+| 7 | 상태가 UI와 machine-readable 결과에 표시 | **충족** (D2) | machine-readable 절은 `ledger_serializes_for_ui_and_cli`가 어휘 전체를 바이트 단위로 고정. UI 절은 `desktop/tests/e2e/workspace-catalog.spec.ts` 3개 — 항목 목록과 이름 변경 배지, 적용 후 `outcome`·`user_action`·캔버스 note·`error`, 게이트 거부와 적용 버튼 숨김. **세션 D 시점**: 카드를 렌더하는 테스트가 하나도 없었다 |
 
 각 부족분을 닫는 방법은 아래 「세션 D에서 넘긴 것」에 적었다.
 
@@ -478,6 +486,13 @@ e2e_workspace_catalog` 4 passed, `just schoolx-upstream-check` 3/3 통과.
    `data-testid`(`settings-workspace-catalog`, `catalog-apply`,
    `catalog-canvas-note-*`, `catalog-user-action-*`, `catalog-error-*`)는
    이미 붙어 있으므로 스펙 하나로 닫힌다.
+
+   **세션 D2에서 닫혔다.** 다만 "스펙 하나"라는 견적은 틀렸다 — mock
+   bridge에 `preflight_workspace_catalog`·`apply_workspace_catalog` 핸들러가
+   없어서 스펙을 세울 수 있는 상태가 아니었다. 노브 셋(항목·ledger·거부
+   문자열)을 더한 뒤 `desktop/tests/e2e/workspace-catalog.spec.ts` 3개로
+   닫았다. 거부는 문자열로 reject해야 한다 — 카드가 에러 문자열로 두 거부를
+   구별한다.
 2. **`catalog_version` upgrade 경로** (완료 기준 #6). 버전은
    `Provenance`와 `Ledger`에 **기록만 되고 어디서도 읽히지 않는다.**
    preflight는 `item_key` 존재와 단계 완료도로만 판정하므로 v2를 v1 위에
@@ -487,10 +502,25 @@ e2e_workspace_catalog` 4 passed, `just schoolx-upstream-check` 3/3 통과.
    구조로만 보장된다 — `CatalogEffects` trait에 파일시스템 능력이 없어서다.
    닫는 방법: catalog v2 fixture로 "이미 적용된 v1 방에 v2를 돌리면 캔버스가
    그대로다"를 고정한다.
+
+   **세션 D2에서 닫혔다** (`catalog_v2_over_applied_v1_does_not_touch_the_canvas`).
+   그 테스트가 단독으로 지키는 것은 **채널 동일성**이다 — 도출식 입력에
+   버전이 섞이면 upgrade가 "같은 방을 이어 쓴다"에서 "버전마다 새 방"으로
+   바뀌는데, 버전이 다를 때만 무는 형태로 주입하면 크레이트 전체에서 이것
+   하나만 실패한다. 캔버스 단언은 그렇지 않다: 판정이 `no_change`라 saga가
+   캔버스 단계 앞에서 반환하므로, 캔버스 가드를 둘 다 열어도 이 테스트는
+   초록으로 남고 대신 기존 여섯 개가 실패한다.
 3. **`renamed`의 ledger 노출** (완료 기준 #3). `PreflightItem`에만 있고
    `LedgerItem`에는 없다. ledger만 읽는 소비자는 `LedgerItem::name`이 그 방의
    현재 이름이 아닐 수 있다는 사실을 알 방법이 없다. 이름이 바뀐 방은
    `adopted`로 끝나므로 실제로 도달하는 상태다.
+
+   **세션 D2에서 닫혔다.** `LedgerItem::renamed`와
+   `renamed_survives_into_the_ledger`, 그리고 golden의 `ops`(`adopted`)
+   항목이 `true`로 직렬화되는 것까지. 카드는 바꾸지 않았다 — 각 행이 이미
+   preflight 항목의 `renamed`로 배지를 그리므로 같은 사실을 두 번 그리지
+   않는다. 이 필드가 필요한 소비자는 ledger만 읽는 쪽, 즉 아직 없는 CLI
+   적용 경로다.
 4. **나머지 8개 업무방 콘텐츠** — 이름, 설명, 시작 canvas, 운영 규칙,
    snapshot test. 스키마와 적용 API가 고정됐으므로 **낮은 추론**으로 나눌 수
    있다. `open` 항목을 넣으려면 `visibility`를 `PreflightItem` →
@@ -625,6 +655,41 @@ e2e_workspace_catalog` 4 passed, `just schoolx-upstream-check` 3/3 통과.
 운영 규칙, snapshot test만 낮은 추론으로 확장할 수 있다.
 
 </details>
+
+### 세션 D2 — Phase 3 닫기 · **완료 (2026-08-04)**
+
+세션 D 「넘긴 것」 1–3을 닫는 것만이 범위였다. 새 동작은 만들지 않았다 —
+셋 다 **이미 옳게 돌던 것을 관측 가능하게** 만드는 작업이었다. 계획은
+[`plans/2026-08-04-phase3-closure.md`](plans/2026-08-04-phase3-closure.md),
+게이트 실행 기록은 [`BASELINE.md`](BASELINE.md)의 세션 D2 절.
+
+세션 D2에서 확인된 사실 중 다음 셋은 이후 세션이 전제해야 한다.
+
+1. **`Ledger`에 필드를 더하는 것은 `steps`에 값을 더하는 것과 다르다.**
+   세션 D 사실 6번의 "조용한 읽기 쪽 breaking change"는 relay에 저장된
+   provenance의 `steps` 어휘를 **구버전이 읽다** 파싱에 실패하는 경로였다.
+   `Ledger`는 relay에 저장되지 않고 `apply_workspace_catalog`의 반환값으로만
+   살아 생산자와 소비자가 같은 빌드 안에 있다. 버전 skew가 없으므로 필드
+   추가가 조용한 실패를 만들지 않는다. **`steps` 쪽 규칙은 그대로다.**
+2. **`no_change` 판정은 캔버스 단계에 도달하지 않는다.** upgrade 테스트의
+   캔버스 단언이 단독 방어선이 아닌 이유이고, 반대로 캔버스 보호를 바꾸는
+   작업이 upgrade 경로 테스트로는 검증되지 않는다는 뜻이기도 하다. 캔버스
+   가드를 건드리면 `adoption_does_not_overwrite_a_canvas_that_has_content`
+   계열 여섯 개를 봐야 한다.
+3. **mock bridge에 없는 command는 조용히 실패하지 않고 스펙을 세울 수 없게
+   만든다.** 카드가 `data-testid`를 다 갖고 있어도 그것을 그리는 데이터가
+   오지 않으면 스펙을 쓸 수 없다. 새 Tauri command를 더하는 세션은 그
+   command의 mock 핸들러도 함께 더한다 — 그러지 않으면 그 화면은 Playwright
+   범위 밖에 남고, 그 사실은 스펙을 쓰려고 할 때까지 드러나지 않는다.
+
+**세션 D2에서 넘긴 것.** Phase 3은 닫혔지만 catalog 표면에 남은 것이 있다.
+전부 완료 기준 7개 밖이다.
+
+1. `generation` 증가 경로 부재 — `deleted` 판정이 재생성을 묻지만 답할
+   컨트롤이 없다 (세션 D 「넘긴 것」 7번).
+2. 선점의 약한 형태와 위임 실행 요청 흐름 (세션 E1 「넘긴 것」 1·2번).
+3. catalog 적용의 CLI 경로 (세션 D 「넘긴 것」 6번).
+4. 나머지 8개 업무방 콘텐츠 (세션 D 「넘긴 것」 4번) — 낮은 추론 가능.
 
 ### 세션 E1 — catalog 적용 권한 · **완료 (2026-08-04)**
 

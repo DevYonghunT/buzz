@@ -285,6 +285,75 @@ buzz-admin reconcile **양쪽**에 같은 태그를 넣어야 했던 이유가 "
 두는 이유는, 표가 「그 날짜에 확인한 값」이라는 기록이기 때문이다 — 다음
 세션이 Node를 다시 확인하고 표를 갱신할지 결정한다.
 
+### 세션 D2 (2026-08-04, Phase 3 닫기)
+
+측정 대상은 `f2008b4d` 위에 문서 변경만 얹은 트리다. 코드 변경 세 건은 그
+커밋과 그 앞의 `ad9b9b2c`·`7933d0c5`에 들어 있다. 시각은 UTC, cargo 캐시는
+전 구간 warm이다.
+
+| command | 시작(UTC) | exit | passed | failed | 소요 | 분류 |
+|---|---|---:|---:|---:|---:|---|
+| `just fmt-check` | 07:07:55 | 0 | - | - | 5s | 통과 |
+| `just clippy` | 07:08:00 | 0 | - | - | 2m26s | 통과 |
+| `just desktop-check` | 07:10:26 | 0 | - | - | 14s | 통과 |
+| `just desktop-tauri-fmt-check` | 07:10:40 | 0 | - | - | 7s | 통과 |
+| `just web-check` | 07:10:47 | 0 | - | - | 4s | 통과 |
+| `just mobile-check` | 07:10:51 | 0 | - | - | 18s | 통과 |
+| `just desktop-tauri-clippy` | 07:11:09 | 0 | - | - | 52s | 통과 |
+| `just test-unit` | 07:12:01 | 0 | 6 suites | 0 | 28s | 통과 — `schoolx-catalog` **80**/0 |
+| `just desktop-test` | 07:12:38 | 0 | 3,929 | 0 | 1m09s | 통과 (59 suites, skipped 0) |
+| `just desktop-build` | 07:13:47 | 0 | - | - | 37s | 통과 |
+| `just web-build` | 07:14:24 | 0 | - | - | 6s | 통과 |
+| `just desktop-tauri-check` | 07:14:30 | 0 | - | - | 32s | 통과 |
+| `just desktop-tauri-test` | 07:15:08 | 0 | 2,077 | 0 | 4m47s | 통과 (14 ignored) |
+| `just mobile-test` | 07:19:55 | 0 | 1,022 | 0 | 1m40s | 통과 (1 skipped) |
+| `just schoolx-upstream-check` | 07:21:42 | 0 | 3/3 | 0 | 2s | 통과 — 범위 312개 파일 |
+| `just test-e2e e2e_workspace_catalog` | 07:21:44 | 0 | 5 | 0 | 70s | 통과 |
+| `just test-e2e e2e_access_matrix` | 07:22:54 | 0 | **17** | 0 | 47s | 통과 — 세션 A 계약 유지 |
+| `pnpm test:e2e:smoke workspace-catalog` | 07:23:50 | 0 | **3** | 0 | 49s | 통과 — **신규**, Phase 3 #7의 UI 증거 |
+
+`just ci`는 세션 D·E1과 같은 이유로 구성 레시피로 나눠 돌렸다. 위 1–14행이
+그 목록 전체이고 전부 exit 0이다. 로그는 세션 로컬 `/tmp/d2-*.log`에 있었고
+repo에 보존하지 않았다.
+
+`schoolx-catalog`는 78 → **80**이다(세션 D2가 더한 둘). 데스크톱 단위 테스트
+수(3,929)와 Tauri 테스트 수(2,077)는 세션 E1과 같다 — 이번 UI 증거는 단위
+테스트가 아니라 Playwright 스펙이라 그 숫자에 들어가지 않는다. **`just ci`에는
+Playwright가 없으므로, 이 세 스펙은 위 표의 마지막 줄처럼 따로 돌려야 한다.**
+
+#### 재주입 결과 — 셋 중 둘만 단독 방어선이었다
+
+세 테스트 모두 목표한 버그를 재주입해 확인했고, 그 결과가 갈렸다. 갈린 것
+자체가 기록할 값이다.
+
+| 주입 | 실패한 테스트 | 판정 |
+|---|---|---|
+| `NoChange` 분기의 `renamed`를 `false`로 고정 | `renamed_survives_into_the_ledger` 하나 | 단독 방어선 |
+| 도출식 입력에 `catalog_version`을 무조건 섞음 | 7개 | 넓게 걸린다 — 6개는 v1에서도 시드 ID가 어긋나 깨진 것이라 이유가 다르다 |
+| 같은 주입을 **버전이 다를 때만** 물게 함 | `catalog_v2_over_applied_v1_does_not_touch_the_canvas` 하나 | 단독 방어선 — 교차 버전 채널 동일성을 덮는 것이 이것뿐이다 |
+| 캔버스 가드 둘(`is_settled` 단락 + 내용 검사)을 모두 엶 | 기존 6개. **새 upgrade 테스트는 초록** | upgrade 테스트의 캔버스 단언은 단독 방어선이 **아니다** |
+| 카드의 `catalog-user-action-*` testid 제거 | Playwright 3개 중 해당 1개 | 단독 방어선 |
+
+네 번째 줄이 이번 세션에서 배운 것이다. `no_change` 판정은 saga가 캔버스
+단계에 **도달하기 전에** 반환하므로, upgrade 경로 테스트로는 캔버스 보호
+로직이 검증되지 않는다. 캔버스 가드를 건드리는 작업은
+`adoption_does_not_overwrite_a_canvas_that_has_content` 계열을 봐야 한다.
+단언 자체는 남겼다 — upgrade의 결과 상태를 문서로 남기고, 훗날 v2가 단계를
+다시 실행하도록 바뀌면 그때 이 자리에서 걸린다.
+
+#### 카드 스펙을 세우려면 mock bridge에 command가 있어야 한다
+
+핸드오프는 완료 기준 #7을 "`data-testid`가 이미 붙어 있으므로 스펙 하나로
+닫힌다"로 봤다. 그 견적이 빗나간 이유는 `e2eBridge.ts`에
+`preflight_workspace_catalog`·`apply_workspace_catalog` 핸들러가 **없었다**는
+것이다 — 카드가 testid를 다 갖고 있어도 그릴 데이터가 오지 않으면 스펙을
+쓸 수 없다. (이름이 비슷한 `apply_workspace`는 커뮤니티 전환용 별개
+command이고 이미 모킹돼 있어 더 헷갈린다.)
+
+**새 Tauri command를 더하는 세션은 그 command의 mock 핸들러도 함께 더한다.**
+그러지 않으면 그 화면은 Playwright 범위 밖에 남고, 그 사실은 누군가 스펙을
+쓰려고 할 때까지 드러나지 않는다.
+
 ### 검증되지 않은 첫 실행과 그 원인
 
 첫 실행에서 `cargo test --manifest-path desktop/src-tauri/Cargo.toml`이

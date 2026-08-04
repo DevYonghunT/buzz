@@ -133,6 +133,9 @@ UUIDv5(SCHOOLX_CATALOG_NAMESPACE,
 `desktop/src-tauri/src/commands/channels.rs`의 `starter_channel_uuid()`와 같은
 패턴이다. **`catalog_version`은 넣지 않는다** — catalog 버전이 올라가도
 `meeting`은 같은 방이어야 한다.
+`catalog_v2_over_applied_v1_does_not_touch_the_canvas`가 이것을 고정한다:
+v2를 이미 적용된 v1 위에 돌려도 채널이 하나이고 같은 ID다. 도출식 입력에
+버전이 섞이면 크레이트 전체에서 그 테스트 하나가 실패한다.
 
 판정 권위는 provenance 이벤트이고, 결정론적 ID는 중복 방지 보조 장치다.
 증명서를 남기기 직전에 앱이 죽어도 같은 ID의 두 번째 생성이 relay에서
@@ -260,17 +263,24 @@ addressable이라 NIP-33 LWW가 신원 안에서만 적용된다 — 한 항목�
 **이름을 catalog 값으로 되돌리지 않는다.** 판정과 분리해야 "이름을 바꿨고
 캔버스도 실패한" 항목이 재시도에서 누락되지 않는다.
 
-> **구현 상태 (세션 D 종료 시점) — 미리보기까지만이다.** `renamed`는
-> `PreflightItem`에만 있고(`crates/schoolx-catalog/src/preflight.rs`),
-> `LedgerItem`에는 **없다**(`crates/schoolx-catalog/src/ledger.rs`). 위 문장이
-> 원래 요구한 "미리보기와 ledger 둘 다"는 아직 성립하지 않는다.
+> **구현 상태 — 세션 D2(2026-08-04)에서 미리보기와 ledger 둘 다가 됐다.**
+> `renamed`는 `PreflightItem`(`crates/schoolx-catalog/src/preflight.rs`)과
+> `LedgerItem`(`crates/schoolx-catalog/src/ledger.rs`) 양쪽에 있고, saga가
+> 다섯 생성 지점 전부에서 preflight 값을 그대로 나른다. 증거는
+> `renamed_survives_into_the_ledger`와, golden의 `ops`(`adopted`) 항목이
+> `true`로 직렬화되는 것이다.
 >
-> 결과가 있는 defect다. `LedgerItem::name`은 catalog가 정한 이름이지 그 방의
-> **현재** 이름이 아닌데, ledger만 읽는 소비자에게는 그 사실을 알릴 플래그가
-> 없다. 이름이 바뀐 방은 §7 「도달 조건」에 따라 `adopted`로 끝나므로 실제로
-> 도달하는 상태다. 닫는 방법: `LedgerItem`에 `renamed: bool`을 더하고
-> `PreflightItem`에서 그대로 나른 뒤 `ledger_serializes_for_ui_and_cli`의
-> golden에 넣는다. 이것은 wire format 변경이므로 §4의 리더-우선 순서를 따른다.
+> 세션 D 종료 시점에는 `PreflightItem`에만 있었고, 그것이 결과가 있는
+> defect였던 이유는 이렇다. `LedgerItem::name`은 catalog가 정한 이름이지 그
+> 방의 **현재** 이름이 아닌데, ledger만 읽는 소비자에게는 그 사실을 알릴
+> 플래그가 없었다. 이름이 바뀐 방은 §7 「도달 조건」에 따라 `adopted`로
+> 끝나므로 실제로 도달하는 상태다.
+>
+> **이 필드 추가에는 §4의 리더-우선 순서가 적용되지 않는다.** 그 순서는
+> relay에 저장돼 **구버전이 읽는** provenance의 `steps` 어휘를 위한 것이다.
+> `Ledger`는 relay에 저장되지 않고 `apply_workspace_catalog`의 반환값으로만
+> 살아 생산자와 소비자가 같은 빌드 안에 있다. `steps`에 값을 더할 때는 §4를
+> 그대로 따른다.
 
 ### `adopted`의 owner 게이트
 
@@ -520,7 +530,8 @@ provenance와 **같은 타입**(`StepStates`)을 그대로 싣는다 — 단계 
 | 재적용 | `cargo test -p schoolx-catalog` | 두 번째 적용이 `no_change`이고 채널 수 동일 |
 | catalog snapshot | `cargo test -p schoolx-catalog` | 항목 키·이름·공개 범위 고정 |
 | relay kind 수용 | `just test-e2e` | 39500 발행·조회, 비멤버 차단 |
-| 데스크톱 | `pnpm --dir desktop test` | 설정 카드 렌더와 결과 표시 |
+| catalog upgrade | `cargo test -p schoolx-catalog` | v2를 적용된 v1 위에 돌려도 같은 방을 이어 쓰고 팀이 쓴 캔버스가 그대로다 |
+| 설정 카드 렌더 | `pnpm --dir desktop test:e2e:smoke workspace-catalog` | 항목 목록과 이름 변경 배지, 적용 후 `outcome`·`user_action`·캔버스 note·`error`, 게이트 거부와 적용 버튼 숨김 |
 
 effect trait로 relay I/O를 주입하므로 fault injection은 live relay 없이
 돈다. relay 왕복이 필요한 것만 E2E로 간다.
