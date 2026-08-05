@@ -280,6 +280,12 @@ pub fn resolve_repos_at_boot(nest_root: &Path) -> bool {
 
 #[cfg(test)]
 mod tests {
+    // Fixture nests use the real production nest name via
+    // `product::NEST_DIR_PROD` rather than a hardcoded literal. These paths are
+    // built directly instead of going through `nest_dir()`, so a literal here
+    // silently drifted from the product layer — it still said `.buzz` after the
+    // rebrand, which read as un-rebranded production code to anyone grepping.
+
     use super::*;
 
     // ── ensure_repos_symlink ──────────────────────────────────────────────
@@ -288,7 +294,7 @@ mod tests {
     #[test]
     fn ensure_repos_symlink_none_creates_real_dir() {
         let tmp = tempfile::tempdir().unwrap();
-        let root = tmp.path().join(".buzz");
+        let root = tmp.path().join(crate::product::NEST_DIR_PROD);
         fs::create_dir_all(&root).unwrap();
 
         ensure_repos_symlink(&root, None).unwrap();
@@ -305,7 +311,7 @@ mod tests {
     #[test]
     fn ensure_repos_symlink_none_reverts_existing_symlink_to_real_dir() {
         let tmp = tempfile::tempdir().unwrap();
-        let root = tmp.path().join(".buzz");
+        let root = tmp.path().join(crate::product::NEST_DIR_PROD);
         fs::create_dir_all(&root).unwrap();
         let external = tmp.path().join("Development");
         fs::create_dir_all(&external).unwrap();
@@ -335,7 +341,7 @@ mod tests {
     #[test]
     fn ensure_repos_symlink_absent_creates_symlink() {
         let tmp = tempfile::tempdir().unwrap();
-        let root = tmp.path().join(".buzz");
+        let root = tmp.path().join(crate::product::NEST_DIR_PROD);
         fs::create_dir_all(&root).unwrap();
         let external = tmp.path().join("Development");
         fs::create_dir_all(&external).unwrap();
@@ -351,7 +357,7 @@ mod tests {
     #[test]
     fn ensure_repos_symlink_repoints_existing_wrong_symlink() {
         let tmp = tempfile::tempdir().unwrap();
-        let root = tmp.path().join(".buzz");
+        let root = tmp.path().join(crate::product::NEST_DIR_PROD);
         fs::create_dir_all(&root).unwrap();
         let old = tmp.path().join("old");
         let new = tmp.path().join("new");
@@ -375,7 +381,7 @@ mod tests {
     #[test]
     fn ensure_repos_symlink_correct_symlink_is_noop() {
         let tmp = tempfile::tempdir().unwrap();
-        let root = tmp.path().join(".buzz");
+        let root = tmp.path().join(crate::product::NEST_DIR_PROD);
         fs::create_dir_all(&root).unwrap();
         let external = tmp.path().join("Development").canonicalize_or_make();
 
@@ -390,7 +396,7 @@ mod tests {
     #[test]
     fn ensure_repos_symlink_empty_real_dir_converts() {
         let tmp = tempfile::tempdir().unwrap();
-        let root = tmp.path().join(".buzz");
+        let root = tmp.path().join(crate::product::NEST_DIR_PROD);
         fs::create_dir_all(root.join("REPOS")).unwrap();
         let external = tmp.path().join("Development");
         fs::create_dir_all(&external).unwrap();
@@ -408,7 +414,7 @@ mod tests {
     #[test]
     fn ensure_repos_symlink_nonempty_real_dir_refuses_and_preserves() {
         let tmp = tempfile::tempdir().unwrap();
-        let root = tmp.path().join(".buzz");
+        let root = tmp.path().join(crate::product::NEST_DIR_PROD);
         let repos = root.join("REPOS");
         fs::create_dir_all(&repos).unwrap();
         let checkout = repos.join("buzz");
@@ -439,7 +445,7 @@ mod tests {
     #[test]
     fn ensure_nest_startup_preserves_existing_repos_symlink() {
         let tmp = tempfile::tempdir().unwrap();
-        let root = tmp.path().join(".buzz");
+        let root = tmp.path().join(crate::product::NEST_DIR_PROD);
 
         // First launch creates the real nest with a real REPOS dir.
         crate::managed_agents::ensure_nest_at(&root).unwrap();
@@ -471,7 +477,7 @@ mod tests {
     #[test]
     fn validate_repos_dir_rejects_tilde_relative_and_missing() {
         let tmp = tempfile::tempdir().unwrap();
-        let root = tmp.path().join(".buzz");
+        let root = tmp.path().join(crate::product::NEST_DIR_PROD);
         fs::create_dir_all(&root).unwrap();
 
         assert!(validate_repos_dir(&root, "~/Development").is_err());
@@ -487,7 +493,7 @@ mod tests {
     #[test]
     fn validate_repos_dir_rejects_nest_ancestor() {
         let tmp = tempfile::tempdir().unwrap();
-        let root = tmp.path().join("home").join(".buzz");
+        let root = tmp.path().join("home").join(crate::product::NEST_DIR_PROD);
         fs::create_dir_all(&root).unwrap();
         let parent = root.parent().unwrap();
 
@@ -502,7 +508,7 @@ mod tests {
     #[test]
     fn persisted_repos_dir_roundtrips_write_read_clear() {
         let tmp = tempfile::tempdir().unwrap();
-        let root = tmp.path().join(".buzz");
+        let root = tmp.path().join(crate::product::NEST_DIR_PROD);
         fs::create_dir_all(&root).unwrap();
 
         assert_eq!(read_persisted_repos_dir(&root), None, "absent → None");
@@ -525,7 +531,7 @@ mod tests {
     #[test]
     fn persisted_repos_dir_empty_value_clears() {
         let tmp = tempfile::tempdir().unwrap();
-        let root = tmp.path().join(".buzz");
+        let root = tmp.path().join(crate::product::NEST_DIR_PROD);
         fs::create_dir_all(&root).unwrap();
         write_persisted_repos_dir(&root, Some("/Users/me/Development")).unwrap();
 
@@ -540,7 +546,7 @@ mod tests {
     #[test]
     fn persisted_repos_dir_clear_when_absent_is_ok() {
         let tmp = tempfile::tempdir().unwrap();
-        let root = tmp.path().join(".buzz");
+        let root = tmp.path().join(crate::product::NEST_DIR_PROD);
         fs::create_dir_all(&root).unwrap();
 
         write_persisted_repos_dir(&root, None).expect("clearing an absent dotfile is not an error");
@@ -552,7 +558,7 @@ mod tests {
         // Mirrors the boot sequence: ensure_nest leaves REPOS an empty real
         // dir, then the setup hook reads the persisted value and symlinks.
         let tmp = tempfile::tempdir().unwrap();
-        let root = tmp.path().join(".buzz");
+        let root = tmp.path().join(crate::product::NEST_DIR_PROD);
         fs::create_dir_all(root.join("REPOS")).unwrap();
         let external = tmp.path().join("Development");
         fs::create_dir_all(&external).unwrap();
@@ -573,7 +579,7 @@ mod tests {
     #[test]
     fn boot_leaves_already_correct_symlink_untouched() {
         let tmp = tempfile::tempdir().unwrap();
-        let root = tmp.path().join(".buzz");
+        let root = tmp.path().join(crate::product::NEST_DIR_PROD);
         fs::create_dir_all(&root).unwrap();
         let external = tmp.path().join("Development");
         fs::create_dir_all(&external).unwrap();
@@ -593,7 +599,7 @@ mod tests {
     #[test]
     fn boot_with_cleared_value_reverts_symlink_to_real_dir() {
         let tmp = tempfile::tempdir().unwrap();
-        let root = tmp.path().join(".buzz");
+        let root = tmp.path().join(crate::product::NEST_DIR_PROD);
         fs::create_dir_all(&root).unwrap();
         let external = tmp.path().join("Development");
         fs::create_dir_all(&external).unwrap();
@@ -627,7 +633,7 @@ mod tests {
         // this hardening fixes). Drives each case through the same
         // effective→persist path `apply_workspace` uses.
         let tmp = tempfile::tempdir().unwrap();
-        let root = tmp.path().join(".buzz");
+        let root = tmp.path().join(crate::product::NEST_DIR_PROD);
         fs::create_dir_all(&root).unwrap();
         let good = tmp.path().join("Development");
         fs::create_dir_all(&good).unwrap();
@@ -689,7 +695,7 @@ mod tests {
         // hook calls resolve_repos_at_boot. Asserts the convert happens at that
         // position and restore is allowed.
         let tmp = tempfile::tempdir().unwrap();
-        let root = tmp.path().join(".buzz");
+        let root = tmp.path().join(crate::product::NEST_DIR_PROD);
         fs::create_dir_all(&root).unwrap();
         let external = tmp.path().join("Development");
         fs::create_dir_all(&external).unwrap();
@@ -720,7 +726,7 @@ mod tests {
         // be skipped and REPOS left as the empty real dir, never the symlink, so
         // no agent clones into the wrong place.
         let tmp = tempfile::tempdir().unwrap();
-        let root = tmp.path().join(".buzz");
+        let root = tmp.path().join(crate::product::NEST_DIR_PROD);
         fs::create_dir_all(&root).unwrap();
         let missing = tmp.path().join("not-mounted-yet");
         write_persisted_repos_dir(&root, Some(missing.to_str().unwrap())).unwrap();
@@ -745,7 +751,7 @@ mod tests {
         // No configured repos_dir → the real in-nest REPOS default is correct,
         // restore proceeds normally (the fail-closed gate must not fire here).
         let tmp = tempfile::tempdir().unwrap();
-        let root = tmp.path().join(".buzz");
+        let root = tmp.path().join(crate::product::NEST_DIR_PROD);
         fs::create_dir_all(&root).unwrap();
         ensure_repos_setup_default(&root).unwrap();
 

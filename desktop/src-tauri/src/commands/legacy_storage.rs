@@ -3,10 +3,14 @@ use std::path::{Path, PathBuf};
 use rusqlite::{Connection, OpenFlags};
 use serde::Serialize;
 
-const BUZZ_RELEASE_IDENTIFIER_PREFIX: &str = "xyz.block.buzz.app";
-const SPROUT_RELEASE_IDENTIFIER: &str = "xyz.block.sprout.app";
-const BUZZ_DEV_IDENTIFIER_PREFIX: &str = "xyz.block.buzz.app.dev";
-const SPROUT_DEV_IDENTIFIER_PREFIX: &str = "xyz.block.sprout.app.dev";
+// Bundle identifiers of the apps SchoolX migrates *from*. They name someone
+// else's installation on disk, so they are fixed history, not product identity
+// — rebranding them would make the migration find nothing and silently import
+// no data. See `src/product.rs` for the identifier this build actually uses.
+const BUZZ_RELEASE_IDENTIFIER_PREFIX: &str = "xyz.block.buzz.app"; // schoolx:buzz-name-ok — legacy bundle id
+const SPROUT_RELEASE_IDENTIFIER: &str = "xyz.block.sprout.app"; // schoolx:buzz-name-ok — legacy bundle id
+const BUZZ_DEV_IDENTIFIER_PREFIX: &str = "xyz.block.buzz.app.dev"; // schoolx:buzz-name-ok — legacy bundle id
+const SPROUT_DEV_IDENTIFIER_PREFIX: &str = "xyz.block.sprout.app.dev"; // schoolx:buzz-name-ok — legacy bundle id
 
 const SPROUT_WORKSPACES_KEY: &str = "sprout-workspaces";
 const SPROUT_ACTIVE_WORKSPACE_KEY: &str = "sprout-active-workspace-id";
@@ -213,16 +217,16 @@ mod tests {
     #[test]
     fn legacy_identifier_maps_release_identifier() {
         assert_eq!(
-            legacy_identifier("xyz.block.buzz.app"),
-            Some("xyz.block.sprout.app".to_string())
+            legacy_identifier("xyz.block.buzz.app"), // schoolx:buzz-name-ok — legacy bundle id
+            Some("xyz.block.sprout.app".to_string())  // schoolx:buzz-name-ok — legacy bundle id
         );
     }
 
     #[test]
     fn legacy_identifier_maps_dev_worktree_identifier() {
         assert_eq!(
-            legacy_identifier("xyz.block.buzz.app.dev.my-branch"),
-            Some("xyz.block.sprout.app.dev.my-branch".to_string())
+            legacy_identifier("xyz.block.buzz.app.dev.my-branch"), // schoolx:buzz-name-ok — legacy bundle id
+            Some("xyz.block.sprout.app.dev.my-branch".to_string()) // schoolx:buzz-name-ok — legacy bundle id
         );
     }
 

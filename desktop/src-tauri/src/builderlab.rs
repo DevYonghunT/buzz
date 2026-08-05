@@ -117,7 +117,7 @@ const AUTH_COMPLETE_HTML: &str = r#"<!doctype html>
 </head>
 <body>
   <main>
-    <svg class="bee" viewBox="0 0 466 309" role="img" aria-label="Buzz">
+    <svg class="bee" viewBox="0 0 466 309" role="img" aria-label="Buzz"> <!-- schoolx:buzz-name-ok — Builderlab's own callback page, not this build -->
       <defs>
         <mask id="bee-mask">
           <rect width="466" height="309" fill="black"/>

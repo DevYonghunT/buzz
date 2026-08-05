@@ -99,7 +99,9 @@ mod tests {
             dir.path(),
             &serde_json::json!([
                 { "name": "Fizz", "persona_id": "persona-1", "runtime": "claude" },
-                { "name": "Buzz", "persona_id": "persona-1" }
+                // Sample agent names, paired with "Fizz" above — not product
+                // identity. schoolx:buzz-name-ok
+                { "name": "Buzz", "persona_id": "persona-1" } // schoolx:buzz-name-ok — sample agent name
             ]),
         );
         let agents_path = dir.path().join("agents/managed-agents.json");

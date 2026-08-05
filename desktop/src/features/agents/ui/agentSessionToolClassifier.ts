@@ -85,7 +85,7 @@ const BUZZ_CLI_READ_VERBS = new Set([
 
 const TOOL_CLASS_LABELS: Record<AgentActivityRenderClass, string> = {
   message: "Message",
-  "relay-op": "Buzz relay op",
+  "relay-op": "SchoolX relay op",
   "file-edit": "File edit",
   "file-read": "File read",
   "skill-read": "Skill read",
@@ -430,17 +430,25 @@ function buzzOperationVerb(verb: string, tone: AgentActivityTone) {
   return "Updated";
 }
 
+/**
+ * The noun an operation acts on, for a transcript line like "Updated channel".
+ *
+ * The fallbacks say "relay" rather than a product name. This runs when the
+ * operation string could not be parsed at all, so naming the app there would
+ * be both uninformative and wrong after a rebrand — the surrounding vocabulary
+ * is already "relay op" (`agentSessionToolClassifier`'s `relay-op` label).
+ */
 function buzzOperationObject(operation: string) {
   if (isBuzzMessageSend(operation)) return "message";
   if (operation.includes(".")) {
     const [group] = operation.split(".");
-    return group ? group.replace(/[-_]+/g, " ") : "Buzz";
+    return group ? group.replace(/[-_]+/g, " ") : "relay";
   }
   const object = operation.replace(
     /^(add|approve|archive|create|delete|edit|get|hide|join|leave|list|open|publish|remove|search|send|set|trigger|unarchive|update|vote)_/,
     "",
   );
-  return object ? object.replace(/[-_]+/g, " ") : "Buzz";
+  return object ? object.replace(/[-_]+/g, " ") : "relay";
 }
 
 function buzzCliTone(group: string, verb: string): AgentActivityTone {

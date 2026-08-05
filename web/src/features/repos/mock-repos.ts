@@ -14,11 +14,18 @@ const people = {
   margaret: "4".repeat(64),
 };
 
-/** Local-only data for previewing the populated repositories state. */
+/**
+ * Local-only data for previewing the populated repositories state.
+ *
+ * The repository names below are sample content, not product identity — they
+ * stand in for whatever repos a community actually announces. They keep their
+ * upstream spelling so the preview reads like a real listing rather than a
+ * rebranded one, and are marked so the identity check does not flag them.
+ */
 export const mockRepos: Repo[] = [
   {
-    id: "buzz-desktop",
-    name: "buzz-desktop",
+    id: "buzz-desktop", // schoolx:buzz-name-ok — sample repo name, not product identity
+    name: "buzz-desktop", // schoolx:buzz-name-ok — sample repo name, not product identity
     description:
       "The desktop client for collaborating with people and agents across Buzz communities.",
     cloneUrls: ["https://example.com/buzz-desktop.git"],
