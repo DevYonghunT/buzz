@@ -19,12 +19,17 @@ gh run watch --repo DevYonghunT/buzz
 미러)으로 되돌리면 이 파일은 기본 브랜치에서 사라지고, 실행이 실패하는 게
 아니라 **워크플로 목록에 아예 뜨지 않는다.**
 
-두 잡이 병렬로 돈다. 끝나면 Actions 실행 페이지 하단 **Artifacts**에 둘이 붙는다.
+세 잡이 병렬로 돈다. 끝나면 Actions 실행 페이지 하단 **Artifacts**에 셋이 붙는다.
 
-| 아티팩트 | 내용 |
-|---|---|
-| `schoolx-macos-<version>` | `.dmg` |
-| `schoolx-windows-<version>` | NSIS `.exe` |
+| 아티팩트 | 받을 사람 | 내용 |
+|---|---|---|
+| `schoolx-macos-apple-silicon-<version>` | M1 이후 Mac | `.dmg` |
+| `schoolx-macos-intel-<version>` | Intel Mac | `.dmg` |
+| `schoolx-windows-<version>` | Windows | NSIS `.exe` |
+
+Mac이 둘로 갈리는 이유는 `macos-latest` 러너가 Apple Silicon이라 그냥 빌드하면
+arm64 전용이 나오기 때문이다. Intel 잡은 `--target x86_64-apple-darwin`으로
+교차 컴파일한다.
 
 버전은 `desktop/package.json`의 값에 `-team.<실행번호>`를 붙인 것이다. 올리지
 않고 접미사만 붙이는 이유는, 테스터의 응용 프로그램 폴더에서 정식 릴리스와
@@ -39,6 +44,15 @@ gh run watch --repo DevYonghunT/buzz
 "바이러스라는데요"라는 답이 온다.
 
 ### macOS
+
+**먼저 둘 중 어느 파일인지 고른다.** 화면 왼쪽 위 **애플 메뉴 → 이 Mac에
+관하여**를 연다. 「칩」이 보이면 `...-apple-silicon-...`, 「프로세서」에
+Intel이 보이면 `...-intel-...`이다.
+
+> 잘못 받으면 앱이 **아예 실행되지 않는다.** 그런데 그 증상이 아래 미서명
+> 경고와 구별되지 않아서, 안내를 따라 우클릭·시스템 설정을 아무리 해도
+> 열리지 않는 상태로 막힌다. 파일을 건넬 때 어느 쪽인지 같이 알려주는 게
+> 가장 확실하다.
 
 1. `.dmg`를 열고 앱을 **응용 프로그램**으로 끈다.
 2. 처음 실행은 **앱을 우클릭 → 열기** — 더블클릭하면 열 방법이 없는

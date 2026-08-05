@@ -9,9 +9,16 @@ name: SchoolX Team Build
 # or wanted by — a SchoolX fork handing builds to a handful of teammates.
 #
 # So this borrows the shape of `windows-canary.yml` (build, upload as a
-# short-lived Actions artifact, no tag and no Release) and adds a macOS job that
-# stops after `--no-sign`, which is exactly where `release.yml` hands off to the
-# signing action.
+# short-lived Actions artifact, no tag and no Release) and adds two macOS jobs
+# that stop after `--no-sign`, which is exactly where `release.yml` hands off to
+# the signing action.
+#
+# Two macOS jobs because `macos-latest` is Apple Silicon: a plain host build is
+# arm64-only and will not launch at all on an Intel Mac — and the failure looks
+# like the unsigned-app warning, so a tester cannot tell the two apart. The
+# Intel job cross-compiles with `--target x86_64-apple-darwin`, mirroring the
+# split `release.yml` already makes. Testers pick by architecture; the "which
+# file do I want" instructions live in TEAM_BUILD.md §2.
 #
 # **What testers get is unsigned.** macOS shows "unidentified developer" and
 # Windows shows a SmartScreen warning; both need a manual override to open. That
@@ -55,8 +62,8 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "Building team version $VERSION from $GITHUB_SHA"
 
-  macos:
-    name: Build macOS (unsigned)
+  macos-arm64:
+    name: Build macOS · Apple Silicon (unsigned)
     needs: version
     runs-on: macos-latest
     timeout-minutes: 60
@@ -123,10 +130,83 @@ jobs:
             exit 1
           fi
           echo "dmg=$DMG" >> "$GITHUB_OUTPUT"
-      - name: Upload macOS installer
+      - name: Upload Apple Silicon installer
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: schoolx-macos-${{ needs.version.outputs.version }}
+          name: schoolx-macos-apple-silicon-${{ needs.version.outputs.version }}
+          if-no-files-found: error
+          path: ${{ steps.artifact.outputs.dmg }}
+
+  macos-intel:
+    name: Build macOS · Intel (unsigned)
+    needs: version
+    runs-on: macos-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      TARGET: x86_64-apple-darwin
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+        with:
+          targets: x86_64-apple-darwin
+      # Belt and braces, exactly as release.yml's Intel job does it: the runner
+      # host is arm64, so the x86_64 std must be present before any build.
+      - name: Add Rust target
+        run: rustup target add "$TARGET"
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: |
+            .
+            desktop/src-tauri
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 24
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+        with:
+          run_install: false
+      - name: Install desktop dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Patch version
+        run: |
+          cd desktop && node scripts/set-version-from-tag.mjs "$VERSION"
+          cd src-tauri && cargo update --workspace
+      - name: Generate non-updating bundle config
+        run: |
+          cat > desktop/src-tauri/tauri.team.conf.json <<'JSON'
+          {
+            "bundle": {
+              "createUpdaterArtifacts": false
+            }
+          }
+          JSON
+      - name: Build sidecars
+        run: |
+          cargo build --release --target "$TARGET" -p buzz-acp -p buzz-agent -p buzz-dev-mcp -p git-credential-nostr -p buzz-cli
+          ./scripts/bundle-sidecars.sh "$TARGET"
+      - name: Build macOS app (unsigned)
+        run: cd desktop && pnpm tauri build --verbose --no-sign --target "$TARGET" --config src-tauri/tauri.team.conf.json
+      - name: Locate DMG
+        id: artifact
+        run: |
+          set -euo pipefail
+          # Cross-compiled output is under target/<triple>/, unlike the host
+          # build in the Apple Silicon job above.
+          BUNDLE_DIR="desktop/src-tauri/target/${TARGET}/release/bundle"
+          DMG=$(find "$BUNDLE_DIR/dmg" -name '*.dmg' -type f | head -1)
+          if [[ -z "$DMG" ]]; then
+            echo "::error::No DMG found in $BUNDLE_DIR/dmg"
+            exit 1
+          fi
+          echo "dmg=$DMG" >> "$GITHUB_OUTPUT"
+      - name: Upload Intel installer
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: schoolx-macos-intel-${{ needs.version.outputs.version }}
           if-no-files-found: error
           path: ${{ steps.artifact.outputs.dmg }}
 

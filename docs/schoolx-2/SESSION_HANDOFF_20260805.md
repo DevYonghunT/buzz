@@ -61,11 +61,16 @@ push에 새로 돌지 않고, canary·sprig 계열은 `default_branch` 조회가
 `refs/heads/main` 문자열 비교이며, pre-push의 `check-branch-skew.sh`도
 `origin/main`을 하드코딩한다.
 
-**열려 있는 것**: DMG는 `macos-latest`(Apple Silicon)에서 나오므로 **arm64
-전용**이다. Intel Mac을 쓰는 팀원에게는 열리지 않고, `TEAM_BUILD.md` §2의
-우클릭 안내로도 해결되지 않는다. 필요하면 `release.yml`의 Intel 잡
-(`--target x86_64-apple-darwin`)을 본떠 잡을 하나 더 단다. 팀에 Intel Mac이
-있는지부터 확인할 것.
+**Intel Mac 대응을 이어서 더했다 — 이 잡은 아직 안 돌아봤다.** 첫 실행이 낸
+DMG는 `macos-latest`(Apple Silicon) 호스트 빌드라 arm64 전용이었고, 팀에 Intel
+Mac이 있는 것이 확인돼 `macos-intel` 잡을 더했다 — `--target
+x86_64-apple-darwin` 교차 컴파일로, `release.yml`의 Intel 잡과 같은 짝이다.
+아티팩트도 `schoolx-macos-apple-silicon-…`과 `schoolx-macos-intel-…`으로
+갈랐다. **§2.1이 보여준 대로 돌려보기 전에는 모른다** — 다음 실행에서 이 잡의
+결과를 확인할 것.
+
+아키텍처를 잘못 받으면 앱이 실행되지 않는데 그 증상이 미서명 경고와
+구별되지 않는다. 고르는 법을 `TEAM_BUILD.md` §2 맨 앞에 적어 뒀다.
 
 ### 2.2 온보딩 사람 검증
 
