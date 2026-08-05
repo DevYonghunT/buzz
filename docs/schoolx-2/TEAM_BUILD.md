@@ -13,6 +13,12 @@ gh workflow run schoolx-team-build.yml --repo DevYonghunT/buzz
 gh run watch --repo DevYonghunT/buzz
 ```
 
+이 명령이 워크플로를 찾는 것은 **저장소 기본 브랜치가
+`codex/schoolx-2-foundation`이기 때문이다.** `workflow_dispatch`는 워크플로
+파일이 기본 브랜치에 있을 때만 트리거된다. 기본 브랜치를 `main`(upstream
+미러)으로 되돌리면 이 파일은 기본 브랜치에서 사라지고, 실행이 실패하는 게
+아니라 **워크플로 목록에 아예 뜨지 않는다.**
+
 두 잡이 병렬로 돈다. 끝나면 Actions 실행 페이지 하단 **Artifacts**에 둘이 붙는다.
 
 | 아티팩트 | 내용 |

@@ -13,8 +13,7 @@ git status -sb          # 깨끗해야 한다
 git log --oneline -3
 ```
 
-**미푸시 커밋 2개가 있다** (`0de3d696`, `c935b318`). 아래 §2의 첫 항목을 읽고
-푸시 여부를 정한다.
+전부 푸시되어 있다. **다음 작업은 §2.2**(온보딩 사람 검증) — §2.1은 닫혔다.
 
 ## 1. 이번에 끝난 것
 
@@ -32,25 +31,41 @@ git log --oneline -3
 
 ## 2. 지금 열려 있는 것 — 우선순위 순
 
-### 2.1 팀 빌드 워크플로가 한 번도 돌지 않았다 ← **다음 작업**
+### 2.1 팀 빌드 워크플로 — **첫 실행 성공 (2026-08-05)**
 
-`c935b318`이 만든 `.github/workflows/schoolx-team-build.yml`은 **문법과 참조
-스크립트 존재만 확인했고 실행해 본 적이 없다.** GitHub Actions에서 처음 돌 때
-나오는 것들(러너 환경, 캐시 키, 사이드카 빌드, macOS 미서명 번들)은 돌려봐야
-안다. 특히 **macOS 잡은 이 저장소에서 미서명으로 돌아본 적이 없다.**
-
-```bash
-git push origin codex/schoolx-2-foundation      # pre-push 훅 10–17분
-gh workflow run schoolx-team-build.yml --repo DevYonghunT/buzz
-gh run watch --repo DevYonghunT/buzz
-```
-
-실패하면 로그를 보고 고친다. 절차와 팀원 배포 안내는
+`c935b318`이 만든 `.github/workflows/schoolx-team-build.yml`이
+[run 30996818994](https://github.com/DevYonghunT/buzz/actions/runs/30996818994)에서
+처음 돌았고 두 잡 모두 통과했다. 절차와 팀원 배포 안내는
 [`TEAM_BUILD.md`](TEAM_BUILD.md).
 
-**푸시 자체가 결정 사항은 아니다** — 사용자는 이미 이 브랜치에 여러 번
-푸시했다. 다만 pre-push 훅이 10분을 넘기므로 백그라운드로 돌리고 완료를
-확인한다(§5의 「10분 한도」 참조).
+| 아티팩트 | 크기 | 잡 시간 |
+|---|---|---|
+| `schoolx-macos-0.5.3-team.1` (DMG) | 67MB | 14분 |
+| `schoolx-windows-0.5.3-team.1` (NSIS) | 49MB | 29분 |
+
+돌리기까지 두 가지가 막고 있었다.
+
+**(a) macOS 사이드카 경로 — 확정적 실패였다** (`93da132a`에서 고침).
+`bundle-sidecars.sh`는 `$1`이 있으면 「cargo를 `--target`으로 불렀다」로 읽고
+`target/<triple>/release`를 본다. macOS 잡은 `--target` 없이 빌드하면서 호스트
+트리플을 넘기고 있어서 빈 디렉터리를 뒤지고 죽을 자리였다. 저장소의 나머지 세
+잡이 이미 이 짝을 지킨다 — `release.yml` arm64는 인자 없이, Intel·Windows와
+`windows-canary.yml`은 `--target`과 그 트리플을 함께 넘긴다.
+
+**(b) `workflow_dispatch`는 기본 브랜치에 있는 파일에만 반응한다.** 포크의
+기본 브랜치가 upstream 미러인 `main`이라 워크플로가 목록에 **뜨지도 않았다**.
+기본 브랜치를 `codex/schoolx-2-foundation`으로 바꿔 풀었다 — SchoolX 커밋
+91개가 전부 그쪽에 있으므로 실제 작업 위치와도 맞는다. 파급은 없음을
+확인했다: `ci.yml`은 `branches: [main, release]` 명시 목록이라 작업 브랜치
+push에 새로 돌지 않고, canary·sprig 계열은 `default_branch` 조회가 아니라
+`refs/heads/main` 문자열 비교이며, pre-push의 `check-branch-skew.sh`도
+`origin/main`을 하드코딩한다.
+
+**열려 있는 것**: DMG는 `macos-latest`(Apple Silicon)에서 나오므로 **arm64
+전용**이다. Intel Mac을 쓰는 팀원에게는 열리지 않고, `TEAM_BUILD.md` §2의
+우클릭 안내로도 해결되지 않는다. 필요하면 `release.yml`의 Intel 잡
+(`--target x86_64-apple-darwin`)을 본떠 잡을 하나 더 단다. 팀에 Intel Mac이
+있는지부터 확인할 것.
 
 ### 2.2 온보딩 사람 검증
 
@@ -158,9 +173,8 @@ Playwright 스펙에서 한국어 문구를 단언하면 실패한다. 문구 �
 ## 4. 상태 요약
 
 ```
-브랜치: codex/schoolx-2-foundation
-원격:   origin/codex/schoolx-2-foundation (= fae8cc93)
-로컬:   c935b318 (원격보다 2 앞)
+브랜치: codex/schoolx-2-foundation  ← 이제 저장소 기본 브랜치이기도 하다
+원격:   origin/codex/schoolx-2-foundation — 로컬과 동기
 워킹트리: 깨끗
 ```
 
