@@ -101,7 +101,13 @@ jobs:
       - name: Build sidecars
         run: |
           cargo build --release -p buzz-acp -p buzz-agent -p buzz-dev-mcp -p git-credential-nostr -p buzz-cli
-          ./scripts/bundle-sidecars.sh "$(rustc -vV | sed -n 's|host: ||p')"
+          # No argument. bundle-sidecars.sh treats a present $1 as "cargo was
+          # invoked with --target" and looks under target/<triple>/release; this
+          # build has no --target, so the binaries are in target/release. Passing
+          # the host triple here sent it to an empty directory. Same pairing as
+          # release.yml's arm64 macOS job — the Windows job below does pass one
+          # because it does build with --target.
+          ./scripts/bundle-sidecars.sh
       - name: Build macOS app (unsigned)
         # `--no-sign` is where release.yml stops before handing the bundle to
         # Block's signing action. Stopping here is the whole difference.
