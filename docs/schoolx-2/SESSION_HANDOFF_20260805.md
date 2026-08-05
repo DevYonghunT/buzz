@@ -61,13 +61,18 @@ push에 새로 돌지 않고, canary·sprig 계열은 `default_branch` 조회가
 `refs/heads/main` 문자열 비교이며, pre-push의 `check-branch-skew.sh`도
 `origin/main`을 하드코딩한다.
 
-**Intel Mac 대응을 이어서 더했다 — 이 잡은 아직 안 돌아봤다.** 첫 실행이 낸
-DMG는 `macos-latest`(Apple Silicon) 호스트 빌드라 arm64 전용이었고, 팀에 Intel
-Mac이 있는 것이 확인돼 `macos-intel` 잡을 더했다 — `--target
-x86_64-apple-darwin` 교차 컴파일로, `release.yml`의 Intel 잡과 같은 짝이다.
-아티팩트도 `schoolx-macos-apple-silicon-…`과 `schoolx-macos-intel-…`으로
-갈랐다. **§2.1이 보여준 대로 돌려보기 전에는 모른다** — 다음 실행에서 이 잡의
-결과를 확인할 것.
+**Intel Mac 대응을 이어서 더했고 검증했다** (`e7efde2d`). 첫 실행이 낸 DMG는
+`macos-latest`(Apple Silicon) 호스트 빌드라 arm64 전용이었고, 팀에 Intel Mac이
+있는 것이 확인돼 `macos-intel` 잡을 더했다 — `--target x86_64-apple-darwin`
+교차 컴파일로, `release.yml`의 Intel 잡과 같은 짝이다.
+[run 30999329683](https://github.com/DevYonghunT/buzz/actions/runs/30999329683)에서
+세 잡 모두 통과했다: `schoolx-macos-apple-silicon-0.5.3-team.2` 67MB,
+`schoolx-macos-intel-0.5.3-team.2` 70MB, `schoolx-windows-0.5.3-team.2` 49MB.
+
+**초록불만 보지 말고 아키텍처를 확인했다.** Intel 잡 로그의 번들 경로가
+`target/x86_64-apple-darwin/release/bundle/dmg/`이고 tauri가 파일명을
+`SchoolX_0.5.3-team.2_x64.dmg`로 붙였다 — 교차 컴파일이 실제로 먹었다는 뜻이다.
+잡이 통과했다는 사실만으로는 arm64를 두 번 만들지 않았다고 말할 수 없다.
 
 아키텍처를 잘못 받으면 앱이 실행되지 않는데 그 증상이 미서명 경고와
 구별되지 않는다. 고르는 법을 `TEAM_BUILD.md` §2 맨 앞에 적어 뒀다.
@@ -121,6 +126,16 @@ git·huddle 설정)는 피드백 대상이 아니다.
 디자인 결정 대기. 지금도 Buzz 아이콘이다.
 
 ## 3. 이번에 알게 된 것 중 다음 세션이 밟기 쉬운 함정
+
+### 3.0 팀 빌드에 `TAURI_BUNDLER_DMG_IGNORE_CI`는 필요 없다 — 고치지 말 것
+
+`release.yml`(둘)과 `signed-macos-canary.yml`의 macOS 잡은 모두 이 변수를
+켜므로, `schoolx-team-build.yml`에 없는 것이 누락으로 보인다. **아니다.**
+tauri는 이 변수가 없으면 CI에서 `bundle_dmg.sh`에 `--skip-jenkins`를 붙일
+뿐이고 **DMG는 그대로 만든다** — 실제 실행 로그에서 `--skip-jenkins`가 붙은
+채 DMG가 생성된 것을 확인했다. 그 셋이 켜는 이유는 직후에
+`set-dmg-finder-text-size.sh`로 Finder 창 외형을 손보기 때문이고, 팀 빌드는
+그 단계가 없다.
 
 ### 3.1 `.env`에 멤버십을 켜 두면 E2E가 통째로 깨진다
 
