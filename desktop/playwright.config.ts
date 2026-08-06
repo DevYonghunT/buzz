@@ -22,6 +22,7 @@ export default defineConfig({
         "**/smoke.spec.ts",
         "**/i18n.spec.ts",
         "**/onboarding-docked-cta-screenshots.spec.ts",
+        "**/manual-screenshots.spec.ts",
         "**/identity-key-help.spec.ts",
         "**/key-import-reveal.spec.ts",
         "**/navigation.spec.ts",
