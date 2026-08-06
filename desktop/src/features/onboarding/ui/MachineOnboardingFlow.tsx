@@ -3,12 +3,15 @@ import type { QueryClient } from "@tanstack/react-query";
 import { ArrowUp } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 
+import { requiredCredentialEnvKeys } from "@/features/agents/ui/agentConfigOptions";
+import { getBakedBuildEnv } from "@/shared/api/tauri";
 import {
   getIdentity,
   importIdentity,
   persistCurrentIdentity,
 } from "@/shared/api/tauriIdentity";
 import type { IdentityStorage } from "@/shared/api/types";
+import { bakedAgentConfigIsComplete } from "./bakedOnboardingSkip";
 import { Button } from "@/shared/ui/button";
 import { StartupWindowDragRegion } from "@/shared/ui/StartupWindowDragRegion";
 import { BackupStep } from "./BackupStep";
@@ -104,6 +107,41 @@ export function MachineOnboardingFlow({
     [],
   );
 
+  // A build with provider, model, and credentials baked in has nothing to ask
+  // on the harness and model steps, so teammates go straight from their key to
+  // the app. Everything stays editable later in Settings → Agents.
+  const [skipAgentSetup, setSkipAgentSetup] = React.useState(false);
+  React.useEffect(() => {
+    let unmounted = false;
+    void getBakedBuildEnv()
+      .then((bakedEnv) => {
+        if (unmounted) return;
+        setSkipAgentSetup(
+          bakedAgentConfigIsComplete(bakedEnv, (provider) =>
+            requiredCredentialEnvKeys("buzz-agent", provider),
+          ),
+        );
+      })
+      // Never let a probe failure strand the user past configuration: on error
+      // the steps stay, which is the OSS-build behaviour.
+      .catch(() => undefined);
+    return () => {
+      unmounted = true;
+    };
+  }, []);
+
+  /** Where to go once the user is done with their key. */
+  const afterIdentityPage = React.useCallback(
+    (pubkey?: string) => {
+      if (skipAgentSetup) {
+        complete(pubkey);
+        return;
+      }
+      setPage("setup");
+    },
+    [complete, skipAgentSetup],
+  );
+
   const loadFreshIdentity = React.useCallback(async () => {
     setIsPending(true);
     setError(null);
@@ -158,9 +196,9 @@ export function MachineOnboardingFlow({
       queryClient.setQueryData(["identity"], identity);
       setIdentityWasImported(true);
       setSelectedPubkey(identity.pubkey);
-      setPage("setup");
+      afterIdentityPage(identity.pubkey);
     },
-    [continueWithIdentity, queryClient],
+    [afterIdentityPage, continueWithIdentity, queryClient],
   );
 
   return (
@@ -316,7 +354,7 @@ export function MachineOnboardingFlow({
                 direction={backupDirection}
                 identityStorage={identityStorage}
                 onBack={() => setPage("identity")}
-                onNext={() => setPage("setup")}
+                onNext={() => afterIdentityPage(selectedPubkey ?? undefined)}
                 onOpenPasswordBackup={() => {
                   resetEncryptedBackupSession(backupSession);
                   setBackupDirection("forward");
