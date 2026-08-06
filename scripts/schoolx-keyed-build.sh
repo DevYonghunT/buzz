@@ -72,6 +72,20 @@ echo "  api key  : (set, ${#ANTHROPIC_API_KEY} chars — never printed)"
 echo
 
 # ── frontend deps and version ────────────────────────────────────────────────
+# set-version-from-tag.mjs rewrites tracked files. Restore them on exit so a
+# build never leaves the repo carrying a "-team.local" version — committing that
+# by accident is easy and silently mislabels the next real release.
+version_files=(
+    desktop/package.json
+    desktop/src-tauri/Cargo.toml
+    desktop/src-tauri/Cargo.lock
+    desktop/src-tauri/tauri.conf.json
+)
+restore_version_files() {
+    git checkout -- "${version_files[@]}" 2>/dev/null || true
+}
+trap restore_version_files EXIT
+
 pnpm install --frozen-lockfile
 (cd desktop && node scripts/set-version-from-tag.mjs "$version")
 
