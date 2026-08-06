@@ -95,6 +95,38 @@ export const en = {
         copy: "Copy to clipboard",
         copied: "Copied to clipboard",
       },
+      community: {
+        chooseTitle: "Join or create a community",
+        chooseDescription:
+          "Join with an invite, create your own community, or reconnect one you already have.",
+        join: "Join a community",
+        create: "Create a community",
+        existing: "I already have a community",
+        reconnectTitle: "Reconnect to your community",
+        reconnectDescription:
+          "Tell us your role so we can find the fastest way back in.",
+        owner: "I own the community",
+        memberOrAdmin: "I’m a member or admin",
+        memberEntryDescription:
+          "Enter the community URL or an invite link. Your role will be restored when you connect.",
+        joinEntryDescription:
+          "Enter the invite link or community URL you received.",
+      },
+      profile: {
+        title: "What should we call you?",
+        description:
+          "Pick the name people and agents will see in SchoolX. You can change it anytime.",
+        continue: "Continue",
+        createKey: "Create an identity key",
+        saving: "Saving profile",
+        skipForNow: "Skip for now",
+        continueWithoutSaving: "Continue without saving",
+      },
+      avatar: {
+        title: "Next, add a display image",
+        description: "Choose an image or emoji as your avatar",
+        addImage: "Add a display image",
+      },
     },
   },
   settings: {

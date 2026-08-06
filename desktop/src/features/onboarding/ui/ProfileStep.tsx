@@ -1,4 +1,5 @@
 import * as React from "react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 import { SidebarRelayConnectionCompactCard } from "@/features/sidebar/ui/SidebarRelayConnectionCard";
@@ -193,6 +194,7 @@ export function ProfileStep({
   state,
   usesExistingIdentity = false,
 }: ProfileStepProps) {
+  const { t } = useTranslation();
   const {
     advanceWithoutSaving,
     back,
@@ -221,11 +223,10 @@ export function ProfileStep({
     >
       <div className="w-full max-w-2xl">
         <h1 className="text-title font-normal text-foreground">
-          What should we call you?
+          {t("app.onboarding.profile.title")}
         </h1>
         <p className="mt-5 text-sm leading-6 text-muted-foreground">
-          Pick the name people and agents will see in SchoolX. You can change it
-          anytime.
+          {t("app.onboarding.profile.description")}
         </p>
       </div>
 
@@ -288,11 +289,14 @@ export function ProfileStep({
           type="button"
         >
           {isSaving ? (
-            <Spinner aria-label="Saving profile" className="h-4 w-4 border-2" />
+            <Spinner
+              aria-label={t("app.onboarding.profile.saving")}
+              className="h-4 w-4 border-2"
+            />
           ) : usesExistingIdentity ? (
-            "Continue"
+            t("app.onboarding.profile.continue")
           ) : (
-            "Create an identity key"
+            t("app.onboarding.profile.createKey")
           )}
         </Button>
 
@@ -332,7 +336,7 @@ export function ProfileStep({
               type="button"
               variant="ghost"
             >
-              Skip for now
+              {t("app.onboarding.profile.skipForNow")}
             </Button>
           ) : null}
           {saveRecovery.canAdvanceWithoutSaving ? (
@@ -343,7 +347,7 @@ export function ProfileStep({
               type="button"
               variant="ghost"
             >
-              Continue without saving
+              {t("app.onboarding.profile.continueWithoutSaving")}
             </Button>
           ) : null}
           <div className="flex-1" />

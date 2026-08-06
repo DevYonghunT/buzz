@@ -1,4 +1,5 @@
 import * as React from "react";
+import { useTranslation } from "react-i18next";
 import { Check, Copy } from "lucide-react";
 
 import { HostedCommunityOnboarding } from "@/features/communities/ui/HostedCommunityOnboarding";
@@ -42,6 +43,7 @@ export function WelcomeSetup({
   initialTransitionMode = "initial",
   onBack,
 }: WelcomeSetupProps) {
+  const { t } = useTranslation();
   const [page, setPage] = React.useState<WelcomeSetupPage>(initialPage);
   const [transitionMode, setTransitionMode] =
     React.useState<WelcomeTransitionMode>(initialTransitionMode);
@@ -123,11 +125,10 @@ export function WelcomeSetup({
             >
               <div className="w-full max-w-[760px]">
                 <h1 className="text-title font-normal">
-                  Join or create a community
+                  {t("app.onboarding.community.chooseTitle")}
                 </h1>
                 <p className="mt-3 text-sm leading-6 text-foreground/80">
-                  Join with an invite, create your own community, or reconnect
-                  one you already have.
+                  {t("app.onboarding.community.chooseDescription")}
                 </p>
               </div>
               <div className="flex w-full flex-1 translate-y-16 flex-col items-center justify-center gap-20 py-8">
@@ -141,7 +142,7 @@ export function WelcomeSetup({
                     onClick={() => showPage("join")}
                     type="button"
                   >
-                    Join a community
+                    {t("app.onboarding.community.join")}
                   </button>
                 </Card>
                 <Card
@@ -154,7 +155,7 @@ export function WelcomeSetup({
                     onClick={() => setIsHostedSignInOpen(true)}
                     type="button"
                   >
-                    Create a community
+                    {t("app.onboarding.community.create")}
                   </button>
                 </Card>
                 <Card
@@ -167,7 +168,7 @@ export function WelcomeSetup({
                     onClick={() => showPage("existing")}
                     type="button"
                   >
-                    I already have a community
+                    {t("app.onboarding.community.existing")}
                   </button>
                 </Card>
               </div>
@@ -192,10 +193,10 @@ export function WelcomeSetup({
             >
               <div className="w-full max-w-[760px]">
                 <h1 className="text-title font-normal">
-                  Reconnect to your community
+                  {t("app.onboarding.community.reconnectTitle")}
                 </h1>
                 <p className="mt-3 text-sm leading-6 text-foreground/80">
-                  Tell us your role so we can find the fastest way back in.
+                  {t("app.onboarding.community.reconnectDescription")}
                 </p>
               </div>
               <div className="flex w-full flex-1 translate-y-16 flex-col items-center justify-center gap-20 py-8">
@@ -209,7 +210,7 @@ export function WelcomeSetup({
                     onClick={() => setIsHostedSignInOpen(true)}
                     type="button"
                   >
-                    I own the community
+                    {t("app.onboarding.community.owner")}
                   </button>
                 </Card>
                 <Card
@@ -222,7 +223,7 @@ export function WelcomeSetup({
                     onClick={() => showPage("member")}
                     type="button"
                   >
-                    I’m a member or admin
+                    {t("app.onboarding.community.memberOrAdmin")}
                   </button>
                 </Card>
                 <SelfHostedRelayEntry
@@ -259,13 +260,13 @@ export function WelcomeSetup({
               <div className="w-full max-w-[620px]">
                 <h1 className="text-title font-normal">
                   {page === "member"
-                    ? "Reconnect to your community"
-                    : "Join a community"}
+                    ? t("app.onboarding.community.reconnectTitle")
+                    : t("app.onboarding.community.join")}
                 </h1>
                 <p className="mt-3 text-sm leading-6 text-foreground/80">
                   {page === "member"
-                    ? "Enter the community URL or an invite link. Your role will be restored when you connect."
-                    : "Enter the invite link or community URL you received."}
+                    ? t("app.onboarding.community.memberEntryDescription")
+                    : t("app.onboarding.community.joinEntryDescription")}
                 </p>
               </div>
               <div className="flex w-full flex-1 flex-col items-center justify-center gap-16">

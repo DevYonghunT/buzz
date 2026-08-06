@@ -12,6 +12,7 @@ import { ONBOARDING_PRIMARY_CTA_CLASS } from "./OnboardingChrome";
 import { OnboardingFooter } from "./OnboardingFooter";
 import { AnimatePresence, motion } from "motion/react";
 import * as React from "react";
+import { useTranslation } from "react-i18next";
 import {
   type OnboardingTransitionDirection,
   OnboardingSlideTransition,
@@ -74,6 +75,7 @@ function AvatarPreview({
   avatarUrl: string;
   previewName: string;
 }) {
+  const { t } = useTranslation();
   const emojiAvatar = parseEmojiAvatarDataUrl(avatarUrl);
   const hasAvatarUrl = avatarUrl.trim().length > 0;
 
@@ -100,7 +102,7 @@ function AvatarPreview({
         </div>
       ) : !hasAvatarUrl ? (
         <div
-          aria-label="Add a display image"
+          aria-label={t("app.onboarding.avatar.addImage")}
           className="flex h-full w-full shrink-0 items-center justify-center rounded-full border-2 border-dashed border-border bg-background text-primary shadow-xs"
           data-testid="onboarding-avatar-preview"
           role="img"
@@ -245,6 +247,7 @@ export function AvatarStep({
   showAlwaysSkip = false,
   state,
 }: AvatarStepProps) {
+  const { t } = useTranslation();
   const {
     advanceWithoutSaving,
     back,
@@ -330,10 +333,10 @@ export function AvatarStep({
         <div className="flex w-full flex-col items-center text-center lg:items-start lg:text-left">
           <div className="w-full max-w-[500px]">
             <h1 className="text-title font-normal text-foreground">
-              Next, add a display image
+              {t("app.onboarding.avatar.title")}
             </h1>
             <p className="mt-5 text-sm leading-6 text-muted-foreground">
-              Choose an image or emoji as your avatar
+              {t("app.onboarding.avatar.description")}
             </p>
           </div>
 

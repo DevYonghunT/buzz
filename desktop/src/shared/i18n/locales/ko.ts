@@ -72,6 +72,37 @@ export const ko = {
         copy: "클립보드에 복사",
         copied: "복사했습니다",
       },
+      community: {
+        chooseTitle: "커뮤니티에 참여하거나 새로 만들기",
+        chooseDescription:
+          "초대를 받아 참여하거나, 우리 커뮤니티를 새로 만들거나, 이미 쓰던 커뮤니티에 다시 연결합니다.",
+        join: "커뮤니티에 참여하기",
+        create: "커뮤니티 새로 만들기",
+        existing: "이미 쓰던 커뮤니티가 있습니다",
+        reconnectTitle: "쓰던 커뮤니티에 다시 연결",
+        reconnectDescription:
+          "어떤 역할이었는지 알려주시면 가장 빠른 길로 안내합니다.",
+        owner: "제가 만든 커뮤니티입니다",
+        memberOrAdmin: "멤버 또는 관리자입니다",
+        memberEntryDescription:
+          "커뮤니티 주소나 초대 링크를 입력하세요. 연결하면 원래 역할이 그대로 복구됩니다.",
+        joinEntryDescription: "받으신 초대 링크나 커뮤니티 주소를 입력하세요.",
+      },
+      profile: {
+        title: "어떻게 불러드릴까요?",
+        description:
+          "사람들과 에이전트에게 보일 이름입니다. 언제든지 바꿀 수 있습니다.",
+        continue: "계속하기",
+        createKey: "프라이빗키 만들기",
+        saving: "프로필을 저장하는 중",
+        skipForNow: "나중에 하기",
+        continueWithoutSaving: "저장하지 않고 계속하기",
+      },
+      avatar: {
+        title: "프로필 사진을 정해 주세요",
+        description: "이미지나 이모지를 아바타로 고를 수 있습니다",
+        addImage: "프로필 사진 추가",
+      },
     },
   },
   settings: {
