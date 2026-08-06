@@ -32,6 +32,7 @@ const NEST_DIRS: &[&str] = &[
     "PLANS",
     "WORK_LOGS",
     "OUTBOX",
+    "TEMPLATES",
     ".scratch",
 ];
 
@@ -42,6 +43,19 @@ pub(crate) const AGENTS_MD: &str = include_str!("nest_agents.md");
 /// Default SKILL.md content for the buzz-cli skill.
 /// Written to ~/.schoolx/.agents/skills/buzz-cli/SKILL.md on first init.
 const BUZZ_CLI_SKILL_MD: &str = include_str!("nest_skill.md");
+
+/// Document-authoring skill: which library to use per format, and the
+/// TEMPLATES/ convention. Bundled so every teammate's agent reaches for the
+/// same tools — otherwise each machine picks a different library and the
+/// documents a school produces stop looking alike.
+const DOCUMENT_SKILL_MD: &str = include_str!("nest_document_skill.md");
+
+/// Written to TEMPLATES/README.md so the empty directory explains itself.
+/// Without it the folder reads as leftover scaffolding and nobody fills it.
+const TEMPLATES_README_MD: &str = include_str!("nest_templates_readme.md");
+
+/// Nest-relative directory for the document-authoring skill.
+const DOCUMENT_SKILL_DIR: &str = ".agents/skills/document-authoring";
 
 /// Template content version for AGENTS.md static content (above managed markers).
 /// Bump this when changing `nest_agents.md` to trigger refresh on existing installs.
@@ -213,26 +227,16 @@ pub fn ensure_nest_at(root: &Path) -> Result<(), String> {
     // Write buzz-cli skill to the harness-agnostic .agents path.
     // The first-init write uses the new canonical path; migration from
     // the old .claude path is handled in refresh_skill_md_if_stale.
-    let agents_skill_dir = root.join(CANONICAL_SKILL_DIR);
-    fs::create_dir_all(&agents_skill_dir)
-        .map_err(|e| format!("create {}: {e}", agents_skill_dir.display()))?;
+    write_if_absent(
+        &root.join(CANONICAL_SKILL_DIR).join("SKILL.md"),
+        BUZZ_CLI_SKILL_MD,
+    )?;
 
-    let skill_md = agents_skill_dir.join("SKILL.md");
-    match fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(&skill_md)
-    {
-        Ok(mut file) => {
-            use std::io::Write;
-            file.write_all(BUZZ_CLI_SKILL_MD.as_bytes())
-                .map_err(|e| format!("write {}: {e}", skill_md.display()))?;
-        }
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {}
-        Err(e) => {
-            return Err(format!("create {}: {e}", skill_md.display()));
-        }
-    }
+    write_if_absent(
+        &root.join(DOCUMENT_SKILL_DIR).join("SKILL.md"),
+        DOCUMENT_SKILL_MD,
+    )?;
+    write_if_absent(&root.join("TEMPLATES/README.md"), TEMPLATES_README_MD)?;
 
     // Create harness-specific symlinks for all known providers.
     // Migration of the old .claude/skills/buzz-cli real dir is handled in
@@ -310,6 +314,29 @@ pub fn ensure_nest_at(root: &Path) -> Result<(), String> {
 /// Create harness-specific skill symlinks for each known provider.
 /// Idempotent: skips any path where `symlink_metadata` succeeds — real
 /// directories, valid symlinks, and dangling symlinks are all left alone.
+/// Write `contents` to `path`, creating parents, but never overwrite.
+///
+/// `create_new` rather than a exists-check: a user who edited their copy keeps
+/// it, and two agents initialising the nest at once cannot clobber each other.
+fn write_if_absent(path: &Path, contents: &str) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("create {}: {e}", parent.display()))?;
+    }
+    match fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+    {
+        Ok(mut file) => {
+            use std::io::Write;
+            file.write_all(contents.as_bytes())
+                .map_err(|e| format!("write {}: {e}", path.display()))
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(()),
+        Err(e) => Err(format!("create {}: {e}", path.display())),
+    }
+}
+
 #[cfg(unix)]
 fn ensure_skill_symlinks(root: &Path) -> Result<(), String> {
     for skill_dir in known_skill_dirs() {

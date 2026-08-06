@@ -120,6 +120,43 @@ fn ensure_nest_rejects_symlink_root() {
 }
 
 #[test]
+fn ensure_nest_creates_document_skill_and_templates() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join(".buzz");
+    ensure_nest_at(&root).unwrap();
+
+    let skill = root.join(".agents/skills/document-authoring/SKILL.md");
+    assert!(skill.exists(), "document-authoring SKILL.md should exist");
+    assert_eq!(fs::read_to_string(&skill).unwrap(), DOCUMENT_SKILL_MD);
+
+    // The folder is the whole point of the skill's template convention: an
+    // agent that cannot find TEMPLATES/ falls back to inventing a layout.
+    let readme = root.join("TEMPLATES/README.md");
+    assert!(readme.exists(), "TEMPLATES/README.md should exist");
+    assert_eq!(fs::read_to_string(&readme).unwrap(), TEMPLATES_README_MD);
+}
+
+/// A user who tailored either file keeps their edits across restarts —
+/// `ensure_nest` runs on every launch, so overwriting would silently discard
+/// the school's own wording every time the app opened.
+#[test]
+fn ensure_nest_does_not_overwrite_edited_document_skill() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join(".buzz");
+    ensure_nest_at(&root).unwrap();
+
+    let skill = root.join(".agents/skills/document-authoring/SKILL.md");
+    let readme = root.join("TEMPLATES/README.md");
+    fs::write(&skill, "우리 학교 규칙").unwrap();
+    fs::write(&readme, "우리 학교 서식 안내").unwrap();
+
+    ensure_nest_at(&root).unwrap();
+
+    assert_eq!(fs::read_to_string(&skill).unwrap(), "우리 학교 규칙");
+    assert_eq!(fs::read_to_string(&readme).unwrap(), "우리 학교 서식 안내");
+}
+
+#[test]
 fn ensure_nest_creates_skill_file() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join(".buzz");
