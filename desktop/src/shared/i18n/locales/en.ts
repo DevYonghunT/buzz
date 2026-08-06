@@ -128,6 +128,20 @@ export const en = {
         addImage: "Add a display image",
       },
     },
+    sidebar: {
+      nav: {
+        inbox: "Inbox",
+        pulse: "Pulse",
+        projects: "Projects",
+        agents: "Agents",
+        workflows: "Workflows",
+      },
+      sections: {
+        channels: "Channels",
+        forums: "Forums",
+        directMessages: "Direct messages",
+      },
+    },
   },
   settings: {
     sidebar: {

@@ -1,4 +1,5 @@
 import { Activity, Bot, FolderGit2, Inbox, Zap } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import { TopbarSearch } from "@/features/search/ui/TopbarSearch";
 import { FeatureGate } from "@/shared/features";
@@ -89,6 +90,7 @@ export function AppSidebarPrimaryMenu({
   onSelectWorkflows,
   selectedView,
 }: AppSidebarPrimaryMenuProps) {
+  const { t } = useTranslation();
   return (
     <SidebarHeader
       className="relative z-40 cursor-default select-none px-2 pb-0 pt-0"
@@ -104,7 +106,7 @@ export function AppSidebarPrimaryMenu({
             type="button"
           >
             <Inbox className="h-4 w-4" />
-            <SidebarMenuLabel>Inbox</SidebarMenuLabel>
+            <SidebarMenuLabel>{t("app.sidebar.nav.inbox")}</SidebarMenuLabel>
           </SidebarMenuButton>
           {homeBadgeCount > 0 ? (
             <SidebarMenuBadge
@@ -125,7 +127,7 @@ export function AppSidebarPrimaryMenu({
               type="button"
             >
               <Activity className="h-4 w-4" />
-              <SidebarMenuLabel>Pulse</SidebarMenuLabel>
+              <SidebarMenuLabel>{t("app.sidebar.nav.pulse")}</SidebarMenuLabel>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </FeatureGate>
@@ -139,7 +141,9 @@ export function AppSidebarPrimaryMenu({
               type="button"
             >
               <FolderGit2 className="h-4 w-4" />
-              <SidebarMenuLabel>Projects</SidebarMenuLabel>
+              <SidebarMenuLabel>
+                {t("app.sidebar.nav.projects")}
+              </SidebarMenuLabel>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </FeatureGate>
@@ -152,7 +156,7 @@ export function AppSidebarPrimaryMenu({
             type="button"
           >
             <Bot className="h-4 w-4" />
-            <SidebarMenuLabel>Agents</SidebarMenuLabel>
+            <SidebarMenuLabel>{t("app.sidebar.nav.agents")}</SidebarMenuLabel>
           </SidebarMenuButton>
         </SidebarMenuItem>
         <FeatureGate feature="workflows">
@@ -165,7 +169,9 @@ export function AppSidebarPrimaryMenu({
               type="button"
             >
               <Zap className="h-4 w-4" />
-              <SidebarMenuLabel>Workflows</SidebarMenuLabel>
+              <SidebarMenuLabel>
+                {t("app.sidebar.nav.workflows")}
+              </SidebarMenuLabel>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </FeatureGate>

@@ -104,6 +104,23 @@ export const ko = {
         addImage: "프로필 사진 추가",
       },
     },
+    sidebar: {
+      // 「받은 편지함」·「업무방」처럼 완전히 우리말로 옮기지 않는다. 이
+      // 이름들은 화면 위치를 가리키는 고유 이름에 가깝고, 팀원끼리 "인박스
+      // 봤어?"처럼 부르게 된다. 뜻이 갈리는 것만 우리말로 둔다.
+      nav: {
+        inbox: "인박스",
+        pulse: "펄스",
+        projects: "프로젝트",
+        agents: "에이전트",
+        workflows: "워크플로",
+      },
+      sections: {
+        channels: "채널",
+        forums: "포럼",
+        directMessages: "개인 메시지",
+      },
+    },
   },
   settings: {
     sidebar: {
