@@ -109,6 +109,13 @@ if [[ -n "${SCHOOLX_RELAY_URL:-}" ]]; then
     export BUZZ_BUILD_AUTO_CONNECT_DEFAULT_RELAY="true"
 fi
 
+# `cargo:rustc-env` only reaches the binary if the crate actually recompiles.
+# A desktop crate left over from an earlier build can be judged fresh, in which
+# case build.rs re-runs and emits the new values while tauri bundles the stale
+# binary — a keyless installer that looks like a success. Touching the file that
+# holds the `option_env!` calls forces the expansion to happen again.
+touch desktop/src-tauri/src/managed_agents/agent_env.rs
+
 build_args=(--verbose --no-sign --config src-tauri/tauri.team.conf.json)
 [[ "$target" == "$host_target" ]] || build_args+=(--target "$target")
 (cd desktop && pnpm tauri build "${build_args[@]}")
@@ -122,6 +129,36 @@ fi
 
 installer=$(find "$bundle_dir" \( -name '*.dmg' -o -name '*setup.exe' \) -type f | head -1 || true)
 [[ -n "$installer" ]] || die "no installer found under $bundle_dir"
+
+# ── prove the key is actually in the binary ──────────────────────────────────
+# Without this the failure is silent: teammates install, open Settings, and find
+# an empty API key field with nothing to explain it.
+#
+# The blob is base64 of "ANTHROPIC_API_KEY=<key>". "ANTHROPIC_API_KEY=" is 18
+# bytes — a whole number of 3-byte base64 groups — so its encoding is a stable
+# prefix of the encoded blob regardless of the key that follows. Matching the
+# prefix proves the bake landed without putting the key on screen.
+if [[ "$target" == "$host_target" ]]; then
+    built_binary="desktop/src-tauri/target/release/buzz"
+else
+    built_binary="desktop/src-tauri/target/${target}/release/buzz"
+fi
+blob_prefix=$(printf 'ANTHROPIC_API_KEY=' | base64 | cut -c1-20)
+
+if [[ ! -f "$built_binary" ]]; then
+    die "cannot verify the bake: $built_binary is missing"
+fi
+
+if ! grep -aq "$blob_prefix" "$built_binary"; then
+    die "the API key is NOT in the built binary — do not ship $installer
+
+build.rs emitted the values but the desktop crate was not recompiled, so the
+bundle carries a stale binary. Force a rebuild and run this script again:
+
+    cargo clean -p buzz-desktop --release --manifest-path desktop/src-tauri/Cargo.toml"
+fi
+
+echo "verified: the baked provider, model, and key are present in the binary."
 
 echo
 echo "Built: ${repo_root}/${installer}"
