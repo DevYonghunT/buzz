@@ -34,6 +34,24 @@ export const en = {
         "Enter the address of the relay your school runs. You do not need an invite code — the first administrator to connect is already an owner.",
       placeholder: "ws://relay.our-school.example",
     },
+    /**
+     * Machine onboarding. Kept inside `app` rather than a namespace of its own:
+     * a namespace present in `en` and missing from `ko` renders every key in it
+     * as a raw path for Korean users, and `fallbackLng` does not rescue it.
+     */
+    onboarding: {
+      landing: {
+        // Two lines because the design breaks the sentence deliberately; the
+        // Korean break lands in a different place than a naive split would.
+        taglineTop: "Your people, your agents, your projects —",
+        taglineBottom: "all in one place.",
+        loading: "Loading identity…",
+        continueSetup: "Continue setup",
+        createKey: "Create a new identity key",
+        useDifferentKey: "Use a different key instead",
+        useExistingKey: "Use an existing key",
+      },
+    },
   },
   settings: {
     sidebar: {

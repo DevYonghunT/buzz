@@ -18,6 +18,19 @@ export const ko = {
         "학교가 운영하는 릴레이 주소를 입력하세요. 초대 코드는 필요 없습니다 — 처음 연결하는 관리자가 이미 소유자입니다.",
       placeholder: "ws://relay.our-school.example",
     },
+    onboarding: {
+      landing: {
+        taglineTop: "우리 사람들, 에이전트, 프로젝트를",
+        taglineBottom: "한곳에서",
+        loading: "신원을 불러오는 중…",
+        continueSetup: "설정 이어서 하기",
+        // 「열쇠」로 부른다 — 사용 설명서와 같은 용어. 비밀번호가 아니라
+        // 잃어버리면 복구할 수 없는 것이라는 감각을 주는 쪽을 택했다.
+        createKey: "새 열쇠 만들기",
+        useDifferentKey: "다른 열쇠로 바꾸기",
+        useExistingKey: "이미 있는 열쇠 사용하기",
+      },
+    },
   },
   settings: {
     sidebar: {

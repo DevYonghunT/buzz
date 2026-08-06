@@ -2,6 +2,7 @@ import * as React from "react";
 import type { QueryClient } from "@tanstack/react-query";
 import { ArrowUp } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
+import { useTranslation } from "react-i18next";
 
 import { requiredCredentialEnvKeys } from "@/features/agents/ui/agentConfigOptions";
 import { getBakedBuildEnv } from "@/shared/api/tauri";
@@ -73,6 +74,7 @@ export function MachineOnboardingFlow({
    */
   navigateAfterComplete?: (nav: PostOnboardingNavigation) => void;
 }) {
+  const { t } = useTranslation();
   const [page, setPage] = React.useState<MachineOnboardingPage>(
     identityLost ? "key-import" : (initialPage ?? "identity"),
   );
@@ -255,8 +257,9 @@ export function MachineOnboardingFlow({
                 src="/landing/buzz-wordmark.png"
               />
               <p className="mt-2 max-w-[560px] text-center text-2xl font-normal leading-none text-foreground">
-                Your people, your agents, your projects —<br />
-                all in one place.
+                {t("app.onboarding.landing.taglineTop")}
+                <br />
+                {t("app.onboarding.landing.taglineBottom")}
               </p>
               {error ? (
                 <p className="mt-4 text-sm text-destructive">{error}</p>
@@ -269,10 +272,10 @@ export function MachineOnboardingFlow({
                   type="button"
                 >
                   {isPending
-                    ? "Loading identity…"
+                    ? t("app.onboarding.landing.loading")
                     : selectedPubkey
-                      ? "Continue setup"
-                      : "Create a new identity key"}
+                      ? t("app.onboarding.landing.continueSetup")
+                      : t("app.onboarding.landing.createKey")}
                 </Button>
                 <Button
                   className={`${ONBOARDING_SECONDARY_CTA_CLASS} px-5`}
@@ -285,8 +288,8 @@ export function MachineOnboardingFlow({
                   variant="ghost"
                 >
                   {selectedPubkey
-                    ? "Use a different key instead"
-                    : "Use an existing key"}
+                    ? t("app.onboarding.landing.useDifferentKey")
+                    : t("app.onboarding.landing.useExistingKey")}
                 </Button>
               </div>
               <IdentityKeyHelpDialog />
