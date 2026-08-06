@@ -90,7 +90,40 @@ $99), Windows는 코드 서명 인증서가 필요하다. 학교에 배포하기
 macOS 서명이 있어야 한다 — 교사가 우클릭·시스템 설정을 거쳐야 하는 앱은
 설치 단계에서 이탈한다.
 
-## 5. 왜 `release.yml`을 안 쓰는가
+## 5. API 키를 구워서 배포하기 (선택)
+
+팀원마다 API 키를 넣게 하는 대신, **관리자가 키를 구운 설치본**을 만들어
+건넬 수 있다. 그러면 팀원은 설치하고 열쇠만 만들면 끝이고, 사용 설명서
+5장(모델·키 설정)을 밟지 않아도 된다.
+
+```bash
+ANTHROPIC_API_KEY="$(op read op://private/anthropic/key)" \
+SCHOOLX_MODEL=<모델-id> \
+  ./scripts/schoolx-keyed-build.sh
+```
+
+Intel용은 `SCHOOLX_TARGET=x86_64-apple-darwin`을 얹어 한 번 더 돌린다.
+`SCHOOLX_RELAY_URL`을 주면 릴레이 주소까지 미리 박혀 팀원이 주소를 입력할
+일도 없다.
+
+구운 값은 **가장 낮은 우선순위**라 팀원이 설정에서 덮어쓸 수 있고, 설정
+화면에는 `(inherited from build)`로 표시되며 키는 `••••••`로 가려진다.
+`SCHOOLX_MODEL`은 기본값을 두지 않았다 — Anthropic은 모델이 필수라
+(`config: ANTHROPIC_MODEL required`) 잘못 추측한 기본값을 구우면 모든
+팀원의 빌드가 조용히 망가진다.
+
+> **구운 설치본은 절대 Actions 아티팩트나 Release로 올리지 않는다.**
+> 키는 바이너리 안에 base64로 들어 있어 `strings`와 디코드로 복구된다. UI
+> 마스킹은 화면 표시에 관한 것이지 바이너리를 지키지 않는다. 이 포크는
+> **공개 저장소**이므로 아티팩트로 올리면 사실상 키를 공개하는 것이다.
+> USB·에어드랍·사내 드라이브로 직접 건네고, **한도를 건 폐기 가능한 키**를
+> 쓴다. GitHub Secret에 넣는 것은 *소스*에 키가 남는 것만 막지 *빌드
+> 결과물*은 막지 못한다 — 둘은 별개다.
+
+키를 구운 빌드에서도 팀원은 여전히 자기 열쇠(identity key)를 직접 만든다.
+그건 신원이지 자격증명이 아니라 공유 대상이 아니다.
+
+## 6. 왜 `release.yml`을 안 쓰는가
 
 `.github/workflows/release.yml`은 이 포크에서 **돌지 않는다.** 모든 잡이
 `if: github.repository == 'block/buzz'`로 막혀 있고, macOS 잡은
