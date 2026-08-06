@@ -1,6 +1,7 @@
 import { Check, Copy, Eye, EyeOff, Info, ShieldCheck } from "lucide-react";
 import { useReducedMotion } from "motion/react";
 import * as React from "react";
+import { useTranslation } from "react-i18next";
 
 import { getNsec } from "@/shared/api/tauriIdentity";
 import type { IdentityStorage } from "@/shared/api/types";
@@ -83,6 +84,7 @@ export function BackupStep({
   const [isRevealed, setIsRevealed] = React.useState(false);
   const cancelledRef = React.useRef(false);
   const copiedTimerRef = React.useRef<number | null>(null);
+  const { t } = useTranslation();
 
   React.useEffect(() => {
     if (introPlayed) return;
@@ -162,22 +164,22 @@ export function BackupStep({
   );
   const storageDescription =
     identityStorage === "system-keyring"
-      ? "SchoolX keeps your identity key in your system keychain. Your computer may ask for your password when SchoolX needs to read the key."
+      ? t("app.onboarding.backup.storage.keychain")
       : identityStorage === "local-file"
-        ? "Your system keychain wasn’t available, so SchoolX keeps your identity key in a private file on this device."
-        : "SchoolX keeps your identity key protected on this device. Make a separate backup in case you lose access.";
+        ? t("app.onboarding.backup.storage.fileFallback")
+        : t("app.onboarding.backup.storage.device");
   const storageTitle =
     identityStorage === "system-keyring"
-      ? "Protected by your system keychain"
+      ? t("app.onboarding.backup.storageTitle.keychain")
       : identityStorage === "local-file"
-        ? "Stored in private device storage"
-        : "Protected in private device storage";
+        ? t("app.onboarding.backup.storageTitle.fileFallback")
+        : t("app.onboarding.backup.storageTitle.device");
   const introStorageDescription =
     identityStorage === "system-keyring"
-      ? "SchoolX keeps your identity key in your system keychain."
+      ? t("app.onboarding.backup.introStorage.keychain")
       : identityStorage === "local-file"
-        ? "SchoolX keeps your identity key in a private file on this device because the system keychain wasn’t available."
-        : "Your identity key is protected on this device.";
+        ? t("app.onboarding.backup.introStorage.fileFallback")
+        : t("app.onboarding.backup.introStorage.device");
 
   if (optionsExpanded) {
     return (
@@ -190,12 +192,10 @@ export function BackupStep({
       >
         <div className="flex w-full max-w-140 shrink-0 flex-col text-center">
           <h1 className="text-title font-normal text-foreground">
-            Backup options
+            {t("app.onboarding.backup.options.title")}
           </h1>
           <p className="mt-5 text-sm leading-6 text-foreground/75">
-            Your identity key works like a password for your SchoolX account.
-            Keep a copy somewhere safe. You can create a backup file and lock it
-            with a password you can remember.
+            {t("app.onboarding.backup.options.description")}
           </p>
         </div>
 
@@ -246,8 +246,8 @@ export function BackupStep({
                 {copyState === "copying"
                   ? "Copying…"
                   : copyState === "copied"
-                    ? "Copied to clipboard"
-                    : "Copy to clipboard"}
+                    ? t("app.onboarding.backup.copied")
+                    : t("app.onboarding.backup.copy")}
               </Button>
             </div>
 
@@ -308,8 +308,8 @@ export function BackupStep({
           key={created ? "created" : "creating"}
         >
           {created
-            ? "Your unique identity key has been created"
-            : "Creating your identity key"}
+            ? t("app.onboarding.backup.titleCreated")
+            : t("app.onboarding.backup.titleCreating")}
         </h1>
         {created ? (
           <p
@@ -318,16 +318,17 @@ export function BackupStep({
               REVEAL_ANIMATION_CLASS,
             )}
           >
-            {introStorageDescription} You can continue now, or{" "}
+            {introStorageDescription}
+            {t("app.onboarding.backup.introContinue")}
             <button
               className="rounded-sm font-medium underline decoration-foreground/40 underline-offset-4 transition-colors hover:decoration-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
               data-testid="backup-options-link"
               onClick={onShowOptions}
               type="button"
             >
-              review backup options
-            </button>{" "}
-            for ways to restore your account.
+              {t("app.onboarding.backup.optionsLink")}
+            </button>
+            {t("app.onboarding.backup.introRestore")}
           </p>
         ) : null}
       </div>
@@ -338,7 +339,7 @@ export function BackupStep({
           data-testid="backup-intro-logo"
         >
           <FuzzyLogo
-            ariaLabel="Creating your identity key"
+            ariaLabel={t("app.onboarding.backup.titleCreating")}
             className="w-20! text-foreground"
             fuzz
             loop
@@ -370,7 +371,9 @@ export function BackupStep({
                 </div>
                 <Button
                   aria-label={
-                    isRevealed ? "Hide private key" : "Reveal private key"
+                    isRevealed
+                      ? t("app.onboarding.backup.hideKey")
+                      : t("app.onboarding.backup.revealKey")
                   }
                   className="h-10 w-10 shrink-0 text-muted-foreground hover:text-foreground"
                   data-testid="backup-key-reveal-toggle"
@@ -401,10 +404,7 @@ export function BackupStep({
 
             <p className="mx-auto mt-5 flex max-w-[440px] items-start justify-center gap-1.5 text-center text-xs leading-5 text-[var(--buzz-onboarding-backup-ink)]">
               <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              <span>
-                Never share your private key. Anyone with this key can
-                impersonate you and access everything in your account.
-              </span>
+              <span>{t("app.onboarding.backup.neverShare")}</span>
             </p>
           </div>
         </div>

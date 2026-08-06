@@ -51,6 +51,50 @@ export const en = {
         useDifferentKey: "Use a different key instead",
         useExistingKey: "Use an existing key",
       },
+      backup: {
+        titleCreated: "Your unique identity key has been created",
+        titleCreating: "Creating your identity key",
+        /**
+         * The intro is one sentence with a link inside it. Split into three
+         * pieces rather than interpolated, because Korean puts the particle
+         * *after* the link text — a single string with a placeholder cannot
+         * express that without stranding the particle in English word order.
+         */
+        introContinue: " You can continue now, or ",
+        optionsLink: "review backup options",
+        introRestore: " for ways to restore your account.",
+        storage: {
+          keychain:
+            "SchoolX keeps your identity key in your system keychain. Your computer may ask for your password when SchoolX needs to read the key.",
+          fileFallback:
+            "Your system keychain wasn’t available, so SchoolX keeps your identity key in a private file on this device.",
+          device:
+            "SchoolX keeps your identity key protected on this device. Make a separate backup in case you lose access.",
+        },
+        /** Shorter storage line, shown in the intro sentence above the key. */
+        introStorage: {
+          keychain: "SchoolX keeps your identity key in your system keychain.",
+          fileFallback:
+            "SchoolX keeps your identity key in a private file on this device because the system keychain wasn’t available.",
+          device: "Your identity key is protected on this device.",
+        },
+        storageTitle: {
+          keychain: "Protected by your system keychain",
+          fileFallback: "Stored in private device storage",
+          device: "Protected in private device storage",
+        },
+        options: {
+          title: "Backup options",
+          description:
+            "Your identity key works like a password for your SchoolX account. Keep a copy somewhere safe. You can create a backup file and lock it with a password you can remember.",
+        },
+        neverShare:
+          "Never share your private key. Anyone with this key can impersonate you and access everything in your account.",
+        revealKey: "Reveal private key",
+        hideKey: "Hide private key",
+        copy: "Copy to clipboard",
+        copied: "Copied to clipboard",
+      },
     },
   },
   settings: {
