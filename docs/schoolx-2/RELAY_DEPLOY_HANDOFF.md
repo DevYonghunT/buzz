@@ -3,6 +3,10 @@
 서버 배포를 맡으실 분을 위한 문서입니다. 이 저장소를 처음 보신다는 전제로
 썼습니다.
 
+**저장소**: `School-X520/schoolx` (비공개) — 작업 브랜치 `codex/schoolx-2-foundation`.
+`DevYonghunT/buzz`(공개, `block/buzz`의 포크)에도 같은 내용이 올라가 있고 두 곳을
+같이 갱신합니다. 배포 작업은 비공개 쪽에서 하세요.
+
 **맡으실 일**: 지금 개발자 노트북에서 포그라운드로 돌고 있는 릴레이를, 팀원들이
 바깥에서 붙을 수 있는 상시 서버로 올리는 것.
 
@@ -67,7 +71,7 @@ upstream 이미지를 올리면 audience 규칙, 에이전트 채널 정책, 신
 
 | 방법 | 어떻게 | 비고 |
 |---|---|---|
-| **CI (권장)** | 저장소 변수 `GHCR_IMAGE`를 `ghcr.io/DevYonghunT/buzz`로 설정하고 `relay-v0.1.0` 같은 태그를 푸시 | `.github/workflows/docker.yml:79`가 이 변수를 읽습니다. 태그 트리거는 브랜치와 무관하게 동작하고, amd64·arm64 멀티아치를 네이티브 러너에서 빌드합니다 |
+| **CI (권장)** | 저장소 변수 `GHCR_IMAGE`를 `ghcr.io/school-x520/schoolx`로 설정하고 `relay-v0.1.0` 같은 태그를 푸시 | `.github/workflows/docker.yml:79`가 이 변수를 읽습니다. 태그 트리거는 브랜치와 무관하게 동작하고, amd64·arm64 멀티아치를 네이티브 러너에서 빌드합니다. **GHCR 이름은 소문자여야 합니다** |
 | 로컬 빌드 후 푸시 | 루트 `Dockerfile`로 `docker buildx build --platform <서버아키텍처>` | 서버와 아키텍처가 다르면 QEMU라 매우 느립니다 |
 | 서버에서 직접 빌드 | 서버에 소스를 놓고 `docker build` | Rust 워크스페이스라 무겁습니다. RAM 4GB 미만이면 실패합니다 |
 
