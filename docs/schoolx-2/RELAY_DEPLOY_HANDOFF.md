@@ -71,7 +71,7 @@ upstream 이미지를 올리면 audience 규칙, 에이전트 채널 정책, 신
 
 | 방법 | 어떻게 | 비고 |
 |---|---|---|
-| **CI (권장)** | 저장소 변수 `GHCR_IMAGE`를 `ghcr.io/school-x520/schoolx`로 설정하고 `relay-v0.1.0` 같은 태그를 푸시 | `.github/workflows/docker.yml:79`가 이 변수를 읽습니다. 태그 트리거는 브랜치와 무관하게 동작하고, amd64·arm64 멀티아치를 네이티브 러너에서 빌드합니다. **GHCR 이름은 소문자여야 합니다** |
+| **CI (권장)** | `relay-v0.1.0` 같은 태그를 푸시하면 끝 | 저장소 변수 `GHCR_IMAGE`는 `ghcr.io/school-x520/schoolx`로 **이미 설정해 뒀습니다** — 변수 설정에 admin 권한이 필요해서 미리 걸었습니다. `.github/workflows/docker.yml:79`가 이 값을 읽습니다. 태그 트리거는 브랜치와 무관하고, amd64·arm64 멀티아치를 네이티브 러너에서 빌드합니다 |
 | 로컬 빌드 후 푸시 | 루트 `Dockerfile`로 `docker buildx build --platform <서버아키텍처>` | 서버와 아키텍처가 다르면 QEMU라 매우 느립니다 |
 | 서버에서 직접 빌드 | 서버에 소스를 놓고 `docker build` | Rust 워크스페이스라 무겁습니다. RAM 4GB 미만이면 실패합니다 |
 
@@ -79,6 +79,34 @@ CI 경로가 제일 깔끔합니다. `docker.yml`은 `push: branches: [main]`과
 `tags: ["relay-v[0-9]*"]`에 걸려 있는데, 이 포크의 작업 브랜치는
 `codex/schoolx-2-foundation`이라 **브랜치 푸시로는 안 돕니다.** 태그를 써야
 합니다.
+
+```bash
+git tag relay-v0.1.0
+git push origin relay-v0.1.0        # Actions 탭에서 "Docker image" 워크플로 확인
+```
+
+### 2.1-a 만들어진 이미지는 비공개입니다
+
+비공개 저장소에서 밀어 올린 GHCR 패키지는 기본이 **private**입니다. 그래서
+서버에서 그냥 `docker pull`을 하면 실패합니다. 둘 중 하나를 하세요.
+
+**(a) 서버에서 GHCR 로그인** — 권장
+
+`read:packages` 스코프만 가진 PAT(classic)를 하나 만들어 서버에서:
+
+```bash
+echo "<PAT>" | docker login ghcr.io -u <깃헙아이디> --password-stdin
+```
+
+compose가 이미지를 당길 때 이 자격증명을 씁니다. PAT은 만료를 짧게 잡고,
+`read:packages` 외에는 주지 마세요.
+
+**(b) 패키지만 공개로 전환**
+
+GitHub → 저장소 → Packages → 해당 패키지 → Package settings → Change
+visibility → Public. 저장소는 비공개로 두고 이미지만 공개됩니다.
+릴레이 바이너리에는 API 키가 안 들어가므로(키를 굽는 건 데스크톱 앱 쪽입니다)
+보안상 큰 문제는 아니지만, 굳이 공개할 이유도 없으면 (a)가 낫습니다.
 
 ### 2.2 `RELAY_URL`이 커뮤니티 ID를 만듭니다
 
@@ -287,7 +315,7 @@ docker logs -f <relay컨테이너> 2>&1 | grep '"route":"/query"'
 |---|---|
 | **호스트명 확정** | 미정. 도메인을 정해야 시작됩니다 |
 | **서버 확보** | 협의 중. 팀원 기계를 빌리는 방향이고, 필요한 정보는 [RELAY_HOST_REQUEST.md](RELAY_HOST_REQUEST.md)로 요청해 뒀습니다 |
-| **릴레이 이미지** | 아직 없음. §2.1의 CI 경로를 쓰려면 `GHCR_IMAGE` 저장소 변수 설정이 선행됩니다 |
+| **릴레이 이미지** | 아직 없음. `GHCR_IMAGE` 변수는 설정 완료 — `relay-v*` 태그만 푸시하면 만들어집니다 (§2.1). 당길 때 §2.1-a 필요 |
 | **`RELAY_OWNER_PUBKEY`** | 관리자 공개키 미확정 |
 | 백업 | 미정. `./run.sh backup-hint` 참고 |
 | 모니터링 | 미정 |
