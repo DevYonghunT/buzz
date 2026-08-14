@@ -100,7 +100,8 @@ const PROJECT_DETAIL_PANEL_SEARCH_KEYS = [
 
 export function ProjectDetailScreen(props: ProjectDetailScreenProps) {
   const { commitHash, projectId, pullRequestId, issueId } = props;
-  const { goChannel, goProject, goProjects } = useAppNavigation();
+  const { goChannel, goProject, goProjectCode, goProjects } =
+    useAppNavigation();
   const { activeCommunity } = useCommunities();
   const mainInsetRef = useMainInsetRef();
   const projectDetailHeaderChromeRef = useMeasuredCssVariable({
@@ -154,11 +155,9 @@ export function ProjectDetailScreen(props: ProjectDetailScreenProps) {
     () => setSelectedCommitHash(commitHash ?? null),
     [commitHash],
   );
-  // Bumped when breadcrumb navigation should land on the project Overview
-  // tab; remounts WorkspaceTabs, which owns the selected-tab state.
+  // Remounts WorkspaceTabs when breadcrumb navigation returns to Overview.
   const [tabsResetKey, setTabsResetKey] = React.useState(0);
-  // Mirror of the WorkspaceTabs selection so the breadcrumb can name the
-  // active sub-tab. The Overview (readme) tab is "home" and gets no crumb.
+  // Mirrors the active workspace tab in the breadcrumb; Overview has no crumb.
   const [activeTab, setActiveTab] = React.useState("overview");
   // Commit, PR, and issue details are mutually exclusive views, so opening
   // one clears the others.
@@ -939,6 +938,11 @@ export function ProjectDetailScreen(props: ProjectDetailScreenProps) {
                 localSnapshotError={localRepoSnapshotQuery.error}
                 localSnapshotLoading={localRepoSnapshotQuery.isLoading}
                 onBranchChange={handleBranchChange}
+                onOpenCode={() => {
+                  void goProjectCode(project.id, {
+                    baseRef: activeBranch ?? defaultBranch ?? "HEAD",
+                  });
+                }}
                 onOpenMergeRecoveryTerminal={handleOpenMergeRecoveryTerminal}
                 onOpenTerminal={() => {
                   void handleOpenTerminal();

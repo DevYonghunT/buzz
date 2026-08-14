@@ -170,6 +170,8 @@ type MockBridgeOptions = {
   pocketVoiceImportResult?: "success" | "cancel" | "invalid";
   /** Advertised HEAD for the first mock project without adding that branch. */
   projectHeadBranch?: string;
+  /** Enable the scoped SchoolX Code native boundary fixture. */
+  schoolxCodeWorkspace?: boolean;
   /** Relay NIP-11 identity used to sign authoritative repository state. */
   relaySelf?: string | null;
   /** Native-like huddle state seeded from authoritative role-bearing membership. */

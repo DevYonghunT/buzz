@@ -19,6 +19,9 @@ pub(crate) fn shut_down_app(app: &tauri::AppHandle, shutdown_done: &std::sync::a
         .store(true, Ordering::SeqCst);
     if !shutdown_done.swap(true, Ordering::SeqCst) {
         prevent_sleep::release(&app.state::<AppState>().prevent_sleep);
+        if let Err(error) = stop_code_runtime(app) {
+            eprintln!("buzz-desktop: failed to stop Codex app-server: {error}");
+        }
         if let Err(error) = shutdown_managed_agents(app) {
             eprintln!("buzz-desktop: failed to stop managed agents: {error}");
         }
@@ -40,6 +43,7 @@ pub(crate) fn install_signal_handler(
             .shutdown_started
             .store(true, Ordering::SeqCst);
         if !shutdown_done.swap(true, Ordering::SeqCst) {
+            let _ = stop_code_runtime(&app);
             let _ = shutdown_managed_agents(&app);
             #[cfg(feature = "mesh-llm")]
             shutdown_mesh_runtime(&app);
@@ -51,6 +55,15 @@ pub(crate) fn install_signal_handler(
     }) {
         eprintln!("buzz-desktop: failed to register signal handler: {error}");
     }
+}
+
+fn stop_code_runtime(app: &tauri::AppHandle) -> Result<(), String> {
+    let state = app.state::<AppState>();
+    let _guard = state
+        .code_thread_bindings_lock
+        .lock()
+        .map_err(|_| "SchoolX Code binding lock is unavailable during shutdown".to_string())?;
+    state.code_runtime.stop().map(|_| ())
 }
 
 #[cfg(all(feature = "mesh-llm", target_os = "macos"))]

@@ -1,0 +1,440 @@
+{
+  "version": 1,
+  "commands": [
+    { "name": "code_runtime_probe", "topLevelArgs": [] },
+    { "name": "code_runtime_start", "topLevelArgs": [] },
+    { "name": "code_runtime_stop", "topLevelArgs": [] },
+    { "name": "code_runtime_status", "topLevelArgs": [] },
+    {
+      "name": "code_runtime_events",
+      "topLevelArgs": ["afterSequence", "runtimeGeneration", "scope"]
+    },
+    { "name": "code_repository_inspect", "topLevelArgs": ["input"] },
+    { "name": "code_worktree_prepare", "topLevelArgs": ["input"] },
+    { "name": "code_worktree_status", "topLevelArgs": ["descriptor"] },
+    {
+      "name": "code_thread_preparations_list",
+      "topLevelArgs": ["input"]
+    },
+    { "name": "code_threads_list", "topLevelArgs": ["input"] },
+    { "name": "code_thread_start", "topLevelArgs": ["input"] },
+    {
+      "name": "code_thread_binding_recover",
+      "topLevelArgs": ["input"]
+    },
+    { "name": "code_thread_resume", "topLevelArgs": ["input"] },
+    { "name": "code_turn_start", "topLevelArgs": ["input"] },
+    { "name": "code_turn_steer", "topLevelArgs": ["input"] },
+    { "name": "code_turn_interrupt", "topLevelArgs": ["input"] },
+    { "name": "code_approval_respond", "topLevelArgs": ["input"] }
+  ],
+  "eventName": "schoolx-code-workspace-event",
+  "enums": {
+    "executionMode": ["worktree", "local"],
+    "preparationState": ["prepared", "starting"],
+    "runtimePhase": [
+      "notInstalled",
+      "stopped",
+      "starting",
+      "initializing",
+      "ready",
+      "stopping",
+      "failed"
+    ],
+    "approvalDecision": ["accept", "acceptForSession", "decline", "cancel"],
+    "permissionScope": ["turn", "session"],
+    "approvalResponseType": ["decision", "permissions"]
+  },
+  "strictInputs": {
+    "repositoryInspect": {
+      "repositoryRoot": "/native/repository",
+      "baseRef": "main"
+    },
+    "worktreePrepare": {
+      "scope": {
+        "communityId": "community-1",
+        "projectDtag": "project-1",
+        "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "repositoryRoot": "/native/repository",
+      "baseRef": "main",
+      "executionMode": "worktree"
+    },
+    "threadPreparationList": {
+      "scope": {
+        "communityId": "community-1",
+        "projectDtag": "project-1",
+        "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    "threadStart": {
+      "scope": {
+        "communityId": "community-1",
+        "projectDtag": "project-1",
+        "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "preparationId": "67f11a1d-0274-4d40-9b0c-e406e51c64fb",
+      "model": "gpt-5.2-codex"
+    },
+    "threadBindingRecover": {
+      "scope": {
+        "communityId": "community-1",
+        "projectDtag": "project-1",
+        "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "preparationId": "67f11a1d-0274-4d40-9b0c-e406e51c64fb",
+      "model": null
+    },
+    "threadList": {
+      "scope": {
+        "communityId": "community-1",
+        "projectDtag": "project-1",
+        "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    "threadResume": {
+      "scope": {
+        "communityId": "community-1",
+        "projectDtag": "project-1",
+        "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "threadId": "thread-1",
+      "model": null
+    },
+    "turnStart": {
+      "scope": {
+        "communityId": "community-1",
+        "projectDtag": "project-1",
+        "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "threadId": "thread-1",
+      "prompt": "Run the focused tests",
+      "model": null,
+      "effort": "medium"
+    },
+    "turnSteer": {
+      "scope": {
+        "communityId": "community-1",
+        "projectDtag": "project-1",
+        "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "threadId": "thread-1",
+      "expectedTurnId": "turn-1",
+      "prompt": "Start with unit tests"
+    },
+    "turnInterrupt": {
+      "scope": {
+        "communityId": "community-1",
+        "projectDtag": "project-1",
+        "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "threadId": "thread-1",
+      "turnId": "turn-1"
+    },
+    "approvalDecision": {
+      "runtimeGeneration": 7,
+      "requestId": "approval-1",
+      "scope": {
+        "communityId": "community-1",
+        "projectDtag": "project-1",
+        "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "threadId": "thread-1",
+      "turnId": "turn-1",
+      "response": { "type": "decision", "decision": "acceptForSession" }
+    },
+    "approvalPermissions": {
+      "runtimeGeneration": 7,
+      "requestId": 9,
+      "scope": {
+        "communityId": "community-1",
+        "projectDtag": "project-1",
+        "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "threadId": "thread-1",
+      "turnId": "turn-1",
+      "response": {
+        "type": "permissions",
+        "permissions": {
+          "network": { "enabled": true }
+        },
+        "scope": "turn",
+        "strictAutoReview": true
+      }
+    }
+  },
+  "invocations": {
+    "runtimeEvents": {
+      "scope": {
+        "communityId": "community-1",
+        "projectDtag": "project-1",
+        "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "runtimeGeneration": 7,
+      "afterSequence": 10
+    },
+    "worktreeStatus": {
+      "descriptor": {
+        "executionMode": "local",
+        "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "executionRoot": "/native/stored-root",
+        "baseRef": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "worktreeId": null
+      }
+    }
+  },
+  "outputs": {
+    "runtimeProbe": {
+      "available": true,
+      "executable": "/usr/local/bin/codex",
+      "version": "codex-cli 0.145.0",
+      "error": null
+    },
+    "runtimeStatus": {
+      "phase": "ready",
+      "generation": 7,
+      "executable": "/usr/local/bin/codex",
+      "version": "codex-cli 0.145.0",
+      "pid": 1234,
+      "userAgent": "codex-test",
+      "codexHome": "/native/codex-home",
+      "platformFamily": "unix",
+      "platformOs": "macos",
+      "queuedNotifications": 2,
+      "lastError": null
+    },
+    "repositoryDescriptor": {
+      "repositoryRoot": "/native/repository",
+      "gitCommonDir": "/native/repository/.git",
+      "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "binding": {
+      "communityId": "community-1",
+      "projectDtag": "project-1",
+      "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "codexThreadId": "thread-1",
+      "executionMode": "local",
+      "executionRoot": "/native/stored-root",
+      "baseRef": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "worktreeId": null
+    },
+    "preparationPublicBaseline": {
+      "preparationId": "67f11a1d-0274-4d40-9b0c-e406e51c64fb",
+      "communityId": "community-1",
+      "projectDtag": "project-1",
+      "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "executionMode": "local",
+      "executionRoot": "/native/stored-root",
+      "baseRef": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "worktreeId": null,
+      "state": "starting"
+    },
+    "preparedWorktree": {
+      "preparationId": "67f11a1d-0274-4d40-9b0c-e406e51c64fb",
+      "scope": {
+        "communityId": "community-1",
+        "projectDtag": "project-1",
+        "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "worktree": {
+        "repository": {
+          "repositoryRoot": "/native/repository",
+          "gitCommonDir": "/native/repository/.git",
+          "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "descriptor": {
+          "executionMode": "local",
+          "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "executionRoot": "/native/stored-root",
+          "baseRef": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "worktreeId": null
+        },
+        "headCommit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "branch": "main",
+        "dirty": false
+      }
+    },
+    "worktreeStatus": {
+      "descriptor": {
+        "executionMode": "local",
+        "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "executionRoot": "/native/stored-root",
+        "baseRef": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "worktreeId": null
+      },
+      "headCommit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "branch": "main",
+      "dirty": false
+    },
+    "preparationList": [
+      {
+        "preparationId": "67f11a1d-0274-4d40-9b0c-e406e51c64fb",
+        "communityId": "community-1",
+        "projectDtag": "project-1",
+        "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "executionMode": "local",
+        "executionRoot": "/native/stored-root",
+        "baseRef": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "worktreeId": null,
+        "state": "starting"
+      }
+    ],
+    "threadSummary": {
+      "id": "thread-1",
+      "sessionId": "session-1",
+      "forkedFromId": null,
+      "parentThreadId": null,
+      "preview": "Run the focused tests",
+      "ephemeral": false,
+      "modelProvider": "openai",
+      "createdAt": 1723600000,
+      "updatedAt": 1723600010,
+      "cwd": "/native/stored-root",
+      "name": "Native contract",
+      "status": { "type": "idle" },
+      "turns": [
+        {
+          "id": "past-turn",
+          "status": "completed",
+          "items": [
+            {
+              "id": "item-restored",
+              "type": "agentMessage",
+              "text": "restored"
+            }
+          ],
+          "error": null
+        }
+      ]
+    },
+    "threadsPage": {
+      "data": [
+        {
+          "binding": {
+            "communityId": "community-1",
+            "projectDtag": "project-1",
+            "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "codexThreadId": "thread-1",
+            "executionMode": "local",
+            "executionRoot": "/native/stored-root",
+            "baseRef": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "worktreeId": null
+          },
+          "thread": null,
+          "unavailable": "Codex app-server is not ready"
+        }
+      ],
+      "nextCursor": null,
+      "backwardsCursor": null
+    },
+    "boundThreadOpen": {
+      "binding": {
+        "communityId": "community-1",
+        "projectDtag": "project-1",
+        "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "codexThreadId": "thread-1",
+        "executionMode": "local",
+        "executionRoot": "/native/stored-root",
+        "baseRef": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "worktreeId": null
+      },
+      "thread": {
+        "id": "thread-1",
+        "sessionId": "session-1",
+        "forkedFromId": null,
+        "parentThreadId": null,
+        "preview": "Run the focused tests",
+        "ephemeral": false,
+        "modelProvider": "openai",
+        "createdAt": 1723600000,
+        "updatedAt": 1723600010,
+        "cwd": "/native/stored-root",
+        "name": "Native contract",
+        "status": { "type": "idle" },
+        "turns": [
+          {
+            "id": "past-turn",
+            "status": "completed",
+            "items": [
+              {
+                "id": "item-restored",
+                "type": "agentMessage",
+                "text": "restored"
+              }
+            ],
+            "error": null
+          }
+        ]
+      },
+      "instructionSources": ["AGENTS.md"]
+    },
+    "event": {
+      "scope": {
+        "communityId": "community-1",
+        "projectDtag": "project-1",
+        "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "runtimeGeneration": 7,
+      "sequence": 11,
+      "threadId": "thread-1",
+      "turnId": "turn-1",
+      "itemId": "item-1",
+      "kind": "item/agentMessage/delta",
+      "payload": {
+        "threadId": "thread-1",
+        "turnId": "turn-1",
+        "itemId": "item-1",
+        "delta": "working"
+      }
+    },
+    "eventWithoutIds": {
+      "scope": {
+        "communityId": "community-1",
+        "projectDtag": "project-1",
+        "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "runtimeGeneration": 7,
+      "sequence": 12,
+      "threadId": null,
+      "turnId": null,
+      "itemId": null,
+      "kind": "configWarning",
+      "payload": { "summary": "ignored setting" }
+    },
+    "eventBacklog": {
+      "runtimeGeneration": 7,
+      "latestSequence": 11,
+      "truncated": false,
+      "events": [
+        {
+          "scope": {
+            "communityId": "community-1",
+            "projectDtag": "project-1",
+            "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          },
+          "runtimeGeneration": 7,
+          "sequence": 11,
+          "threadId": "thread-1",
+          "turnId": "turn-1",
+          "itemId": "item-1",
+          "kind": "item/agentMessage/delta",
+          "payload": {
+            "threadId": "thread-1",
+            "turnId": "turn-1",
+            "itemId": "item-1",
+            "delta": "working"
+          }
+        }
+      ]
+    },
+    "turnSummary": { "id": "turn-1", "status": "inProgress" },
+    "threadStartError": {
+      "code": "threadStartUncertain",
+      "message": "Codex response was interrupted",
+      "preparationId": "67f11a1d-0274-4d40-9b0c-e406e51c64fb",
+      "threadId": null,
+      "executionRoot": "/native/stored-root"
+    },
+    "unitResponse": null
+  }
+}

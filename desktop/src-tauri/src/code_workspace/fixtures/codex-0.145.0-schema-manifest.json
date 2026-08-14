@@ -1,0 +1,662 @@
+{
+  "snapshotSchemaVersion": 1,
+  "source": {
+    "cliVersion": "codex-cli 0.145.0",
+    "generator": "app-server generate-json-schema",
+    "experimental": false,
+    "generatedFileCount": 273,
+    "canonicalization": "jq -S -c output including final LF",
+    "aggregateFormat": "relative paths sorted bytewise, then <canonical-file-sha256><two spaces><relative-path><LF>",
+    "fullGeneratedSetSha256": "757aa191b6d452c6e6d05f6c1f1cb093b9f673da2d185a29ee8d5d96feae67a8",
+    "selectedLeafSchemasSha256": "ecc06394aee332dc3fa827434095ff26f7c8e33b31a315697bd87f6c3da78512",
+    "selectedSchemaCount": 54,
+    "selectedSchemasSha256": "df00b0eff4563354d1a6ab799f1d1f446dcf439745bfb1e04742ae566ffedcd5",
+    "selectedSchemaArtifact": "codex-0.145.0-selected-schemas.tar.gz.base64",
+    "selectedSchemaArtifactEncoding": "base64(gzip(tar(canonical jq -S -c files)))",
+    "executableSha256": "1da3f4e0e96028b8a771814293c3033dafd1971f943f6c7e79b0897fe705f590",
+    "executableHashIsInformational": true
+  },
+  "runtimeVersionRequirement": "codex-cli 0.145.<numeric patch>",
+  "provenSnapshotVersion": "codex-cli 0.145.0",
+  "methods": {
+    "initialize": ["v1/InitializeParams.json", "v1/InitializeResponse.json"],
+    "thread/start": [
+      "v2/ThreadStartParams.json",
+      "v2/ThreadStartResponse.json"
+    ],
+    "thread/resume": [
+      "v2/ThreadResumeParams.json",
+      "v2/ThreadResumeResponse.json"
+    ],
+    "thread/read": ["v2/ThreadReadParams.json", "v2/ThreadReadResponse.json"],
+    "thread/list": ["v2/ThreadListParams.json", "v2/ThreadListResponse.json"],
+    "thread/loaded/list": [
+      "v2/ThreadLoadedListParams.json",
+      "v2/ThreadLoadedListResponse.json"
+    ],
+    "turn/start": ["v2/TurnStartParams.json", "v2/TurnStartResponse.json"],
+    "turn/steer": ["v2/TurnSteerParams.json", "v2/TurnSteerResponse.json"],
+    "turn/interrupt": [
+      "v2/TurnInterruptParams.json",
+      "v2/TurnInterruptResponse.json"
+    ]
+  },
+  "clientNotifications": {
+    "initialized": null
+  },
+  "notifications": {
+    "error": "v2/ErrorNotification.json",
+    "warning": "v2/WarningNotification.json",
+    "configWarning": "v2/ConfigWarningNotification.json",
+    "thread/started": "v2/ThreadStartedNotification.json",
+    "thread/status/changed": "v2/ThreadStatusChangedNotification.json",
+    "thread/closed": "v2/ThreadClosedNotification.json",
+    "turn/started": "v2/TurnStartedNotification.json",
+    "turn/completed": "v2/TurnCompletedNotification.json",
+    "turn/diff/updated": "v2/TurnDiffUpdatedNotification.json",
+    "turn/plan/updated": "v2/TurnPlanUpdatedNotification.json",
+    "item/started": "v2/ItemStartedNotification.json",
+    "item/completed": "v2/ItemCompletedNotification.json",
+    "item/agentMessage/delta": "v2/AgentMessageDeltaNotification.json",
+    "item/plan/delta": "v2/PlanDeltaNotification.json",
+    "item/reasoning/summaryTextDelta": "v2/ReasoningSummaryTextDeltaNotification.json",
+    "item/reasoning/summaryPartAdded": "v2/ReasoningSummaryPartAddedNotification.json",
+    "item/reasoning/textDelta": "v2/ReasoningTextDeltaNotification.json",
+    "item/commandExecution/outputDelta": "v2/CommandExecutionOutputDeltaNotification.json",
+    "item/commandExecution/terminalInteraction": "v2/TerminalInteractionNotification.json",
+    "item/fileChange/patchUpdated": "v2/FileChangePatchUpdatedNotification.json",
+    "serverRequest/resolved": "v2/ServerRequestResolvedNotification.json"
+  },
+  "serverRequests": {
+    "item/commandExecution/requestApproval": [
+      "CommandExecutionRequestApprovalParams.json",
+      "CommandExecutionRequestApprovalResponse.json"
+    ],
+    "item/fileChange/requestApproval": [
+      "FileChangeRequestApprovalParams.json",
+      "FileChangeRequestApprovalResponse.json"
+    ],
+    "item/permissions/requestApproval": [
+      "PermissionsRequestApprovalParams.json",
+      "PermissionsRequestApprovalResponse.json"
+    ]
+  },
+  "dispatchSchemas": [
+    "ClientNotification.json",
+    "ClientRequest.json",
+    "ServerNotification.json",
+    "ServerRequest.json"
+  ],
+  "schemas": [
+    [
+      "febe99874fffe269f5bf6f9702f3f1a412c4ee7b49bfef248865153740925d08",
+      "ClientNotification.json"
+    ],
+    [
+      "0cbfb811baf5aef5a805338dee7005ffddb767f54fc8b2ed1413a134806ac432",
+      "ClientRequest.json"
+    ],
+    [
+      "fe0b563649eac16a0730c6836345cde8ad67ac895ade46507e37b4db84496c31",
+      "CommandExecutionRequestApprovalParams.json"
+    ],
+    [
+      "7b8af360b9ff4577e1c7ee5d35c1ce942c459b9f1eee1f335c40a4dc91884f04",
+      "CommandExecutionRequestApprovalResponse.json"
+    ],
+    [
+      "3aca120680b6c6638a695252483960a51787c673574b48eef11a170af3a82ee8",
+      "FileChangeRequestApprovalParams.json"
+    ],
+    [
+      "0157c6f0433cd48deca30a2b912b8548196f0574b08fbba76ba23cef3de278b0",
+      "FileChangeRequestApprovalResponse.json"
+    ],
+    [
+      "c754534021edb3edb06a552d47a7b549dce09ab06aaa51f9d2d0b035ac68732a",
+      "JSONRPCError.json"
+    ],
+    [
+      "026026037eba6336bf7d617bfe094f6c8f48e00d51eac4785e0b611ff77f1b44",
+      "JSONRPCNotification.json"
+    ],
+    [
+      "36a2e6bd61e837f56140f7091ebf68cad9fe846be2ac4255c5415948503092a2",
+      "JSONRPCRequest.json"
+    ],
+    [
+      "c5de716115ba314839c26e4ca2329757d1bf5968b83d355994a4b86bff37db59",
+      "JSONRPCResponse.json"
+    ],
+    [
+      "0c8c0e3410c45281b41730db5fbcb5d5b9ea31691b26bab3d5402a451b3a93dd",
+      "PermissionsRequestApprovalParams.json"
+    ],
+    [
+      "7d71f901d6ef5cf0321362187e38050dd7461448c49604eab8d76d715eb3dc4b",
+      "PermissionsRequestApprovalResponse.json"
+    ],
+    [
+      "7741abd00abbf9f9ad04d3b5abda17070edb45f539807aa5e1bc222ee46ea767",
+      "RequestId.json"
+    ],
+    [
+      "35ebb2e60def1d322694e06a287fa3c915c1c506152a0343cad98e6caf75ceee",
+      "ServerNotification.json"
+    ],
+    [
+      "57bfa7faf0d0a1abfc25ee78b0134fcd3f070d48b91eeede328848a695e40b8e",
+      "ServerRequest.json"
+    ],
+    [
+      "ffc5d048f2f40289ec0f0f6d8fb9390f606070d479b66a8151e02ab291f11ee5",
+      "v1/InitializeParams.json"
+    ],
+    [
+      "85cc2584f9035d3c8ca6a2afba9f94ffc75b5e5a9ba4a17ec9f5ebe522118d54",
+      "v1/InitializeResponse.json"
+    ],
+    [
+      "2fcf6218362ecf0248406a2c7b8f44561a7be629de4b28c0a987d19245775de6",
+      "v2/AgentMessageDeltaNotification.json"
+    ],
+    [
+      "34562a18a2ce84d18e6d515ace7343ab8d5c7a621c42592982f531d436736082",
+      "v2/CommandExecutionOutputDeltaNotification.json"
+    ],
+    [
+      "cb3f5b50aa47d5cb1e921ad482e63a698155a6acc85c9e8d747b5585364dd64a",
+      "v2/ConfigWarningNotification.json"
+    ],
+    [
+      "9a8873b56fea55a7e23f329378dcef302646605469703406ba49562d2f8ec4f5",
+      "v2/ErrorNotification.json"
+    ],
+    [
+      "ce449ced2ffd73fe2cc0f45f2e46597f9a2254d611e1a28715151ef0677834bd",
+      "v2/FileChangePatchUpdatedNotification.json"
+    ],
+    [
+      "1223d6244307db79c4bdf2f9fc4f082dd781797d486504e19fa05d6cfc535d17",
+      "v2/ItemCompletedNotification.json"
+    ],
+    [
+      "1cba06d7fd9b7632e6643cdfada8d5f8ff74a5af3ca4158b7ca7d8fd812d1745",
+      "v2/ItemStartedNotification.json"
+    ],
+    [
+      "f628b790867842bbaa1012bdb47a92f0cbd6dbd14b746fb7e9c5049fe180c858",
+      "v2/PlanDeltaNotification.json"
+    ],
+    [
+      "4fcac6278e0f524d063d52ebff4ec33b523e8f860aa29c9085c151db1c73c203",
+      "v2/ReasoningSummaryPartAddedNotification.json"
+    ],
+    [
+      "81d7d60ee62c62e2f91183671aebabd1da6af62bebe06fa83139ec543099e357",
+      "v2/ReasoningSummaryTextDeltaNotification.json"
+    ],
+    [
+      "88427ef4ae9397a47d363c7de76b94d8f3f7764f67ce12ae5aa8eb2b4f40ba24",
+      "v2/ReasoningTextDeltaNotification.json"
+    ],
+    [
+      "1d194b07f86b95eb3df5819c3c1094ed3cb987cf3a194121cfe7f2e701838b5f",
+      "v2/ServerRequestResolvedNotification.json"
+    ],
+    [
+      "b51f00243b47814732ca80335712d401f719997f71b546c1e66257aee6d815ed",
+      "v2/TerminalInteractionNotification.json"
+    ],
+    [
+      "bce0eb4697915482eadea5d556977bf59eca8eaf3941e5fe179d241d74fd2a99",
+      "v2/ThreadClosedNotification.json"
+    ],
+    [
+      "12d4afe547ed300cb84fce1697f3e9b5b8ab0847e42b3e146c39bf0b006ec137",
+      "v2/ThreadListParams.json"
+    ],
+    [
+      "871efe35325fc43382c60582f5839ed89f5f5b4e0add7d757ef46cc1dae051e9",
+      "v2/ThreadListResponse.json"
+    ],
+    [
+      "ddd12b09152014c45ca43584f3e59ec7ae0ce0d59f3dfa3bc787fc2f5c6cb416",
+      "v2/ThreadLoadedListParams.json"
+    ],
+    [
+      "fa66d2c671b7a4bff36e5ab12af0dd9970e4bfcf2da22e746d85ced7e107b6af",
+      "v2/ThreadLoadedListResponse.json"
+    ],
+    [
+      "1e9a91150e80994d8c58645c18b17396e86a237a7a45945f33e0b394fa52da34",
+      "v2/ThreadReadParams.json"
+    ],
+    [
+      "47c1c2b1186b3957f11c38d21cf1ac82374d67cf59067d534ab39e8589a879b0",
+      "v2/ThreadReadResponse.json"
+    ],
+    [
+      "32770ba1552bf2bf91b60bb623d6164f91302662cc7bf447c9ed9a7a2c206dfa",
+      "v2/ThreadResumeParams.json"
+    ],
+    [
+      "aa727ad6e8f4160da5ff7c42e773bcf2679ae19edcbf35a9a5fe9ae9bdd3e909",
+      "v2/ThreadResumeResponse.json"
+    ],
+    [
+      "9adda186c98152f872f0c528f1d20acc8f9cb061b3677fa7677c2040f7c30ff7",
+      "v2/ThreadStartParams.json"
+    ],
+    [
+      "3831b2de4262990f95fb923ab3fb1aaffc1d9cc51f83b59d14039d7880211f0d",
+      "v2/ThreadStartResponse.json"
+    ],
+    [
+      "b8b795068b32a0b8e544a89a7f5be5320076549d524b60814a041a30bfc22e2a",
+      "v2/ThreadStartedNotification.json"
+    ],
+    [
+      "89fb196f9ba882dd00226dfa8d23678e2df489b555d4ef1798ecb99ac9427723",
+      "v2/ThreadStatusChangedNotification.json"
+    ],
+    [
+      "5d2b2400c9cd1d9f983d9b329e7bb927c44faf1e447766eed5035cc26196b279",
+      "v2/TurnCompletedNotification.json"
+    ],
+    [
+      "f2ba99de88bb3c0c23d654fc622dbe1c07a750f52e0ab5c1888992b7223ff082",
+      "v2/TurnDiffUpdatedNotification.json"
+    ],
+    [
+      "d7224f20407c5dd1f40f83f1b519372906784fb31b3874ad9b141d0b48e717f8",
+      "v2/TurnInterruptParams.json"
+    ],
+    [
+      "4e907d67c75c0f0947077f13f8c0b0ba5d4f224d3a397ac70c078ca66ddcbf32",
+      "v2/TurnInterruptResponse.json"
+    ],
+    [
+      "7af783612d86aea9390b3e2ea6477892376007db90be53e87250b4c088cb6779",
+      "v2/TurnPlanUpdatedNotification.json"
+    ],
+    [
+      "4aecc474511aefeef728b89ae42e8927dc7b61618e8db184da458e9f979d00e5",
+      "v2/TurnStartParams.json"
+    ],
+    [
+      "94960c28e2b8588bfe6be480cbca62cb00ea7778ee19aab09af89bc4692ff454",
+      "v2/TurnStartResponse.json"
+    ],
+    [
+      "20c7b63e9492808935f4432f38dffe8c3f173f3a6320aed69fe842fb7cbb7978",
+      "v2/TurnStartedNotification.json"
+    ],
+    [
+      "18c524a65c7a773eb55f429be4ad4b3eb86ecaedeb1e6d6d7a162fec58435691",
+      "v2/TurnSteerParams.json"
+    ],
+    [
+      "8f30205c3f711c98691e8f83e1780cb07a2e837799b9ea4f0e103e8ff226b3b3",
+      "v2/TurnSteerResponse.json"
+    ],
+    [
+      "c32bde56e1f229ef96ef5401231765fd2d4ee83a9a10fab8cfc27acddcb8930f",
+      "v2/WarningNotification.json"
+    ]
+  ],
+  "schemaShapes": {
+    "CommandExecutionRequestApprovalParams.json": {
+      "required": ["itemId", "startedAtMs", "threadId", "turnId"],
+      "properties": [
+        "approvalId",
+        "command",
+        "commandActions",
+        "cwd",
+        "environmentId",
+        "itemId",
+        "networkApprovalContext",
+        "proposedExecpolicyAmendment",
+        "proposedNetworkPolicyAmendments",
+        "reason",
+        "startedAtMs",
+        "threadId",
+        "turnId"
+      ]
+    },
+    "CommandExecutionRequestApprovalResponse.json": {
+      "required": ["decision"],
+      "properties": ["decision"]
+    },
+    "FileChangeRequestApprovalParams.json": {
+      "required": ["itemId", "startedAtMs", "threadId", "turnId"],
+      "properties": [
+        "grantRoot",
+        "itemId",
+        "reason",
+        "startedAtMs",
+        "threadId",
+        "turnId"
+      ]
+    },
+    "FileChangeRequestApprovalResponse.json": {
+      "required": ["decision"],
+      "properties": ["decision"]
+    },
+    "PermissionsRequestApprovalParams.json": {
+      "required": [
+        "cwd",
+        "itemId",
+        "permissions",
+        "startedAtMs",
+        "threadId",
+        "turnId"
+      ],
+      "properties": [
+        "cwd",
+        "environmentId",
+        "itemId",
+        "permissions",
+        "reason",
+        "startedAtMs",
+        "threadId",
+        "turnId"
+      ]
+    },
+    "PermissionsRequestApprovalResponse.json": {
+      "required": ["permissions"],
+      "properties": ["permissions", "scope", "strictAutoReview"]
+    },
+    "v1/InitializeParams.json": {
+      "required": ["clientInfo"],
+      "properties": ["capabilities", "clientInfo"]
+    },
+    "v1/InitializeResponse.json": {
+      "required": ["codexHome", "platformFamily", "platformOs", "userAgent"],
+      "properties": ["codexHome", "platformFamily", "platformOs", "userAgent"]
+    },
+    "v2/AgentMessageDeltaNotification.json": {
+      "required": ["delta", "itemId", "threadId", "turnId"],
+      "properties": ["delta", "itemId", "threadId", "turnId"]
+    },
+    "v2/CommandExecutionOutputDeltaNotification.json": {
+      "required": ["delta", "itemId", "threadId", "turnId"],
+      "properties": ["delta", "itemId", "threadId", "turnId"]
+    },
+    "v2/ConfigWarningNotification.json": {
+      "required": ["summary"],
+      "properties": ["details", "path", "range", "summary"]
+    },
+    "v2/ErrorNotification.json": {
+      "required": ["error", "threadId", "turnId", "willRetry"],
+      "properties": ["error", "threadId", "turnId", "willRetry"]
+    },
+    "v2/FileChangePatchUpdatedNotification.json": {
+      "required": ["changes", "itemId", "threadId", "turnId"],
+      "properties": ["changes", "itemId", "threadId", "turnId"]
+    },
+    "v2/ItemCompletedNotification.json": {
+      "required": ["completedAtMs", "item", "threadId", "turnId"],
+      "properties": ["completedAtMs", "item", "threadId", "turnId"]
+    },
+    "v2/ItemStartedNotification.json": {
+      "required": ["item", "startedAtMs", "threadId", "turnId"],
+      "properties": ["item", "startedAtMs", "threadId", "turnId"]
+    },
+    "v2/PlanDeltaNotification.json": {
+      "required": ["delta", "itemId", "threadId", "turnId"],
+      "properties": ["delta", "itemId", "threadId", "turnId"]
+    },
+    "v2/ReasoningSummaryPartAddedNotification.json": {
+      "required": ["itemId", "summaryIndex", "threadId", "turnId"],
+      "properties": ["itemId", "summaryIndex", "threadId", "turnId"]
+    },
+    "v2/ReasoningSummaryTextDeltaNotification.json": {
+      "required": ["delta", "itemId", "summaryIndex", "threadId", "turnId"],
+      "properties": ["delta", "itemId", "summaryIndex", "threadId", "turnId"]
+    },
+    "v2/ReasoningTextDeltaNotification.json": {
+      "required": ["contentIndex", "delta", "itemId", "threadId", "turnId"],
+      "properties": ["contentIndex", "delta", "itemId", "threadId", "turnId"]
+    },
+    "v2/ServerRequestResolvedNotification.json": {
+      "required": ["requestId", "threadId"],
+      "properties": ["requestId", "threadId"]
+    },
+    "v2/TerminalInteractionNotification.json": {
+      "required": ["itemId", "processId", "stdin", "threadId", "turnId"],
+      "properties": ["itemId", "processId", "stdin", "threadId", "turnId"]
+    },
+    "v2/ThreadClosedNotification.json": {
+      "required": ["threadId"],
+      "properties": ["threadId"]
+    },
+    "v2/ThreadListParams.json": {
+      "required": [],
+      "properties": [
+        "archived",
+        "cursor",
+        "cwd",
+        "limit",
+        "modelProviders",
+        "searchTerm",
+        "sortDirection",
+        "sortKey",
+        "sourceKinds",
+        "useStateDbOnly"
+      ]
+    },
+    "v2/ThreadListResponse.json": {
+      "required": ["data"],
+      "properties": ["backwardsCursor", "data", "nextCursor"]
+    },
+    "v2/ThreadLoadedListParams.json": {
+      "required": [],
+      "properties": ["cursor", "limit"]
+    },
+    "v2/ThreadLoadedListResponse.json": {
+      "required": ["data"],
+      "properties": ["data", "nextCursor"]
+    },
+    "v2/ThreadReadParams.json": {
+      "required": ["threadId"],
+      "properties": ["includeTurns", "threadId"]
+    },
+    "v2/ThreadReadResponse.json": {
+      "required": ["thread"],
+      "properties": ["thread"]
+    },
+    "v2/ThreadResumeParams.json": {
+      "required": ["threadId"],
+      "properties": [
+        "approvalPolicy",
+        "approvalsReviewer",
+        "baseInstructions",
+        "config",
+        "cwd",
+        "developerInstructions",
+        "model",
+        "modelProvider",
+        "personality",
+        "sandbox",
+        "serviceTier",
+        "threadId"
+      ]
+    },
+    "v2/ThreadResumeResponse.json": {
+      "required": [
+        "approvalPolicy",
+        "approvalsReviewer",
+        "cwd",
+        "model",
+        "modelProvider",
+        "sandbox",
+        "thread"
+      ],
+      "properties": [
+        "approvalPolicy",
+        "approvalsReviewer",
+        "cwd",
+        "instructionSources",
+        "model",
+        "modelProvider",
+        "reasoningEffort",
+        "sandbox",
+        "serviceTier",
+        "thread"
+      ]
+    },
+    "v2/ThreadStartParams.json": {
+      "required": [],
+      "properties": [
+        "approvalPolicy",
+        "approvalsReviewer",
+        "baseInstructions",
+        "config",
+        "cwd",
+        "developerInstructions",
+        "ephemeral",
+        "model",
+        "modelProvider",
+        "personality",
+        "sandbox",
+        "serviceName",
+        "serviceTier",
+        "sessionStartSource",
+        "threadSource"
+      ]
+    },
+    "v2/ThreadStartResponse.json": {
+      "required": [
+        "approvalPolicy",
+        "approvalsReviewer",
+        "cwd",
+        "model",
+        "modelProvider",
+        "sandbox",
+        "thread"
+      ],
+      "properties": [
+        "approvalPolicy",
+        "approvalsReviewer",
+        "cwd",
+        "instructionSources",
+        "model",
+        "modelProvider",
+        "reasoningEffort",
+        "sandbox",
+        "serviceTier",
+        "thread"
+      ]
+    },
+    "v2/ThreadStartedNotification.json": {
+      "required": ["thread"],
+      "properties": ["thread"]
+    },
+    "v2/ThreadStatusChangedNotification.json": {
+      "required": ["status", "threadId"],
+      "properties": ["status", "threadId"]
+    },
+    "v2/TurnCompletedNotification.json": {
+      "required": ["threadId", "turn"],
+      "properties": ["threadId", "turn"]
+    },
+    "v2/TurnDiffUpdatedNotification.json": {
+      "required": ["diff", "threadId", "turnId"],
+      "properties": ["diff", "threadId", "turnId"]
+    },
+    "v2/TurnInterruptParams.json": {
+      "required": ["threadId", "turnId"],
+      "properties": ["threadId", "turnId"]
+    },
+    "v2/TurnInterruptResponse.json": {
+      "required": [],
+      "properties": []
+    },
+    "v2/TurnPlanUpdatedNotification.json": {
+      "required": ["plan", "threadId", "turnId"],
+      "properties": ["explanation", "plan", "threadId", "turnId"]
+    },
+    "v2/TurnStartParams.json": {
+      "required": ["input", "threadId"],
+      "properties": [
+        "approvalPolicy",
+        "approvalsReviewer",
+        "clientUserMessageId",
+        "cwd",
+        "effort",
+        "input",
+        "model",
+        "outputSchema",
+        "personality",
+        "sandboxPolicy",
+        "serviceTier",
+        "summary",
+        "threadId"
+      ]
+    },
+    "v2/TurnStartResponse.json": {
+      "required": ["turn"],
+      "properties": ["turn"]
+    },
+    "v2/TurnStartedNotification.json": {
+      "required": ["threadId", "turn"],
+      "properties": ["threadId", "turn"]
+    },
+    "v2/TurnSteerParams.json": {
+      "required": ["expectedTurnId", "input", "threadId"],
+      "properties": [
+        "clientUserMessageId",
+        "expectedTurnId",
+        "input",
+        "threadId"
+      ]
+    },
+    "v2/TurnSteerResponse.json": {
+      "required": ["turnId"],
+      "properties": ["turnId"]
+    },
+    "v2/WarningNotification.json": {
+      "required": ["message"],
+      "properties": ["message", "threadId"]
+    }
+  },
+  "structuralFacts": {
+    "threadRequired": [
+      "cliVersion",
+      "createdAt",
+      "cwd",
+      "ephemeral",
+      "id",
+      "modelProvider",
+      "preview",
+      "sessionId",
+      "source",
+      "status",
+      "turns",
+      "updatedAt"
+    ],
+    "threadSourceRequiredBySchoolX": true,
+    "threadOpenResponseRequired": [
+      "thread",
+      "model",
+      "modelProvider",
+      "cwd",
+      "approvalPolicy",
+      "approvalsReviewer",
+      "sandbox"
+    ],
+    "turnRequired": ["id", "items", "status"],
+    "agentMessageItemRequired": ["id", "text", "type"],
+    "turnStatuses": ["completed", "interrupted", "failed", "inProgress"],
+    "sandboxModes": ["read-only", "workspace-write", "danger-full-access"],
+    "sessionSources": ["cli", "vscode", "exec", "appServer", "unknown"],
+    "stableApprovalDecisions": [
+      "accept",
+      "acceptForSession",
+      "decline",
+      "cancel"
+    ],
+    "permissionGrantScopes": ["turn", "session"]
+  }
+}

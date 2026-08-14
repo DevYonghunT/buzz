@@ -1,5 +1,6 @@
 import {
   CircleDot,
+  Code2,
   GitPullRequest,
   Plus,
   RefreshCw,
@@ -130,6 +131,7 @@ export function WorkspaceTabs({
   onSelectedPullRequestIdChange,
   onSelectedTabChange,
   onBranchChange,
+  onOpenCode,
   onOpenMergeRecoveryTerminal,
   onOpenTerminal,
   snapshot,
@@ -167,6 +169,7 @@ export function WorkspaceTabs({
   /** Reports the active tab so the screen breadcrumb can mirror it. */
   onSelectedTabChange?: (tab: string) => void;
   onBranchChange: (branch: string | null) => void;
+  onOpenCode?: () => void;
   onOpenMergeRecoveryTerminal?: OpenMergeRecoveryTerminal;
   onOpenTerminal?: () => void;
   snapshot: ProjectRepoSnapshot | null | undefined;
@@ -280,6 +283,18 @@ export function WorkspaceTabs({
     >
       <div className="flex h-10 min-w-0 items-center gap-1">
         <ProjectTabsList prsActive={isPullRequestSelected} />
+        {onOpenCode ? (
+          <Button
+            className="h-8 shrink-0 gap-1.5"
+            onClick={onOpenCode}
+            size="sm"
+            title="Open this project in SchoolX Code"
+            variant="outline"
+          >
+            <Code2 className="h-4 w-4" />
+            Code
+          </Button>
+        ) : null}
         {onOpenTerminal ? (
           <Button
             aria-label="Open terminal"

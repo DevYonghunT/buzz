@@ -174,6 +174,8 @@ type E2eConfig = {
     pocketVoiceImportResult?: "success" | "cancel" | "invalid";
     /** Advertised HEAD for the first mock project without adding that branch. */
     projectHeadBranch?: string;
+    /** Enable the scoped SchoolX Code native boundary fixture. */
+    schoolxCodeWorkspace?: boolean;
     /** Builderlab account returned by hosted-community onboarding. Null/omitted = signed out. */
     builderlabAuth?: {
       email?: string;
@@ -9945,12 +9947,94 @@ export function maybeInstallE2eTauriMocks() {
       sourceUrl: null;
     };
   }> = [];
+  const mockCodeRepositoryIdentity = "c4".repeat(32);
+  const mockCodeBaseRef = "main";
+  const mockCodeRuntimeGeneration = 7;
+  const mockCodeScope = {
+    communityId: "e2e-default-community",
+    projectDtag: "buzz",
+    repositoryIdentity: mockCodeRepositoryIdentity,
+  };
+  const mockCodeRepository = {
+    repositoryRoot: "/mock/buzz",
+    gitCommonDir: "/mock/buzz/.git",
+    repositoryIdentity: mockCodeRepositoryIdentity,
+  };
+  const mockCodeBinding = {
+    ...mockCodeScope,
+    codexThreadId: "thread-e2e-1",
+    executionMode: "local",
+    executionRoot: "/mock/buzz",
+    baseRef: mockCodeBaseRef,
+    worktreeId: null,
+  };
+  const mockCodeThread = {
+    id: mockCodeBinding.codexThreadId,
+    sessionId: "session-e2e-1",
+    forkedFromId: null,
+    parentThreadId: null,
+    preview: "Update the SchoolX Code shell",
+    ephemeral: false,
+    modelProvider: "openai",
+    createdAt: 1_723_600_000,
+    updatedAt: 1_723_600_010,
+    cwd: "/mock/buzz",
+    name: "Code shell task",
+    status: { type: "idle" },
+    turns: [
+      {
+        id: "turn-history-1",
+        status: "completed",
+        items: [
+          {
+            id: "item-history-user",
+            type: "userMessage",
+            text: "Open the existing SchoolX Code task.",
+          },
+          {
+            id: "item-history-agent",
+            type: "agentMessage",
+            text: "Historical Code response from fixture.",
+          },
+        ],
+        error: null,
+      },
+    ],
+  };
+  const mockCodeOpenResult = {
+    binding: mockCodeBinding,
+    thread: mockCodeThread,
+    instructionSources: ["AGENTS.md"],
+  };
+  const mockCodeThreadListSummary = {
+    ...mockCodeThread,
+    turns: [],
+  };
+  let mockCodeRuntimeReady = false;
+  const mockCodeRuntimeStatus = () => ({
+    phase: mockCodeRuntimeReady ? "ready" : "stopped",
+    generation: mockCodeRuntimeGeneration,
+    executable: "/usr/local/bin/codex",
+    version: "codex-cli 0.145.0",
+    pid: mockCodeRuntimeReady ? 4_321 : null,
+    userAgent: mockCodeRuntimeReady ? "schoolx-code-e2e" : null,
+    codexHome: "/mock/codex-home",
+    platformFamily: "unix",
+    platformOs: "macos",
+    queuedNotifications: 0,
+    lastError: null,
+  });
   const handleMockCommand = async (
     command: string,
     payload: unknown,
   ): Promise<unknown> => {
     const activeConfig = getConfig();
     const identity = getActiveIdentity(activeConfig);
+    const requireSchoolxCodeWorkspace = () => {
+      if (!activeConfig?.mock?.schoolxCodeWorkspace) {
+        throw new Error(`Unsupported mocked Tauri command: ${command}`);
+      }
+    };
     window.__BUZZ_E2E_COMMANDS__?.push(command);
     const loggedPayload = (() => {
       try {
@@ -10679,6 +10763,145 @@ export function maybeInstallE2eTauriMocks() {
           ],
         };
       case "get_project_local_repo_snapshot":
+        if (!activeConfig?.mock?.schoolxCodeWorkspace) return null;
+        return {
+          path: "/mock/buzz",
+          snapshot: {
+            latest_commit: null,
+            commits: [],
+            files: [],
+            contributors: [],
+          },
+        };
+      case "code_runtime_probe":
+        requireSchoolxCodeWorkspace();
+        return {
+          available: true,
+          executable: "/usr/local/bin/codex",
+          version: "codex-cli 0.145.0",
+          error: null,
+        };
+      case "code_runtime_start":
+        requireSchoolxCodeWorkspace();
+        mockCodeRuntimeReady = true;
+        return mockCodeRuntimeStatus();
+      case "code_runtime_stop":
+        requireSchoolxCodeWorkspace();
+        mockCodeRuntimeReady = false;
+        return mockCodeRuntimeStatus();
+      case "code_runtime_status":
+        requireSchoolxCodeWorkspace();
+        return mockCodeRuntimeStatus();
+      case "code_runtime_events":
+        requireSchoolxCodeWorkspace();
+        return {
+          runtimeGeneration: mockCodeRuntimeGeneration,
+          latestSequence: 0,
+          truncated: false,
+          events: [],
+        };
+      case "code_repository_inspect":
+        requireSchoolxCodeWorkspace();
+        return structuredClone(mockCodeRepository);
+      case "code_worktree_prepare": {
+        requireSchoolxCodeWorkspace();
+        const input = (
+          payload as {
+            input: {
+              scope: typeof mockCodeScope;
+              repositoryRoot: string;
+              baseRef: string;
+              executionMode: "worktree" | "local";
+            };
+          }
+        ).input;
+        const descriptor = {
+          executionMode: input.executionMode,
+          repositoryIdentity: mockCodeRepositoryIdentity,
+          executionRoot:
+            input.executionMode === "worktree"
+              ? "/mock/buzz-worktrees/code-e2e-new"
+              : input.repositoryRoot,
+          baseRef: input.baseRef,
+          worktreeId:
+            input.executionMode === "worktree"
+              ? "11111111-2222-4333-8444-555555555555"
+              : null,
+        };
+        return {
+          preparationId: "preparation-e2e-new",
+          scope: input.scope,
+          worktree: {
+            repository: structuredClone(mockCodeRepository),
+            descriptor,
+            headCommit: "0123456789abcdef0123456789abcdef01234567",
+            branch: input.executionMode === "local" ? "main" : null,
+            dirty: false,
+          },
+        };
+      }
+      case "code_worktree_status": {
+        requireSchoolxCodeWorkspace();
+        const descriptor = (
+          payload as {
+            descriptor: {
+              executionMode: "worktree" | "local";
+              repositoryIdentity: string;
+              executionRoot: string;
+              baseRef: string;
+              worktreeId: string | null;
+            };
+          }
+        ).descriptor;
+        return {
+          descriptor,
+          headCommit: "0123456789abcdef0123456789abcdef01234567",
+          branch: descriptor.executionMode === "local" ? "main" : null,
+          dirty: false,
+        };
+      }
+      case "code_thread_preparations_list":
+        requireSchoolxCodeWorkspace();
+        return [
+          {
+            preparationId: "preparation-e2e-existing",
+            ...mockCodeScope,
+            executionMode: "worktree",
+            executionRoot: "/mock/buzz-worktrees/prepared-e2e",
+            baseRef: mockCodeBaseRef,
+            worktreeId: "99999999-8888-4777-8666-555555555555",
+            state: "prepared",
+          },
+        ];
+      case "code_threads_list":
+        requireSchoolxCodeWorkspace();
+        return {
+          data: [
+            {
+              binding: structuredClone(mockCodeBinding),
+              thread: structuredClone(mockCodeThreadListSummary),
+              unavailable: null,
+            },
+          ],
+          nextCursor: null,
+          backwardsCursor: null,
+        };
+      case "code_thread_start":
+      case "code_thread_binding_recover":
+      case "code_thread_resume":
+        requireSchoolxCodeWorkspace();
+        return structuredClone(mockCodeOpenResult);
+      case "code_turn_start":
+        requireSchoolxCodeWorkspace();
+        return { id: "turn-e2e-new", status: "inProgress" };
+      case "code_turn_steer": {
+        requireSchoolxCodeWorkspace();
+        const input = (payload as { input: { expectedTurnId: string } }).input;
+        return { id: input.expectedTurnId, status: "inProgress" };
+      }
+      case "code_turn_interrupt":
+      case "code_approval_respond":
+        requireSchoolxCodeWorkspace();
         return null;
       case "get_project_repo_diff":
         return {

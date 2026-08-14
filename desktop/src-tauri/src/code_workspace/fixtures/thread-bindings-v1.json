@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "bindings": [
+    {
+      "communityId": "community-1",
+      "projectDtag": "project-1",
+      "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "codexThreadId": "thread-1",
+      "executionMode": "local",
+      "executionRoot": "{{EXECUTION_ROOT}}",
+      "baseRef": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "worktreeId": null
+    }
+  ],
+  "preparations": [
+    {
+      "preparationId": "67f11a1d-0274-4d40-9b0c-e406e51c64fb",
+      "communityId": "community-1",
+      "projectDtag": "project-1",
+      "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "executionMode": "local",
+      "executionRoot": "{{EXECUTION_ROOT}}",
+      "baseRef": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "worktreeId": null,
+      "state": "starting",
+      "recoveryThreadBaseline": ["foreign-thread", "thread-before-start"]
+    }
+  ]
+}

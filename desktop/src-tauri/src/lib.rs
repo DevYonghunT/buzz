@@ -2,6 +2,7 @@
 mod app_state;
 mod archive;
 mod builderlab;
+mod code_workspace;
 mod commands;
 mod deep_link;
 mod egress_guard;
@@ -35,6 +36,16 @@ mod shutdown;
 mod templates;
 #[cfg(target_os = "macos")]
 mod tray_menu;
+
+/// Dispatch the private, descriptor-bound Git helper before Tauri starts.
+///
+/// Normal launches return `Ok(false)`. A helper launch either replaces the
+/// process with Git or returns an error; the boolean keeps the startup contract
+/// explicit if a platform-specific helper ever completes without replacement.
+#[cfg(unix)]
+pub fn run_code_pinned_git_helper_if_requested() -> Result<bool, String> {
+    code_workspace::run_pinned_git_helper_if_requested()
+}
 mod util;
 #[cfg(target_os = "linux")]
 pub mod webkit_rendering;
@@ -673,6 +684,23 @@ pub fn run() {
             cancel_builderlab_login,
             get_builderlab_auth,
             clear_builderlab_auth,
+            code_runtime_probe,
+            code_runtime_start,
+            code_runtime_stop,
+            code_runtime_status,
+            code_runtime_events,
+            code_repository_inspect,
+            code_worktree_prepare,
+            code_worktree_status,
+            code_thread_preparations_list,
+            code_threads_list,
+            code_thread_start,
+            code_thread_binding_recover,
+            code_thread_resume,
+            code_turn_start,
+            code_turn_steer,
+            code_turn_interrupt,
+            code_approval_respond,
             get_builderlab_nostr_identity,
             bind_builderlab_nostr_identity,
             delete_builderlab_nostr_identity,

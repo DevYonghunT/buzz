@@ -132,6 +132,28 @@ export function useAppNavigation() {
     [commitNavigation],
   );
 
+  const goProjectCode = React.useCallback(
+    (
+      projectId: string,
+      options?: NavigationBehavior & {
+        baseRef?: string;
+        threadId?: string;
+      },
+    ) =>
+      commitNavigation(
+        {
+          to: "/projects/$projectId/code",
+          params: { projectId },
+          search: {
+            baseRef: options?.baseRef,
+            threadId: options?.threadId,
+          },
+        },
+        options,
+      ),
+    [commitNavigation],
+  );
+
   const goWorkflows = React.useCallback(
     (behavior?: NavigationBehavior) =>
       commitNavigation(
@@ -313,6 +335,7 @@ export function useAppNavigation() {
     goHome,
     goNewMessage,
     goProject,
+    goProjectCode,
     goProjects,
     goPulse,
     goProfile,
