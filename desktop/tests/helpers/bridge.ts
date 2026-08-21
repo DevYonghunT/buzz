@@ -1,4 +1,10 @@
 import type { Page } from "@playwright/test";
+import type {
+  CodeEventBacklog,
+  CodeThreadChanges,
+  CodeThreadLifecycleState,
+} from "../../src/features/code/api/types";
+import type { CodeGitStatus } from "../../src/features/code/api/codeGitTypes";
 import type { ChannelTemplate, RelayEvent } from "../../src/shared/api/types";
 import { LOCALE_STORAGE_KEY } from "../../src/shared/i18n/locale";
 import { FEATURE_OVERRIDES_STORAGE_KEY, PREVIEW_FEATURE_IDS } from "./features";
@@ -172,6 +178,30 @@ type MockBridgeOptions = {
   projectHeadBranch?: string;
   /** Enable the scoped SchoolX Code native boundary fixture. */
   schoolxCodeWorkspace?: boolean;
+  /** Successive native replay snapshots returned to the Code event adapter. */
+  schoolxCodeEventBacklogs?: CodeEventBacklog[];
+  /** Successive strict Changes snapshots returned for a selected Code thread. */
+  schoolxCodeChanges?: CodeThreadChanges[];
+  /** Successive authoritative Git snapshots returned for a managed Code thread. */
+  schoolxCodeGitStatuses?: CodeGitStatus[];
+  /** Sequenced response-loss failures after a native Code commit completed. */
+  schoolxCodeGitCommitResponseLosses?: Array<string | null>;
+  /** Sequenced thread-fork failures; null entries allow that call through. */
+  schoolxCodeForkErrors?: Array<string | null>;
+  /** Delay a fork result so source-selection and pending UI remain observable. */
+  schoolxCodeForkDelayMs?: number;
+  /** Sequenced managed-worktree removal failures; null allows the call through. */
+  schoolxCodeRemovalErrors?: Array<string | null>;
+  /** Sequenced response-loss failures after native removal has committed. */
+  schoolxCodeRemovalResponseLosses?: Array<string | null>;
+  /** Hold the first removal operation at its pre-commit test boundary. */
+  schoolxCodeBlockRemoval?: boolean;
+  /** Delay removal so confirmation and non-optimistic rows remain observable. */
+  schoolxCodeRemovalDelayMs?: number;
+  /** Initial lifecycle state keyed by exact Codex thread id. */
+  schoolxCodeThreadLifecycles?: Record<string, CodeThreadLifecycleState>;
+  /** Hold the first Code replay so synchronization-gated UI can be asserted. */
+  schoolxCodeBlockInitialEventReplay?: boolean;
   /** Relay NIP-11 identity used to sign authoritative repository state. */
   relaySelf?: string | null;
   /** Native-like huddle state seeded from authoritative role-bearing membership. */

@@ -11,6 +11,7 @@ import {
   codeSessionReducer,
   createCodeSessionState,
   type CodePendingApproval,
+  type CodeSessionAction,
   type CodeSessionState,
   selectCanRespondToCodeApproval,
   selectCodeActiveTurns,
@@ -29,6 +30,58 @@ function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === "AbortError";
 }
 
+/** One fail-closed completion tied to an exact replay generation and epoch. */
+export type CodeAuthoritativeRefreshCompletion = {
+  readonly runtimeGeneration: number;
+  readonly subscriptionEpoch: number;
+  complete: () => boolean;
+};
+
+/** Capture a one-shot reducer completion that rejects any later state drift. */
+export function captureCodeAuthoritativeRefreshCompletion(
+  getState: () => CodeSessionState,
+  dispatch: (action: CodeSessionAction) => void,
+): CodeAuthoritativeRefreshCompletion | null {
+  const current = getState();
+  const runtimeGeneration = current.runtimeGeneration;
+  const subscriptionEpoch = current.replay.subscriptionEpoch;
+  if (
+    runtimeGeneration === null ||
+    subscriptionEpoch === null ||
+    !current.replay.needsAuthoritativeRefresh ||
+    current.runtimeStatus?.phase !== "ready" ||
+    current.runtimeStatus.generation !== runtimeGeneration
+  ) {
+    return null;
+  }
+
+  let completed = false;
+  return {
+    runtimeGeneration,
+    subscriptionEpoch,
+    complete: () => {
+      if (completed) return false;
+      const latest = getState();
+      if (
+        latest.runtimeGeneration !== runtimeGeneration ||
+        latest.replay.subscriptionEpoch !== subscriptionEpoch ||
+        !latest.replay.needsAuthoritativeRefresh ||
+        latest.runtimeStatus?.phase !== "ready" ||
+        latest.runtimeStatus.generation !== runtimeGeneration
+      ) {
+        return false;
+      }
+      completed = true;
+      dispatch({
+        type: "authoritativeRefreshCompleted",
+        runtimeGeneration,
+        subscriptionEpoch,
+      });
+      return true;
+    },
+  };
+}
+
 /** Scope-owned reducer plus the one race-free native event subscription. */
 export function useCodeSessionStore(
   scope: CodeThreadBindingScope,
@@ -41,6 +94,7 @@ export function useCodeSessionStore(
   startRuntime: () => Promise<CodeRuntimeStatus>;
   refreshRuntime: () => Promise<void>;
   retryEventSync: () => void;
+  captureAuthoritativeRefreshCompletion: () => CodeAuthoritativeRefreshCompletion | null;
   respondToApproval: (
     approval: CodePendingApproval,
     response: CodeApprovalResponse,
@@ -218,11 +272,21 @@ export function useCodeSessionStore(
     setSubscriptionRefresh((value) => value + 1);
   }, []);
 
+  const captureAuthoritativeRefreshCompletion = React.useCallback(
+    () =>
+      captureCodeAuthoritativeRefreshCompletion(
+        () => stateRef.current,
+        dispatch,
+      ),
+    [],
+  );
+
   const respondToApproval = React.useCallback(
     async (approval: CodePendingApproval, response: CodeApprovalResponse) => {
       const current = stateRef.current;
       if (
         current.replay.status !== "synchronized" ||
+        current.replay.needsAuthoritativeRefresh ||
         current.replay.approvalStateIncomplete ||
         subscriptionErrorRef.current !== null ||
         !selectCanRespondToCodeApproval(current, approval)
@@ -256,6 +320,7 @@ export function useCodeSessionStore(
       if (
         !turn ||
         current.replay.status !== "synchronized" ||
+        current.replay.needsAuthoritativeRefresh ||
         current.replay.approvalStateIncomplete ||
         subscriptionErrorRef.current !== null ||
         current.runtimeStatus?.phase !== "ready" ||
@@ -285,6 +350,7 @@ export function useCodeSessionStore(
     startRuntime,
     refreshRuntime,
     retryEventSync,
+    captureAuthoritativeRefreshCompletion,
     respondToApproval,
     interruptThread,
   };

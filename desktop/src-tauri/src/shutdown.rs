@@ -14,11 +14,16 @@ pub(crate) fn is_restart_request(code: Option<i32>) -> bool {
 pub(crate) fn shut_down_app(app: &tauri::AppHandle, shutdown_done: &std::sync::atomic::AtomicBool) {
     use std::sync::atomic::Ordering;
 
-    app.state::<AppState>()
-        .shutdown_started
-        .store(true, Ordering::SeqCst);
+    let state = app.state::<AppState>();
+    state.shutdown_started.store(true, Ordering::SeqCst);
+    state
+        .code_lifecycle_authority_ready
+        .store(false, Ordering::SeqCst);
     if !shutdown_done.swap(true, Ordering::SeqCst) {
         prevent_sleep::release(&app.state::<AppState>().prevent_sleep);
+        if let Err(error) = stop_code_terminals(app) {
+            eprintln!("buzz-desktop: failed to stop SchoolX Code terminals: {error}");
+        }
         if let Err(error) = stop_code_runtime(app) {
             eprintln!("buzz-desktop: failed to stop Codex app-server: {error}");
         }
@@ -39,10 +44,13 @@ pub(crate) fn install_signal_handler(
     use std::sync::atomic::Ordering;
 
     if let Err(error) = ctrlc::set_handler(move || {
-        app.state::<AppState>()
-            .shutdown_started
-            .store(true, Ordering::SeqCst);
+        let state = app.state::<AppState>();
+        state.shutdown_started.store(true, Ordering::SeqCst);
+        state
+            .code_lifecycle_authority_ready
+            .store(false, Ordering::SeqCst);
         if !shutdown_done.swap(true, Ordering::SeqCst) {
+            let _ = stop_code_terminals(&app);
             let _ = stop_code_runtime(&app);
             let _ = shutdown_managed_agents(&app);
             #[cfg(feature = "mesh-llm")]
@@ -57,8 +65,32 @@ pub(crate) fn install_signal_handler(
     }
 }
 
+fn stop_code_terminals(app: &tauri::AppHandle) -> Result<(), String> {
+    app.state::<AppState>().code_terminal_manager.shutdown()
+}
+
+/// Stop window-bound PTYs before preserving the macOS webview in the tray.
+#[cfg(target_os = "macos")]
+pub(crate) fn hide_main_window_for_tray(app: &tauri::AppHandle) {
+    if let Err(error) = app
+        .state::<AppState>()
+        .code_terminal_manager
+        .terminate_all()
+    {
+        eprintln!("buzz-desktop: failed to stop terminals on window close: {error}");
+    }
+    if let Some(window) = app.get_webview_window("main") {
+        if let Err(error) = window.hide() {
+            eprintln!("buzz-desktop: failed to hide main window: {error}");
+        }
+    }
+}
+
 fn stop_code_runtime(app: &tauri::AppHandle) -> Result<(), String> {
     let state = app.state::<AppState>();
+    state
+        .code_lifecycle_authority_ready
+        .store(false, std::sync::atomic::Ordering::Release);
     let _guard = state
         .code_thread_bindings_lock
         .lock()

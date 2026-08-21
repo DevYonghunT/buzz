@@ -15,7 +15,13 @@ mod channel_templates;
 mod channel_window;
 mod channels;
 mod clipboard;
+mod code_git_handoff;
+mod code_terminal;
+mod code_thread_fork;
+mod code_thread_lifecycle;
+mod code_thread_management;
 mod code_workspace;
+mod code_worktree_inventory;
 mod dms;
 mod engrams;
 mod export_util;
@@ -63,6 +69,9 @@ mod workflows;
 mod workspace;
 mod workspace_catalog;
 
+#[cfg(all(test, unix))]
+pub(crate) use code_workspace::tests::stateful_fake_codex;
+
 pub use agent_auth::*;
 pub use agent_config::*;
 pub use agent_discovery::*;
@@ -77,7 +86,13 @@ pub use channel_templates::*;
 pub use channel_window::*;
 pub use channels::*;
 pub use clipboard::*;
+pub use code_git_handoff::*;
+pub use code_terminal::*;
+pub use code_thread_fork::*;
+pub use code_thread_lifecycle::*;
+pub use code_thread_management::*;
 pub use code_workspace::*;
+pub use code_worktree_inventory::*;
 pub use dms::*;
 pub use engrams::*;
 pub use global_agent_config::*;

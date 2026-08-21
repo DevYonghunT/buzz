@@ -148,6 +148,7 @@ jobs:
           LLAMA_STAGE_BUILD_DIR: ${{ github.workspace }}/.cache/mesh-llama/build-stage-abi-metal
           SKIPPY_LLAMA_AUTO_BUILD: "0"
           TAURI_BUNDLER_DMG_IGNORE_CI: "true"
+          SCHOOLX_CODE_GIT_CARGO_LAYOUT: native
 
       - name: Locate unsigned DMG
         id: unsigned
@@ -186,9 +187,10 @@ jobs:
           EXTRACT_DIR="${RUNNER_TEMP}/signed-app-extract"
           rm -rf "$EXTRACT_DIR" && mkdir -p "$EXTRACT_DIR"
           ditto -x -k "$SIGNED_APP_ZIP" "$EXTRACT_DIR"
-          codesign --verify --deep --strict --verbose=2 "$EXTRACT_DIR/Buzz.app"
-          spctl --assess --type execute --verbose=4 "$EXTRACT_DIR/Buzz.app"
-          desktop/scripts/verify-macos-entitlements.sh "$EXTRACT_DIR/Buzz.app"
+          codesign --verify --deep --strict --verbose=2 "$EXTRACT_DIR/SchoolX.app"
+          spctl --assess --type execute --verbose=4 "$EXTRACT_DIR/SchoolX.app"
+          desktop/scripts/verify-macos-entitlements.sh "$EXTRACT_DIR/SchoolX.app"
+          desktop/scripts/verify-code-git-xpc-signature.sh "$EXTRACT_DIR/SchoolX.app"
 
       - name: Stage signed DMG
         id: artifact

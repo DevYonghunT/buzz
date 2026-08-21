@@ -282,3 +282,65 @@ test("local submitted prompts project as user rows without leaking other threads
   assert.equal(rows[0].pending, true);
   assert.equal(JSON.stringify(rows).includes("foreign output"), false);
 });
+
+test("persisted user messages reconcile only exact optimistic prompts", () => {
+  const rows = projectCodeTimeline(
+    thread([
+      {
+        id: "turn-restored",
+        status: "inProgress",
+        items: [
+          {
+            id: "persisted-prompt",
+            type: "userMessage",
+            text: "Repeat this prompt",
+          },
+        ],
+        error: null,
+      },
+    ]),
+    [],
+    [
+      {
+        id: "local-matched",
+        text: "Repeat this prompt",
+        turnId: "turn-restored",
+      },
+      {
+        id: "local-still-waiting",
+        text: "Repeat this prompt",
+        turnId: "turn-restored",
+      },
+      {
+        id: "local-different-text",
+        text: "Different prompt",
+        turnId: "turn-restored",
+      },
+      {
+        id: "local-different-turn",
+        text: "Repeat this prompt",
+        turnId: "turn-pending",
+      },
+      {
+        id: "local-without-turn",
+        text: "Repeat this prompt",
+      },
+    ],
+  );
+  const userRows = rows.filter((row) => row.kind === "user");
+
+  assert.deepEqual(
+    userRows.map((row) => row.itemId),
+    [
+      "persisted-prompt",
+      "local-still-waiting",
+      "local-different-text",
+      "local-different-turn",
+      "local-without-turn",
+    ],
+  );
+  assert.equal(
+    userRows.some((row) => row.itemId === "local-matched"),
+    false,
+  );
+});

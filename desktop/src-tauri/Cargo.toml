@@ -27,6 +27,7 @@ system-keyring = ["dep:keyring"]
 base64 = "0.22"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+swift-bridge-build = "=0.1.59"
 tauri-build = { version = "2", features = [] }
 
 [target.'cfg(unix)'.dependencies]
@@ -52,6 +53,7 @@ objc2-app-kit = { version = "0.3.2", default-features = false, features = ["NSHa
 objc2-foundation = { version = "0.3.2", default-features = false, features = ["NSProcessInfo", "NSString"] }
 keyring = { version = "3.6.3", default-features = false, features = ["apple-native", "vendored"], optional = true }
 security-framework = { version = "3.7.0", features = ["OSX_10_15"] }
+swift-bridge = { version = "=0.1.59", default-features = false }
 window-vibrancy = "0.6"
 user-idle = { version = "0.6", default-features = false }
 plist = "1"
@@ -65,6 +67,7 @@ user-idle = { version = "0.6", default-features = false }
 atomic-write-file = "0.3"
 anyhow = "1"
 dirs = "6"
+portable-pty = "0.9"
 tauri = { version = "2", features = ["macos-private-api", "tray-icon"] }
 tauri-plugin-deep-link = "2"
 tauri-plugin-opener = "2"
@@ -112,6 +115,7 @@ mesh-llm-system = { git = "https://github.com/Mesh-LLM/mesh-llm.git", tag = "v0.
 mesh-llm-events = { git = "https://github.com/Mesh-LLM/mesh-llm.git", tag = "v0.74.0", package = "mesh-llm-events", optional = true }
 base64 = "0.22"
 sha2 = "0.11"
+sha1 = "0.11"
 tar = "0.4"
 bzip2 = "0.6"
 chrono = { version = "0.4", features = ["serde"] }

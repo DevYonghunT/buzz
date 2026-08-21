@@ -35,9 +35,21 @@ export type ProjectRepoDiffFile = {
   additions: number;
   deletions: number;
   patch: string;
-  /** True when the patch was cut off at the backend's per-file line cap. */
+  /** True when the patch exceeded the backend's per-file render budget. */
   truncated: boolean;
+  /** Git worktree status, when the diff source can report it. */
+  status?: ProjectRepoDiffFileStatus;
+  /** True when the file cannot be represented as a textual patch. */
+  binary?: boolean;
 };
+
+export type ProjectRepoDiffFileStatus =
+  | "added"
+  | "modified"
+  | "deleted"
+  | "typeChanged"
+  | "unmerged"
+  | "untracked";
 
 export type ProjectRepoDiff = {
   files: ProjectRepoDiffFile[];

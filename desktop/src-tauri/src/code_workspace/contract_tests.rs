@@ -13,34 +13,53 @@ use sha2::{Digest, Sha256};
 use tar::Archive;
 
 use super::approvals::{
-    CodeApprovalDecision, CodeApprovalResponse, CodePermissionScope, PendingApprovalStore,
+    CodeApprovalDecision, CodeApprovalResponse, CodePermissionIntent, CodePermissionScope,
+    PendingApprovalStore,
 };
 use super::bindings::{
     CodeExecutionMode, CodeThreadBinding, CodeThreadBindingScope, CodeThreadBindingStore,
-    CodeThreadPreparationState,
+    CodeThreadLifecycleStatus, CodeThreadPreparationOperation, CodeThreadPreparationState,
+    CODE_THREAD_BINDING_SCHEMA_VERSION,
 };
 use super::jsonrpc;
 use super::protocol::{
     loaded_thread_list_params, normalize_notification, parse_loaded_thread_list,
-    parse_recovery_thread_list, parse_recovery_thread_read, parse_thread_open, parse_thread_read,
-    parse_turn_start, parse_turn_steer, recovery_thread_list_params, thread_read_params,
-    CodeBoundThreadOpenResult, CodeBoundThreadSummary, CodeEventBacklog, CodePreparedWorktree,
-    CodeThreadBindingRecoverInput, CodeThreadListInput, CodeThreadResumeInput,
-    CodeThreadStartError, CodeThreadStartInput, CodeThreadsPage, CodeTurnInterruptInput,
-    CodeTurnStartInput, CodeTurnSteerInput, CodeTurnSummary, CodeWorkspaceEvent,
-    CodeWorktreePrepareCommandInput,
+    parse_recovery_thread_list, parse_recovery_thread_read, parse_thread_name_set,
+    parse_thread_open, parse_thread_read, parse_turn_start, parse_turn_steer,
+    recovery_thread_list_params, thread_read_params, CodeBoundThreadOpenResult,
+    CodeBoundThreadSummary, CodeEventBacklog, CodeEventCheckpoint, CodePreparedWorktree,
+    CodeThreadBindingRecoverInput, CodeThreadChangeStatus, CodeThreadChangedFile,
+    CodeThreadChanges, CodeThreadChangesInput, CodeThreadForkInput,
+    CodeThreadLifecycleMutationResult, CodeThreadListInput, CodeThreadRenameInput,
+    CodeThreadResumeInput, CodeThreadStartError, CodeThreadStartInput, CodeThreadsPage,
+    CodeTurnInterruptInput, CodeTurnStartInput, CodeTurnSteerInput, CodeTurnSummary,
+    CodeWorkspaceEvent, CodeWorktreePrepareCommandInput,
 };
 use super::runtime::{initialize_params, CodeRuntimePhase, CodeRuntimeStatus};
+use super::terminal::{
+    CodeTerminalEvent, CodeTerminalOpenInput, CodeTerminalResizeInput, CodeTerminalSession,
+    CodeTerminalStdinInput, CodeTerminalTerminateInput,
+};
+use super::thread_lifecycle::{parse_thread_archive, parse_thread_unarchive};
+use super::worktree_inventory::{
+    CodeWorktreeInspection, CodeWorktreeInventoryAuthority, CodeWorktreeInventoryBlocker,
+};
 use super::worktrees::{
     CodeRepositoryDescriptor, CodeRepositoryInspectInput, CodeWorktreeDescriptor,
     CodeWorktreePrepareResult, CodeWorktreeStatus,
 };
 use super::{
-    CodeApprovalResponseInput, CodeRuntimeProbe, CodeThreadPreparationListInput,
-    CODE_WORKSPACE_EVENT,
+    CodeApprovalResponseInput, CodeModelOption, CodeModelSelection, CodeModelsListResult,
+    CodeReasoningEffortOption, CodeRuntimeProbe, CodeThreadLifecycleInput,
+    CodeThreadPreparationListInput, CodeWorktreeInventoryRow, CodeWorktreeRemovalReceipt,
+    CodeWorktreeRemoveInput, CodeWorktreesListInput, CODE_WORKSPACE_EVENT,
 };
 
 const TAURI_CONTRACT: &str = include_str!("fixtures/tauri-contract-v1.json");
+const WORKTREE_REMOVAL_GATE_CONTRACT: &str =
+    include_str!("fixtures/worktree-removal-gates-v1.json");
+const WORKTREE_REMOVAL_GATE_DESIGN: &str =
+    include_str!("../../../../docs/schoolx-2/SCHOOLX_CODE_WORKTREE_REMOVAL_GATES.md");
 const STORE_FIXTURE: &str = include_str!("fixtures/thread-bindings-v1.json");
 const SCHEMA_MANIFEST: &str = include_str!("fixtures/codex-0.145.0-schema-manifest.json");
 const WIRE_FIXTURE: &str = include_str!("fixtures/codex-0.145.0-wire.json");
@@ -48,6 +67,14 @@ const SELECTED_SCHEMA_ARCHIVE: &str =
     include_str!("fixtures/codex-0.145.0-selected-schemas.tar.gz.base64");
 const LIB_SOURCE: &str = include_str!("../lib.rs");
 const COMMAND_SOURCE: &str = include_str!("../commands/code_workspace.rs");
+const TERMINAL_COMMAND_SOURCE: &str = include_str!("../commands/code_terminal.rs");
+const THREAD_MANAGEMENT_COMMAND_SOURCE: &str =
+    include_str!("../commands/code_thread_management.rs");
+const THREAD_LIFECYCLE_COMMAND_SOURCE: &str = include_str!("../commands/code_thread_lifecycle.rs");
+const THREAD_FORK_COMMAND_SOURCE: &str = include_str!("../commands/code_thread_fork.rs");
+const WORKTREE_INVENTORY_COMMAND_SOURCE: &str =
+    include_str!("../commands/code_worktree_inventory.rs");
+const GIT_HANDOFF_COMMAND_SOURCE: &str = include_str!("../commands/code_git_handoff.rs");
 
 fn fixture(raw: &str) -> Result<Value, String> {
     serde_json::from_str(raw).map_err(|error| error.to_string())
@@ -506,6 +533,18 @@ fn command_arguments(command: &str) -> Result<Vec<String>, String> {
     let signature = COMMAND_SOURCE
         .split_once(&async_marker)
         .or_else(|| COMMAND_SOURCE.split_once(&sync_marker))
+        .or_else(|| TERMINAL_COMMAND_SOURCE.split_once(&async_marker))
+        .or_else(|| TERMINAL_COMMAND_SOURCE.split_once(&sync_marker))
+        .or_else(|| THREAD_MANAGEMENT_COMMAND_SOURCE.split_once(&async_marker))
+        .or_else(|| THREAD_MANAGEMENT_COMMAND_SOURCE.split_once(&sync_marker))
+        .or_else(|| THREAD_LIFECYCLE_COMMAND_SOURCE.split_once(&async_marker))
+        .or_else(|| THREAD_LIFECYCLE_COMMAND_SOURCE.split_once(&sync_marker))
+        .or_else(|| THREAD_FORK_COMMAND_SOURCE.split_once(&async_marker))
+        .or_else(|| THREAD_FORK_COMMAND_SOURCE.split_once(&sync_marker))
+        .or_else(|| WORKTREE_INVENTORY_COMMAND_SOURCE.split_once(&async_marker))
+        .or_else(|| WORKTREE_INVENTORY_COMMAND_SOURCE.split_once(&sync_marker))
+        .or_else(|| GIT_HANDOFF_COMMAND_SOURCE.split_once(&async_marker))
+        .or_else(|| GIT_HANDOFF_COMMAND_SOURCE.split_once(&sync_marker))
         .map(|(_, remainder)| remainder)
         .ok_or_else(|| format!("missing native command signature for {command}"))?;
     let signature = signature
@@ -565,14 +604,14 @@ fn schema_manifest_freezes_the_audited_codex_0_145_0_contract() -> Result<(), St
     let schemas = manifest["schemas"]
         .as_array()
         .ok_or_else(|| "missing schemas".to_string())?;
-    assert_eq!(schemas.len(), 54);
-    assert_eq!(manifest["source"]["selectedSchemaCount"], 54);
+    assert_eq!(schemas.len(), 66);
+    assert_eq!(manifest["source"]["selectedSchemaCount"], 66);
     let paths = schemas
         .iter()
         .map(|schema| schema[1].as_str().unwrap_or_default())
         .collect::<Vec<_>>();
     assert!(paths.windows(2).all(|pair| pair[0] < pair[1]));
-    assert_eq!(paths.iter().copied().collect::<HashSet<_>>().len(), 54);
+    assert_eq!(paths.iter().copied().collect::<HashSet<_>>().len(), 66);
     assert!(schemas.iter().all(|schema| {
         schema[0]
             .as_str()
@@ -584,7 +623,11 @@ fn schema_manifest_freezes_the_audited_codex_0_145_0_contract() -> Result<(), St
     );
     assert_eq!(
         manifest["source"]["selectedSchemasSha256"],
-        "df00b0eff4563354d1a6ab799f1d1f446dcf439745bfb1e04742ae566ffedcd5"
+        "1ce5af96175ce83bb1d91db7939e8dcc243984255cf44777f19e58e0afe6549a"
+    );
+    assert_eq!(
+        manifest["source"]["selectedLeafSchemasSha256"],
+        "b8d695b56e3ea5255857e2eb2dc9685d5ad65b735f276a5c743363d792677c73"
     );
     assert_eq!(
         manifest["source"]["fullGeneratedSetSha256"],
@@ -594,10 +637,10 @@ fn schema_manifest_freezes_the_audited_codex_0_145_0_contract() -> Result<(), St
     let methods = manifest["methods"]
         .as_object()
         .ok_or_else(|| "missing method map".to_string())?;
-    assert_eq!(methods.len(), 9);
+    assert_eq!(methods.len(), 14);
     assert_eq!(
         manifest["notifications"].as_object().map(|map| map.len()),
-        Some(21)
+        Some(23)
     );
     assert_eq!(
         manifest["serverRequests"].as_object().map(|map| map.len()),
@@ -628,7 +671,9 @@ fn selected_schema_artifact_recomputes_every_manifest_hash() -> Result<(), Strin
         expected_paths
     );
 
+    let dispatch_schemas = string_set(&manifest["dispatchSchemas"], "dispatch schemas")?;
     let mut aggregate = String::new();
+    let mut leaf_aggregate = String::new();
     for entry in entries {
         let expected_hash = entry[0]
             .as_str()
@@ -655,10 +700,20 @@ fn selected_schema_artifact_recomputes_every_manifest_hash() -> Result<(), Strin
         aggregate.push_str("  ");
         aggregate.push_str(path);
         aggregate.push('\n');
+        if !dispatch_schemas.contains(path) {
+            leaf_aggregate.push_str(&actual_hash);
+            leaf_aggregate.push_str("  ");
+            leaf_aggregate.push_str(path);
+            leaf_aggregate.push('\n');
+        }
     }
     assert_eq!(
         sha256_hex(aggregate.as_bytes()),
         manifest["source"]["selectedSchemasSha256"]
+    );
+    assert_eq!(
+        sha256_hex(leaf_aggregate.as_bytes()),
+        manifest["source"]["selectedLeafSchemasSha256"]
     );
     Ok(())
 }
@@ -698,11 +753,16 @@ fn wire_fixture_conforms_to_the_curated_schema_shapes() -> Result<(), String> {
     );
 
     let method_fixtures = [
+        ("model/list", "modelList"),
+        ("thread/archive", "threadArchive"),
+        ("thread/fork", "threadFork"),
         ("thread/start", "threadStart"),
         ("thread/list", "threadList"),
         ("thread/loaded/list", "threadLoadedList"),
         ("thread/read", "threadRead"),
+        ("thread/name/set", "threadNameSet"),
         ("thread/resume", "threadResume"),
+        ("thread/unarchive", "threadUnarchive"),
         ("turn/start", "turnStart"),
         ("turn/steer", "turnSteer"),
         ("turn/interrupt", "turnInterrupt"),
@@ -761,6 +821,17 @@ fn wire_fixture_conforms_to_the_curated_schema_shapes() -> Result<(), String> {
         notification_methods,
         notification_map.keys().cloned().collect()
     );
+    let fork_started = wire["notifications"]
+        .as_array()
+        .and_then(|notifications| {
+            notifications
+                .iter()
+                .find(|notification| notification["method"] == "thread/started")
+        })
+        .ok_or_else(|| "missing representative fork thread/started notification".to_string())?;
+    assert_eq!(fork_started["params"]["thread"]["id"], "thread-2");
+    assert_eq!(fork_started["params"]["thread"]["forkedFromId"], "thread-1");
+    assert_eq!(fork_started["params"]["thread"]["turns"], json!([]));
 
     let server_request_map = manifest["serverRequests"]
         .as_object()
@@ -813,6 +884,7 @@ fn wire_fixture_conforms_to_the_curated_schema_shapes() -> Result<(), String> {
 
     let facts = &manifest["structuralFacts"];
     for thread in [
+        &wire["threadFork"]["result"]["thread"],
         &wire["threadStart"]["result"]["thread"],
         &wire["threadRead"]["result"]["thread"],
         &wire["threadResume"]["result"]["thread"],
@@ -823,6 +895,7 @@ fn wire_fixture_conforms_to_the_curated_schema_shapes() -> Result<(), String> {
         }
     }
     for response in [
+        &wire["threadFork"]["result"],
         &wire["threadStart"]["result"],
         &wire["threadResume"]["result"],
     ] {
@@ -834,6 +907,7 @@ fn wire_fixture_conforms_to_the_curated_schema_shapes() -> Result<(), String> {
     }
     for turn in [
         &wire["turnStart"]["result"]["turn"],
+        &wire["threadFork"]["result"]["thread"]["turns"][0],
         &wire["threadResume"]["result"]["thread"]["turns"][0],
     ] {
         assert_required_fields(turn, &facts["turnRequired"], "Codex Turn")?;
@@ -846,11 +920,16 @@ fn wire_fixture_conforms_to_the_curated_schema_shapes() -> Result<(), String> {
             ));
         }
     }
-    assert_required_fields(
+    for item in [
+        &wire["threadFork"]["result"]["thread"]["turns"][0]["items"][0],
         &wire["threadResume"]["result"]["thread"]["turns"][0]["items"][0],
-        &facts["agentMessageItemRequired"],
-        "Codex agentMessage item",
-    )?;
+    ] {
+        assert_required_fields(
+            item,
+            &facts["agentMessageItemRequired"],
+            "Codex agentMessage item",
+        )?;
+    }
     Ok(())
 }
 
@@ -866,18 +945,37 @@ fn tauri_command_input_enum_and_event_contract_is_exact() -> Result<(), String> 
             "code_runtime_events",
             &["afterSequence", "runtimeGeneration", "scope"][..],
         ),
+        ("code_models_list", &[][..]),
+        ("code_model_selection_set", &["input"][..]),
+        ("code_terminal_open", &["input", "onEvent"][..]),
+        ("code_terminal_resize", &["input"][..]),
+        ("code_terminal_stdin", &["input"][..]),
+        ("code_terminal_terminate", &["input"][..]),
         ("code_repository_inspect", &["input"][..]),
         ("code_worktree_prepare", &["input"][..]),
         ("code_worktree_status", &["descriptor"][..]),
+        ("code_worktrees_list", &["input"][..]),
+        ("code_worktree_remove", &["input"][..]),
         ("code_thread_preparations_list", &["input"][..]),
         ("code_threads_list", &["input"][..]),
+        ("code_thread_archive", &["input"][..]),
+        ("code_thread_unarchive", &["input"][..]),
+        ("code_thread_rename", &["input"][..]),
+        ("code_thread_changes", &["input"][..]),
         ("code_thread_start", &["input"][..]),
+        ("code_thread_fork", &["input"][..]),
         ("code_thread_binding_recover", &["input"][..]),
         ("code_thread_resume", &["input"][..]),
         ("code_turn_start", &["input"][..]),
         ("code_turn_steer", &["input"][..]),
         ("code_turn_interrupt", &["input"][..]),
         ("code_approval_respond", &["input"][..]),
+        ("code_thread_git_status", &["input"][..]),
+        ("code_thread_git_stage", &["input"][..]),
+        ("code_thread_git_unstage", &["input"][..]),
+        ("code_thread_git_commit", &["input"][..]),
+        ("code_thread_git_reconcile", &["input"][..]),
+        ("code_thread_git_acknowledge", &["input"][..]),
     ];
     let actual = contract["commands"]
         .as_array()
@@ -906,10 +1004,28 @@ fn tauri_command_input_enum_and_event_contract_is_exact() -> Result<(), String> 
         encode_values([CodeExecutionMode::Worktree, CodeExecutionMode::Local])?
     );
     assert_eq!(
+        contract["enums"]["threadChangeStatus"],
+        encode_values([
+            CodeThreadChangeStatus::Added,
+            CodeThreadChangeStatus::Modified,
+            CodeThreadChangeStatus::Deleted,
+            CodeThreadChangeStatus::TypeChanged,
+            CodeThreadChangeStatus::Unmerged,
+            CodeThreadChangeStatus::Untracked,
+        ])?
+    );
+    assert_eq!(
         contract["enums"]["preparationState"],
         encode_values([
             CodeThreadPreparationState::Prepared,
             CodeThreadPreparationState::Starting,
+        ])?
+    );
+    assert_eq!(
+        contract["enums"]["preparationOperation"],
+        encode_values([
+            CodeThreadPreparationOperation::Start,
+            CodeThreadPreparationOperation::Fork,
         ])?
     );
     assert_eq!(
@@ -937,15 +1053,66 @@ fn tauri_command_input_enum_and_event_contract_is_exact() -> Result<(), String> 
         contract["enums"]["permissionScope"],
         encode_values([CodePermissionScope::Turn, CodePermissionScope::Session])?
     );
+    assert_eq!(
+        contract["enums"]["permissionIntent"],
+        encode_values([CodePermissionIntent::Grant, CodePermissionIntent::Decline])?
+    );
+    assert_eq!(
+        contract["enums"]["threadLifecycle"],
+        encode_values([
+            CodeThreadLifecycleStatus::Active,
+            CodeThreadLifecycleStatus::Archiving,
+            CodeThreadLifecycleStatus::Archived,
+            CodeThreadLifecycleStatus::Unarchiving,
+            CodeThreadLifecycleStatus::Unknown,
+        ])?
+    );
+    assert_eq!(
+        contract["enums"]["worktreeInventoryBlocker"],
+        encode_values([
+            CodeWorktreeInventoryBlocker::ActiveBinding,
+            CodeWorktreeInventoryBlocker::LifecycleUnsettled,
+            CodeWorktreeInventoryBlocker::UnfinishedPreparation,
+            CodeWorktreeInventoryBlocker::LocalCheckout,
+            CodeWorktreeInventoryBlocker::UnavailableRoot,
+            CodeWorktreeInventoryBlocker::DirtyRoot,
+            CodeWorktreeInventoryBlocker::BranchAttached,
+            CodeWorktreeInventoryBlocker::HeadDrift,
+            CodeWorktreeInventoryBlocker::MergeProofUnavailable,
+        ])?
+    );
 
     let inputs = &contract["strictInputs"];
+    reject_unknown::<CodeTerminalOpenInput>(&inputs["terminalOpen"])?;
+    reject_unknown::<CodeTerminalResizeInput>(&inputs["terminalResize"])?;
+    reject_unknown::<CodeTerminalStdinInput>(&inputs["terminalStdin"])?;
+    reject_unknown::<CodeTerminalTerminateInput>(&inputs["terminalTerminate"])?;
     reject_unknown::<CodeRepositoryInspectInput>(&inputs["repositoryInspect"])?;
     reject_unknown::<CodeWorktreePrepareCommandInput>(&inputs["worktreePrepare"])?;
+    reject_unknown::<CodeWorktreesListInput>(&inputs["worktreesList"])?;
+    assert_eq!(
+        keys(&inputs["worktreesList"])?,
+        ["scope"].into_iter().map(str::to_string).collect()
+    );
+    reject_unknown::<CodeWorktreeRemoveInput>(&inputs["worktreeRemove"])?;
+    assert_eq!(
+        keys(&inputs["worktreeRemove"])?,
+        ["scope", "threadId"]
+            .into_iter()
+            .map(str::to_string)
+            .collect()
+    );
     reject_unknown::<CodeThreadPreparationListInput>(&inputs["threadPreparationList"])?;
     reject_unknown::<CodeThreadStartInput>(&inputs["threadStart"])?;
+    reject_unknown::<CodeThreadForkInput>(&inputs["threadFork"])?;
     reject_unknown::<CodeThreadBindingRecoverInput>(&inputs["threadBindingRecover"])?;
     reject_unknown::<CodeThreadListInput>(&inputs["threadList"])?;
+    reject_unknown::<CodeThreadLifecycleInput>(&inputs["threadArchive"])?;
+    reject_unknown::<CodeThreadLifecycleInput>(&inputs["threadUnarchive"])?;
+    reject_unknown::<CodeThreadRenameInput>(&inputs["threadRename"])?;
+    reject_unknown::<CodeThreadChangesInput>(&inputs["threadChanges"])?;
     reject_unknown::<CodeThreadResumeInput>(&inputs["threadResume"])?;
+    reject_unknown::<CodeModelSelection>(&inputs["modelSelection"])?;
     reject_unknown::<CodeTurnStartInput>(&inputs["turnStart"])?;
     reject_unknown::<CodeTurnSteerInput>(&inputs["turnSteer"])?;
     reject_unknown::<CodeTurnInterruptInput>(&inputs["turnInterrupt"])?;
@@ -982,11 +1149,98 @@ fn tauri_command_input_enum_and_event_contract_is_exact() -> Result<(), String> 
         contract["outputs"]["binding"]
     );
     assert_eq!(keys(&contract["outputs"]["binding"])?.len(), 8);
+    let model_selection: CodeModelSelection = decode(&contract["outputs"]["modelSelection"])?;
+    assert_eq!(
+        serde_json::to_value(&model_selection).map_err(|error| error.to_string())?,
+        contract["outputs"]["modelSelection"]
+    );
+    assert_eq!(keys(&contract["outputs"]["modelSelection"])?.len(), 2);
+    let model_catalog = CodeModelsListResult {
+        runtime_generation: 7,
+        models: vec![
+            CodeModelOption {
+                id: "gpt-5.2-codex".to_string(),
+                model: "gpt-5.2-codex".to_string(),
+                display_name: "GPT-5.2 Codex".to_string(),
+                description: "Coding model for agentic workflows".to_string(),
+                is_default: true,
+                default_reasoning_effort: "medium".to_string(),
+                supported_reasoning_efforts: vec![
+                    CodeReasoningEffortOption {
+                        reasoning_effort: "medium".to_string(),
+                        description: "Balanced reasoning for everyday tasks".to_string(),
+                    },
+                    CodeReasoningEffortOption {
+                        reasoning_effort: "high".to_string(),
+                        description: "Deeper reasoning for complex tasks".to_string(),
+                    },
+                ],
+            },
+            CodeModelOption {
+                id: "codex-mini".to_string(),
+                model: "codex-mini-latest".to_string(),
+                display_name: "Codex Mini".to_string(),
+                description: "Fast coding model for focused tasks".to_string(),
+                is_default: false,
+                default_reasoning_effort: "low".to_string(),
+                supported_reasoning_efforts: vec![
+                    CodeReasoningEffortOption {
+                        reasoning_effort: "low".to_string(),
+                        description: "Fast responses for straightforward tasks".to_string(),
+                    },
+                    CodeReasoningEffortOption {
+                        reasoning_effort: "medium".to_string(),
+                        description: "Balanced reasoning for everyday tasks".to_string(),
+                    },
+                ],
+            },
+        ],
+        recent_selection: Some(CodeModelSelection {
+            model: "gpt-5.2-codex".to_string(),
+            reasoning_effort: "medium".to_string(),
+        }),
+    };
+    assert_eq!(
+        serde_json::to_value(model_catalog).map_err(|error| error.to_string())?,
+        contract["outputs"]["modelCatalog"]
+    );
+    assert_eq!(keys(&contract["outputs"]["modelCatalog"])?.len(), 3);
     let preparation_list: Vec<super::bindings::CodeThreadPreparation> =
         decode(&contract["outputs"]["preparationList"])?;
     assert_eq!(
         serde_json::to_value(preparation_list).map_err(|error| error.to_string())?,
         contract["outputs"]["preparationList"]
+    );
+    let inventory: Vec<CodeWorktreeInventoryRow> =
+        decode(&contract["outputs"]["worktreeInventory"])?;
+    assert_eq!(
+        serde_json::to_value(&inventory).map_err(|error| error.to_string())?,
+        contract["outputs"]["worktreeInventory"]
+    );
+    assert!(inventory.iter().all(|row| {
+        row.descriptor.execution_mode == CodeExecutionMode::Worktree
+            && row.descriptor.worktree_id.is_some()
+            && row.preserved
+            && row.can_remove == row.blockers.is_empty()
+    }));
+    assert!(matches!(
+        inventory[0].inspection,
+        CodeWorktreeInspection::Unavailable { .. }
+    ));
+    assert!(matches!(
+        inventory[0].authority,
+        CodeWorktreeInventoryAuthority::Binding { .. }
+    ));
+    reject_unknown::<CodeWorktreeRemovalReceipt>(&contract["outputs"]["worktreeRemovalReceipt"])?;
+    let removal_receipt: CodeWorktreeRemovalReceipt =
+        decode(&contract["outputs"]["worktreeRemovalReceipt"])?;
+    assert_eq!(
+        serde_json::to_value(removal_receipt).map_err(|error| error.to_string())?,
+        contract["outputs"]["worktreeRemovalReceipt"]
+    );
+    assert_eq!(
+        keys(&contract["outputs"]["worktreeRemovalReceipt"])?.len(),
+        9
     );
 
     let probe = CodeRuntimeProbe {
@@ -1015,6 +1269,43 @@ fn tauri_command_input_enum_and_event_contract_is_exact() -> Result<(), String> 
     assert_eq!(
         serde_json::to_value(status).map_err(|error| error.to_string())?,
         contract["outputs"]["runtimeStatus"]
+    );
+
+    let terminal_scope: CodeThreadBindingScope =
+        decode(&contract["strictInputs"]["terminalOpen"]["scope"])?;
+    let terminal_session = CodeTerminalSession {
+        scope: terminal_scope.clone(),
+        thread_id: "thread-1".to_string(),
+        session_id: "d9b41c7a-0e12-4df2-8c19-7e5a6b3c2901".to_string(),
+        cols: 120,
+        rows: 32,
+    };
+    assert_eq!(
+        serde_json::to_value(terminal_session).map_err(|error| error.to_string())?,
+        contract["outputs"]["terminalSession"]
+    );
+    let terminal_output_event = CodeTerminalEvent::Output {
+        scope: terminal_scope.clone(),
+        thread_id: "thread-1".to_string(),
+        session_id: "d9b41c7a-0e12-4df2-8c19-7e5a6b3c2901".to_string(),
+        sequence: 1,
+        data: vec![36, 32],
+    };
+    assert_eq!(
+        serde_json::to_value(terminal_output_event).map_err(|error| error.to_string())?,
+        contract["outputs"]["terminalOutputEvent"]
+    );
+    let terminal_exit_event = CodeTerminalEvent::Exit {
+        scope: terminal_scope,
+        thread_id: "thread-1".to_string(),
+        session_id: "d9b41c7a-0e12-4df2-8c19-7e5a6b3c2901".to_string(),
+        sequence: 2,
+        exit_code: 0,
+        signal: None,
+    };
+    assert_eq!(
+        serde_json::to_value(terminal_exit_event).map_err(|error| error.to_string())?,
+        contract["outputs"]["terminalExitEvent"]
     );
 
     let repository_descriptor = CodeRepositoryDescriptor {
@@ -1070,6 +1361,7 @@ fn tauri_command_input_enum_and_event_contract_is_exact() -> Result<(), String> 
     let threads_page = CodeThreadsPage {
         data: vec![CodeBoundThreadSummary {
             binding: binding.clone(),
+            lifecycle: CodeThreadLifecycleStatus::Active,
             thread: None,
             unavailable: Some("Codex app-server is not ready".to_string()),
         }],
@@ -1080,15 +1372,47 @@ fn tauri_command_input_enum_and_event_contract_is_exact() -> Result<(), String> 
         serde_json::to_value(threads_page).map_err(|error| error.to_string())?,
         contract["outputs"]["threadsPage"]
     );
+    let lifecycle_mutation = CodeThreadLifecycleMutationResult {
+        binding: binding.clone(),
+        lifecycle: CodeThreadLifecycleStatus::Archived,
+        thread: None,
+    };
+    assert_eq!(
+        serde_json::to_value(lifecycle_mutation).map_err(|error| error.to_string())?,
+        contract["outputs"]["threadLifecycleMutation"]
+    );
+    let thread_changes = CodeThreadChanges {
+        files: vec![CodeThreadChangedFile {
+            path: "desktop/src/features/code/ui/CodeChangesPanel.tsx".to_string(),
+            status: CodeThreadChangeStatus::Modified,
+            binary: false,
+            additions: 12,
+            deletions: 2,
+            patch: "@@ -1,2 +1,3 @@\n-old\n+new\n+line".to_string(),
+            truncated: false,
+        }],
+        total_files: 1,
+        files_truncated: false,
+        additions: 12,
+        deletions: 2,
+        commit_body: None,
+    };
+    assert_eq!(
+        serde_json::to_value(thread_changes).map_err(|error| error.to_string())?,
+        contract["outputs"]["threadChanges"]
+    );
     let open = CodeBoundThreadOpenResult {
         binding: binding.clone(),
         thread,
         instruction_sources: vec!["AGENTS.md".to_string()],
+        model: "gpt-5.2-codex".to_string(),
+        reasoning_effort: Some("medium".to_string()),
     };
     assert_eq!(
         serde_json::to_value(open).map_err(|error| error.to_string())?,
         contract["outputs"]["boundThreadOpen"]
     );
+    assert_eq!(keys(&contract["outputs"]["boundThreadOpen"])?.len(), 5);
 
     let event = CodeWorkspaceEvent {
         scope: decode(&contract["outputs"]["event"]["scope"])?,
@@ -1123,6 +1447,12 @@ fn tauri_command_input_enum_and_event_contract_is_exact() -> Result<(), String> 
         runtime_generation: 7,
         latest_sequence: 11,
         truncated: false,
+        checkpoint: Some(CodeEventCheckpoint {
+            runtime_generation: 7,
+            sequence_watermark: 11,
+            active_turns: Vec::new(),
+            pending_approvals: Vec::new(),
+        }),
         events: vec![event],
     };
     assert_eq!(
@@ -1156,6 +1486,461 @@ fn tauri_command_input_enum_and_event_contract_is_exact() -> Result<(), String> 
 }
 
 #[test]
+fn worktree_removal_decision_gates_are_frozen_with_the_public_surface_open() -> Result<(), String> {
+    let contract = fixture(WORKTREE_REMOVAL_GATE_CONTRACT)?;
+    let tauri_contract = fixture(TAURI_CONTRACT)?;
+    let gate_order = [
+        "mergedAuthority",
+        "durableRemovalJournal",
+        "bindingTranscriptSemantics",
+        "pinnedDeletionBoundary",
+    ];
+
+    assert_eq!(contract["version"], 1);
+    assert_eq!(
+        contract["status"],
+        "authorityProofJournalPhysicalRemovalImplementedPublicSurfaceOpen"
+    );
+    assert_eq!(
+        keys(&contract)?,
+        [
+            "acceptanceCases",
+            "currentInventory",
+            "currentStoreVersion",
+            "designDocument",
+            "forbiddenOperations",
+            "futureReceipt",
+            "futureStoreVersion",
+            "futureSurface",
+            "gateOrder",
+            "gates",
+            "journalStates",
+            "physicalRemovalOrder",
+            "status",
+            "version",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect()
+    );
+    assert_eq!(
+        contract["currentStoreVersion"],
+        CODE_THREAD_BINDING_SCHEMA_VERSION
+    );
+    assert_eq!(contract["futureStoreVersion"], 4);
+    assert_eq!(contract["gateOrder"], json!(gate_order));
+    assert_eq!(
+        keys(&contract["gates"])?,
+        gate_order.into_iter().map(str::to_string).collect()
+    );
+    for gate in gate_order {
+        assert_eq!(contract["gates"][gate]["state"], "implementedClosed");
+        assert!(
+            WORKTREE_REMOVAL_GATE_DESIGN.contains(&format!("Gate `{gate}`")),
+            "removal design is missing the {gate} section"
+        );
+    }
+    assert!(WORKTREE_REMOVAL_GATE_DESIGN.contains("CodeWorktreeRemoveInput"));
+    assert_eq!(
+        contract["designDocument"],
+        "docs/schoolx-2/SCHOOLX_CODE_WORKTREE_REMOVAL_GATES.md"
+    );
+
+    let surface = &contract["futureSurface"];
+    assert_eq!(surface["commandName"], "code_worktree_remove");
+    assert_eq!(surface["topLevelArgs"], json!(["input"]));
+    assert_eq!(surface["inputFields"], json!(["scope", "threadId"]));
+    assert_eq!(surface["operationId"], "nativeCanonicalUuid");
+    assert_eq!(surface["registered"], true);
+    assert_eq!(surface["frontendMethodExposed"], true);
+    assert_eq!(surface["buttonRendered"], true);
+    assert_eq!(
+        keys(&tauri_contract["strictInputs"]["worktreeRemove"])?,
+        surface["inputFields"]
+            .as_array()
+            .ok_or_else(|| "removal input fields must be an array".to_string())?
+            .iter()
+            .filter_map(Value::as_str)
+            .map(str::to_string)
+            .collect()
+    );
+    assert_eq!(
+        contract["futureReceipt"]["fields"],
+        json!([
+            "removalId",
+            "scope",
+            "threadId",
+            "worktreeId",
+            "headCommit",
+            "mergedIntoRef",
+            "mergedIntoCommit",
+            "transcriptDisposition",
+            "executionDisposition"
+        ])
+    );
+    assert_eq!(
+        contract["futureReceipt"]["transcriptDisposition"],
+        "preserved"
+    );
+    assert_eq!(contract["futureReceipt"]["executionDisposition"], "removed");
+    assert_eq!(
+        keys(&tauri_contract["outputs"]["worktreeRemovalReceipt"])?,
+        string_set(
+            &contract["futureReceipt"]["fields"],
+            "removal receipt fields"
+        )?
+    );
+
+    assert_eq!(
+        contract["gates"]["mergedAuthority"]["targetRefNamespace"],
+        "refs/heads/"
+    );
+    assert_eq!(
+        contract["gates"]["mergedAuthority"]["storeCollection"],
+        "mergeTargets"
+    );
+    assert_eq!(
+        contract["gates"]["mergedAuthority"]["captureImplemented"],
+        true
+    );
+    assert_eq!(
+        contract["gates"]["mergedAuthority"]["proofImplemented"],
+        true
+    );
+    assert_eq!(
+        contract["gates"]["mergedAuthority"]["publicProofSurface"],
+        false
+    );
+    assert_eq!(
+        contract["gates"]["mergedAuthority"]["legacyBindings"],
+        "authorityAbsent"
+    );
+    assert_eq!(
+        contract["gates"]["mergedAuthority"]["proof"],
+        "mergeBaseIsAncestor"
+    );
+    assert_eq!(
+        contract["gates"]["mergedAuthority"]["proofSnapshotFields"],
+        json!([
+            "repositoryIdentity",
+            "worktreeId",
+            "headCommit",
+            "targetRef",
+            "targetCommit"
+        ])
+    );
+    assert_eq!(
+        contract["gates"]["mergedAuthority"]["rejectedEvidence"],
+        json!([
+            "headEqualsBaseRef",
+            "inventoryInspection",
+            "callerRefOrCommit",
+            "tagOrRawObjectId",
+            "remoteTrackingRef",
+            "otherContainingRef",
+            "squashOrCherryPickEquivalence",
+            "networkOrPullRequestClaim",
+            "replacementOrGraftAncestry"
+        ])
+    );
+    assert_eq!(
+        contract["gates"]["durableRemovalJournal"]["states"],
+        json!(["claimed", "removing", "removed"])
+    );
+    assert_eq!(
+        contract["gates"]["durableRemovalJournal"]["retryKey"],
+        json!(["scope", "threadId"])
+    );
+    assert_eq!(
+        contract["gates"]["durableRemovalJournal"]["recordFields"],
+        json!([
+            "state",
+            "removalId",
+            "binding",
+            "threadLifecycleAtClaim",
+            "mergeProof",
+            "physicalManifestDigest",
+            "physical",
+            "transcriptDisposition",
+            "executionDisposition"
+        ])
+    );
+    assert_eq!(
+        contract["gates"]["durableRemovalJournal"]["physicalFields"],
+        contract["gates"]["pinnedDeletionBoundary"]["requiredPinnedCoordinates"]
+    );
+    assert_eq!(
+        contract["gates"]["durableRemovalJournal"]["casImplemented"],
+        true
+    );
+    assert_eq!(
+        contract["gates"]["durableRemovalJournal"]["physicalMutationImplemented"],
+        true
+    );
+    assert_eq!(
+        contract["gates"]["bindingTranscriptSemantics"]["finalBindingDisposition"],
+        "retiredIntoPermanentRemovalTombstone"
+    );
+    assert_eq!(
+        contract["gates"]["bindingTranscriptSemantics"]["transcriptDisposition"],
+        "preserved"
+    );
+    assert_eq!(
+        contract["gates"]["bindingTranscriptSemantics"]["tombstoneExecutable"],
+        false
+    );
+    assert_eq!(
+        contract["gates"]["pinnedDeletionBoundary"]["currentPinnedGitHelperReusable"],
+        false
+    );
+    assert_eq!(
+        contract["gates"]["pinnedDeletionBoundary"]["physicalMutationImplemented"],
+        true
+    );
+    assert_eq!(
+        contract["gates"]["pinnedDeletionBoundary"]["publicRemovalEntrypoint"],
+        true
+    );
+    assert_eq!(
+        contract["gates"]["pinnedDeletionBoundary"]["manifestStorage"],
+        "digestAddressedStrictV1Sidecar"
+    );
+    assert_eq!(
+        contract["gates"]["pinnedDeletionBoundary"]["manifestIdentityPolicy"],
+        "deviceInodeBirthTimeAndSupportedGeneration"
+    );
+    assert_eq!(
+        contract["gates"]["pinnedDeletionBoundary"]["manifestPathPolicy"],
+        "sameMountHandleRelativeNamedDirectoryAndFileIdentity"
+    );
+    assert_eq!(
+        contract["gates"]["pinnedDeletionBoundary"]["verifiedAbsenceCapability"],
+        "opaqueSingleUse"
+    );
+    assert_eq!(
+        contract["gates"]["pinnedDeletionBoundary"]["proofRefNamespace"],
+        "refs/schoolx/removal-claims/"
+    );
+    assert_eq!(
+        contract["gates"]["pinnedDeletionBoundary"]["proofRefTarget"],
+        "targetCommit"
+    );
+    assert_eq!(
+        contract["gates"]["pinnedDeletionBoundary"]["proofRefCleanup"],
+        "durableExactCompareAndDelete"
+    );
+    assert_eq!(
+        contract["gates"]["pinnedDeletionBoundary"]["manifestCleanupMarker"],
+        "durableSidecarAbsenceAfterDurableProofRefAbsence"
+    );
+    assert_eq!(
+        contract["gates"]["pinnedDeletionBoundary"]["removedCleanupOfflinePolicy"],
+        "preserveSidecarAndDefer"
+    );
+    assert_eq!(
+        contract["gates"]["pinnedDeletionBoundary"]["gitAdminLockPolicy"],
+        "lockedMarkerOrLockfileReject"
+    );
+    assert_eq!(
+        contract["gates"]["pinnedDeletionBoundary"]["objectStoragePolicy"],
+        "primarySameMountNoFollowNoAlternates"
+    );
+    assert_eq!(
+        contract["gates"]["pinnedDeletionBoundary"]["refStoragePolicy"],
+        "filesBackendWithLooseProofRef"
+    );
+    assert_eq!(
+        contract["gates"]["pinnedDeletionBoundary"]["mountBoundaryPolicy"],
+        "sameMountIdentityNoNestedMounts"
+    );
+    assert_eq!(
+        contract["gates"]["pinnedDeletionBoundary"]["proofRefRepresentation"],
+        "directLooseRegularNoFollow"
+    );
+    assert_eq!(
+        contract["gates"]["pinnedDeletionBoundary"]["proofRefDurability"],
+        "referenceFileAndDirectoryFsync"
+    );
+    assert_eq!(
+        contract["gates"]["pinnedDeletionBoundary"]["partialDeletionPolicy"],
+        "knownPrefixOnly"
+    );
+    assert_eq!(
+        contract["gates"]["pinnedDeletionBoundary"]["startupRecoveryBefore"],
+        json!([
+            "runtimeEmitterStart",
+            "lifecycleReconciliation",
+            "startRecovery",
+            "forkRecovery"
+        ])
+    );
+    assert_eq!(
+        contract["gates"]["pinnedDeletionBoundary"]["pendingRemovalConflictGates"],
+        json!(["archivedRename", "turnInterrupt"])
+    );
+    assert_eq!(
+        contract["gates"]["pinnedDeletionBoundary"]["physicalManifestPolicy"],
+        "dotGitAndTrackedEntriesOnly"
+    );
+    assert_eq!(
+        contract["gates"]["pinnedDeletionBoundary"]["quarantinePolicy"],
+        "atomicNoReplaceParentRelativeRename"
+    );
+    assert_eq!(
+        contract["gates"]["pinnedDeletionBoundary"]["requiredPinnedCoordinates"],
+        json!([
+            "managedRootParent",
+            "managedRoot",
+            "quarantineName",
+            "gitAdminParent",
+            "gitAdminEntry"
+        ])
+    );
+    assert_eq!(
+        contract["journalStates"],
+        json!([
+            {
+                "state": "claimed",
+                "meaning": "durableProofWithZeroDeletionMutation",
+                "rollback": "definitelyNotStartedOnly"
+            },
+            {
+                "state": "removing",
+                "meaning": "firstMutationMayHaveOccurred",
+                "rollback": "never"
+            },
+            {
+                "state": "removed",
+                "meaning": "verifiedAbsenceAndPermanentTranscriptTombstone",
+                "rollback": "never"
+            }
+        ])
+    );
+    assert_eq!(
+        contract["physicalRemovalOrder"],
+        json!([
+            "loadArchivedAuthority",
+            "proveQuiescenceAndCaptureManifest",
+            "persistDigestAddressedManifestSidecar",
+            "persistClaimed",
+            "revalidateAuthorityAndPersistRemoving",
+            "pinExactProofRefAndRevalidate",
+            "renameRootToQuarantine",
+            "deleteManifestFromQuarantine",
+            "deleteExactGitAdminEntry",
+            "verifyAbsenceAndSiblings",
+            "atomicallyRetireBindingIntoTombstone",
+            "compareDeleteExactProofRef",
+            "durablyRetireManifestSidecar"
+        ])
+    );
+
+    assert_eq!(contract["currentInventory"]["preserved"], true);
+    assert_eq!(contract["currentInventory"]["canRemove"], "eligibleOnly");
+    assert_eq!(
+        contract["currentInventory"]["archivedBlocker"],
+        "mergeProofUnavailableUnlessProven"
+    );
+    assert_eq!(
+        contract["forbiddenOperations"],
+        json!([
+            "force",
+            "gitClean",
+            "gitReset",
+            "gitWorktreeRemove",
+            "gitWorktreePrune",
+            "broadRemoveDirAll",
+            "implicitArchiveCleanup",
+            "implicitForkCleanup",
+            "inventoryReceiptReuse",
+            "frontendPathOrProofClaim",
+            "fetchOrNetworkProof",
+            "threadOrTranscriptDelete"
+        ])
+    );
+    assert_eq!(
+        contract["acceptanceCases"],
+        json!({
+            "mergedAuthority": [
+                "headEqualsTarget",
+                "headAncestorViaMergeCommit",
+                "unmergedHead",
+                "squashOrCherryPickOnly",
+                "legacyAuthorityAbsent",
+                "headOrTargetDrift",
+                "replacementOrGraftOnly",
+                "timeoutOrMissingObject",
+                "zeroMutation"
+            ],
+            "journal": [
+                "claimAdmissionFailureZeroMutation",
+                "claimedDefinitelyNotStartedCancellation",
+                "removingNeverRollsBack",
+                "crashAtEveryMutationBoundary",
+                "responseLossReturnsSameRemoval",
+                "finalStoreFailureRetriesFinalization",
+                "startupRecoveryPrecedesOtherReconciliation",
+                "pendingRemovalGatesRenameAndInterrupt"
+            ],
+            "semantics": [
+                "liveBindingRetainedBeforeVerifiedAbsence",
+                "removedTombstonePreservesTranscriptCoordinate",
+                "removedIdentityCannotBeReused",
+                "removedTaskCannotExecuteOrUnarchive",
+                "noCodexThreadMutation"
+            ],
+            "deletionBoundary": [
+                "ignoredFileRejects",
+                "untrackedOrEmptyDirectoryRejects",
+                "specialOrCrossDeviceEntryRejects",
+                "missingOrAlternateObjectRejects",
+                "nonPrefixPartialDeletionRejects",
+                "manifestSidecarReplacementFailsClosed",
+                "offlineCommonDirCleanupDefers",
+                "lockedGitAdminRejects",
+                "symlinkIsUnlinkedNotFollowed",
+                "originalNameReplacementSurvives",
+                "quarantineOrAdminReplacementFailsClosed",
+                "proofRefReplacementSurvivesCleanup",
+                "siblingRootsRemainUnchanged",
+                "unsupportedPlatformZeroMutation"
+            ]
+        })
+    );
+
+    let destructive_verbs = [
+        "remove", "delete", "destroy", "cleanup", "clean", "prune", "purge", "discard",
+    ];
+    let has_worktree_mutation = |command: &str| {
+        command.starts_with("code_worktree")
+            && destructive_verbs.iter().any(|verb| command.contains(verb))
+    };
+    let fixture_commands = tauri_contract["commands"]
+        .as_array()
+        .ok_or_else(|| "missing Tauri command contract".to_string())?;
+    let fixture_mutations = fixture_commands
+        .iter()
+        .filter_map(|command| command["name"].as_str())
+        .filter(|name| has_worktree_mutation(name))
+        .collect::<Vec<_>>();
+    assert_eq!(fixture_mutations, vec!["code_worktree_remove"]);
+    let registered_mutations = registered_code_commands()?
+        .into_iter()
+        .filter(|command| has_worktree_mutation(command))
+        .collect::<Vec<_>>();
+    assert_eq!(registered_mutations, vec!["code_worktree_remove"]);
+    assert!(tauri_contract["strictInputs"]
+        .as_object()
+        .is_some_and(|inputs| inputs.contains_key("worktreeRemove")));
+    assert!(tauri_contract["outputs"]
+        .as_object()
+        .is_some_and(|outputs| outputs.contains_key("worktreeRemovalReceipt")));
+    assert!(COMMAND_SOURCE.contains("code_worktree_remove"));
+    assert!(!WORKTREE_INVENTORY_COMMAND_SOURCE.contains("code_worktree_remove"));
+    Ok(())
+}
+
+#[test]
 fn binding_store_fixture_reloads_and_public_list_scrubs_recovery_baseline() -> Result<(), String> {
     let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
     let root = directory.path().join("execution-root");
@@ -1166,7 +1951,7 @@ fn binding_store_fixture_reloads_and_public_list_scrubs_recovery_baseline() -> R
     fs::write(store.store_path(), payload).map_err(|error| error.to_string())?;
 
     let loaded = store.load()?;
-    assert_eq!(loaded.version, 1);
+    assert_eq!(loaded.version, CODE_THREAD_BINDING_SCHEMA_VERSION);
     assert_eq!(loaded.bindings.len(), 1);
     assert_eq!(loaded.preparations.len(), 1);
     let scope = CodeThreadBindingScope {
@@ -1178,6 +1963,7 @@ fn binding_store_fixture_reloads_and_public_list_scrubs_recovery_baseline() -> R
     assert_eq!(public.len(), 1);
     let public_value = serde_json::to_value(&public[0]).map_err(|error| error.to_string())?;
     assert!(public_value.get("recoveryThreadBaseline").is_none());
+    assert!(public_value.get("mergeTargetRef").is_none());
     let mut expected = fixture(TAURI_CONTRACT)?["outputs"]["preparationPublicBaseline"].clone();
     expected["executionRoot"] = json!(root.to_string_lossy());
     assert_eq!(public_value, expected);
@@ -1200,10 +1986,47 @@ fn native_codex_builders_and_parsers_match_the_wire_fixture() -> Result<(), Stri
     );
     let opened = parse_thread_open(wire["threadStart"]["result"].clone())?;
     assert_eq!(opened.thread.id, "thread-1");
+    assert_eq!(opened.model, "gpt-5.2-codex");
+    assert_eq!(opened.reasoning_effort.as_deref(), Some("medium"));
     assert_eq!(
         opened.thread_source.as_deref(),
         Some("schoolx-code/67f11a1d-0274-4d40-9b0c-e406e51c64fb")
     );
+
+    let fork: CodeThreadForkInput = decode(&inputs["threadFork"])?;
+    assert_eq!(
+        fork.rpc_params("/native/fork-root", "89c210f4-7a5b-4bd5-a98c-322386a8a2e9")?,
+        wire["threadFork"]["params"]
+    );
+    assert_eq!(
+        keys(&wire["threadFork"]["params"])?,
+        [
+            "approvalPolicy",
+            "cwd",
+            "sandbox",
+            "threadId",
+            "threadSource",
+        ]
+        .into_iter()
+        .map(str::to_string)
+        .collect()
+    );
+    let forked = parse_thread_open(wire["threadFork"]["result"].clone())?;
+    assert_eq!(forked.thread.id, "thread-2");
+    assert_eq!(forked.model, "gpt-5.2-codex");
+    assert_eq!(forked.reasoning_effort, None);
+    assert_eq!(forked.thread.session_id.as_deref(), Some("thread-2"));
+    assert_eq!(forked.thread.forked_from_id.as_deref(), Some("thread-1"));
+    assert_eq!(forked.thread.parent_thread_id, None);
+    assert!(!forked.thread.ephemeral);
+    assert_eq!(forked.thread.cwd.as_deref(), Some("/native/fork-root"));
+    assert_eq!(forked.response_cwd.as_deref(), Some("/native/fork-root"));
+    assert_eq!(
+        forked.thread_source.as_deref(),
+        Some("schoolx-code/89c210f4-7a5b-4bd5-a98c-322386a8a2e9")
+    );
+    assert_eq!(forked.session_source, Some(json!("appServer")));
+    assert_eq!(forked.thread.turns[0].id, "past-turn");
 
     assert_eq!(
         recovery_thread_list_params("/native/stored-root", Some("list-next"))?,
@@ -1234,18 +2057,32 @@ fn native_codex_builders_and_parsers_match_the_wire_fixture() -> Result<(), Stri
         Some("schoolx-code/67f11a1d-0274-4d40-9b0c-e406e51c64fb")
     );
 
+    let rename: CodeThreadRenameInput = decode(&inputs["threadRename"])?;
+    assert_eq!(rename.rpc_params()?, wire["threadNameSet"]["params"]);
+    parse_thread_name_set(wire["threadNameSet"]["result"].clone())?;
+    assert!(parse_thread_name_set(json!({ "unexpected": true })).is_err());
+
+    let archive: CodeThreadLifecycleInput = decode(&inputs["threadArchive"])?;
+    assert_eq!(archive.rpc_params()?, wire["threadArchive"]["params"]);
+    parse_thread_archive(wire["threadArchive"]["result"].clone())?;
+    assert!(parse_thread_archive(json!({ "unexpected": true })).is_err());
+
+    let unarchive: CodeThreadLifecycleInput = decode(&inputs["threadUnarchive"])?;
+    assert_eq!(unarchive.rpc_params()?, wire["threadUnarchive"]["params"]);
+    assert_eq!(
+        parse_thread_unarchive(wire["threadUnarchive"]["result"].clone())?.id,
+        "thread-1"
+    );
+
     let resume: CodeThreadResumeInput = decode(&inputs["threadResume"])?;
     assert_eq!(
         resume.rpc_params("/native/stored-root")?,
         wire["threadResume"]["params"]
     );
-    assert_eq!(
-        parse_thread_open(wire["threadResume"]["result"].clone())?
-            .thread
-            .turns[0]
-            .id,
-        "past-turn"
-    );
+    let resumed = parse_thread_open(wire["threadResume"]["result"].clone())?;
+    assert_eq!(resumed.thread.turns[0].id, "past-turn");
+    assert_eq!(resumed.model, "gpt-5.2-codex");
+    assert_eq!(resumed.reasoning_effort.as_deref(), Some("medium"));
 
     let turn: CodeTurnStartInput = decode(&inputs["turnStart"])?;
     assert_eq!(
@@ -1267,8 +2104,12 @@ fn native_codex_builders_and_parsers_match_the_wire_fixture() -> Result<(), Stri
     let interrupt: CodeTurnInterruptInput = decode(&inputs["turnInterrupt"])?;
     assert_eq!(interrupt.rpc_params()?, wire["turnInterrupt"]["params"]);
     for params in [
+        &wire["threadFork"]["params"],
         &wire["threadStart"]["params"],
         &wire["threadResume"]["params"],
+        &wire["threadNameSet"]["params"],
+        &wire["threadArchive"]["params"],
+        &wire["threadUnarchive"]["params"],
         &wire["turnStart"]["params"],
         &wire["turnSteer"]["params"],
         &wire["turnInterrupt"]["params"],
@@ -1305,7 +2146,7 @@ fn all_supported_notifications_and_approvals_match_wire_fixtures() -> Result<(),
     let notifications = wire["notifications"]
         .as_array()
         .ok_or_else(|| "missing notifications".to_string())?;
-    assert_eq!(notifications.len(), 21);
+    assert_eq!(notifications.len(), 23);
     let mut methods = HashSet::new();
     for notification in notifications {
         let method = notification["method"]
@@ -1341,6 +2182,13 @@ fn all_supported_notifications_and_approvals_match_wire_fixtures() -> Result<(),
             )?
             .ok_or_else(|| "approval request was not recognized".to_string())?;
         assert_eq!(event.kind, request["method"]);
+        if request["method"] == "item/permissions/requestApproval" {
+            let public_request = event.payload["request"]
+                .as_object()
+                .ok_or_else(|| "permission event request was not an object".to_string())?;
+            assert!(!public_request.contains_key("permissions"));
+            assert_eq!(public_request["permissionDisplay"]["grantable"], true);
+        }
         let input: CodeApprovalResponseInput = decode(&approval["responseInput"])?;
         let reservation = approvals.reserve_response(&input)?;
         let (request_id, result) = reservation.wire_response();

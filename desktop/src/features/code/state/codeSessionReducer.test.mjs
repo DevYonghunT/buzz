@@ -91,6 +91,7 @@ function replayBatch({
   generation = 7,
   latestSequence,
   truncated = false,
+  checkpoint = null,
   events = [],
   bufferedEvents = [],
   bufferTruncated = false,
@@ -104,6 +105,7 @@ function replayBatch({
       runtimeGeneration: generation,
       latestSequence,
       truncated,
+      checkpoint,
       events,
     },
     bufferedEvents,
@@ -501,6 +503,74 @@ test("truncation is sticky across incremental replay and avoids live-state loss"
   });
   assert.equal(state.replay.needsAuthoritativeRefresh, false);
   assert.equal(state.replay.approvalStateIncomplete, true);
+});
+
+test("authoritative checkpoint heals evicted transient state before buffered live events", () => {
+  const checkpointApproval = approvalEvent({
+    sequence: 513,
+    requestId: "checkpoint-approval",
+  });
+  const bufferedApproval = approvalEvent({
+    sequence: 514,
+    requestId: "buffered-approval",
+  });
+  let state = readySubscribedState();
+  state = codeSessionReducer(state, {
+    type: "replayReceived",
+    batch: replayBatch({
+      latestSequence: 513,
+      truncated: true,
+      checkpoint: {
+        runtimeGeneration: 7,
+        sequenceWatermark: 513,
+        activeTurns: [
+          {
+            threadId: "thread-1",
+            turnId: "turn-1",
+            status: "inProgress",
+            startedSequence: 1,
+          },
+        ],
+        pendingApprovals: [{ event: checkpointApproval, respondable: true }],
+      },
+      events: [event({ sequence: 513 })],
+      bufferedEvents: [bufferedApproval],
+    }),
+  });
+
+  assert.equal(state.replay.status, "synchronized");
+  assert.equal(state.replay.approvalStateIncomplete, false);
+  assert.equal(state.replay.needsAuthoritativeRefresh, true);
+  assert.equal(state.latestSequence, 514);
+  assert.equal(selectCodeActiveTurns(state, "thread-1").length, 1);
+  assert.deepEqual(
+    selectCodePendingApprovals(state).map(({ requestId }) => requestId),
+    ["checkpoint-approval", "buffered-approval"],
+  );
+
+  state = receive(
+    state,
+    event({
+      sequence: 515,
+      kind: "serverRequest/resolved",
+      itemId: null,
+      payload: { requestId: "checkpoint-approval" },
+    }),
+  );
+  assert.deepEqual(
+    selectCodePendingApprovals(state).map(({ requestId }) => requestId),
+    ["buffered-approval"],
+  );
+  state = codeSessionReducer(state, {
+    type: "authoritativeRefreshCompleted",
+    runtimeGeneration: 7,
+    subscriptionEpoch: epoch,
+  });
+  assert.equal(state.replay.needsAuthoritativeRefresh, false);
+  assert.equal(
+    selectCanRespondToCodeApproval(state, selectCodePendingApprovals(state)[0]),
+    true,
+  );
 });
 
 test("buffer overflow and contradictory replay batches fail closed", () => {

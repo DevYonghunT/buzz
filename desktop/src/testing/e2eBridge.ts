@@ -1,5 +1,5 @@
 import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
-import { emit, listen } from "@tauri-apps/api/event";
+import { emit } from "@tauri-apps/api/event";
 import { mockIPC, mockWindows } from "@tauri-apps/api/mocks";
 import { decode, npubEncode, nsecEncode } from "nostr-tools/nip19";
 import { finalizeEvent, getPublicKey } from "nostr-tools/pure";
@@ -25,6 +25,38 @@ import {
   injectObserverEventsForE2E,
   syncAgentObserverEvents,
 } from "@/features/agents/observerRelayStore";
+import type {
+  CodeBoundThreadOpenResult,
+  CodeEventBacklog,
+  CodeModelsCatalog,
+  CodeModelSelection,
+  CodePreparedWorktree,
+  CodeRuntimePhase,
+  CodeTerminalEvent,
+  CodeTerminalOpenInput,
+  CodeTerminalResizeInput,
+  CodeTerminalSession,
+  CodeTerminalStdinInput,
+  CodeTerminalTerminateInput,
+  CodeThreadBindingScope,
+  CodeThreadChanges,
+  CodeThreadForkInput,
+  CodeThreadLifecycleMutationInput,
+  CodeThreadLifecycleMutationResult,
+  CodeThreadLifecycleState,
+  CodeThreadPreparation,
+  CodeThreadResumeInput,
+  CodeThreadStartError,
+  CodeThreadStartInput,
+  CodeWorktreeInventoryRow,
+  CodeWorktreeRemovalReceipt,
+  CodeWorktreeRemoveInput,
+  CodeWorkspaceEvent,
+} from "@/features/code/api/types";
+import type {
+  CodeGitMutationReceipt,
+  CodeGitStatus,
+} from "@/features/code/api/codeGitTypes";
 import {
   CUSTOM_EMOJI_SET_D_TAG,
   KIND_EMOJI_SET,
@@ -176,6 +208,36 @@ type E2eConfig = {
     projectHeadBranch?: string;
     /** Enable the scoped SchoolX Code native boundary fixture. */
     schoolxCodeWorkspace?: boolean;
+    /** Successive native replay snapshots returned to the Code event adapter. */
+    schoolxCodeEventBacklogs?: CodeEventBacklog[];
+    /** Successive strict Changes snapshots returned for a selected Code thread. */
+    schoolxCodeChanges?: CodeThreadChanges[];
+    /** Successive authoritative Git snapshots returned for a managed Code thread. */
+    schoolxCodeGitStatuses?: CodeGitStatus[];
+    /** Sequenced response-loss failures after a native Code commit completed. */
+    schoolxCodeGitCommitResponseLosses?: Array<string | null>;
+    /** Sequenced model-catalog failures; null entries allow that read through. */
+    schoolxCodeModelCatalogErrors?: Array<string | null>;
+    /** Sequenced model-selection persistence failures; null allows that write. */
+    schoolxCodeModelSelectionErrors?: Array<string | null>;
+    /** Sequenced thread-rename failures; null entries allow that call through. */
+    schoolxCodeRenameErrors?: Array<string | null>;
+    /** Sequenced thread-fork failures; null entries allow that call through. */
+    schoolxCodeForkErrors?: Array<string | null>;
+    /** Delay a fork result so source-selection and pending UI remain observable. */
+    schoolxCodeForkDelayMs?: number;
+    /** Sequenced managed-worktree removal failures; null allows the call through. */
+    schoolxCodeRemovalErrors?: Array<string | null>;
+    /** Sequenced response-loss failures after native removal has committed. */
+    schoolxCodeRemovalResponseLosses?: Array<string | null>;
+    /** Hold the first removal operation at its pre-commit test boundary. */
+    schoolxCodeBlockRemoval?: boolean;
+    /** Delay removal so confirmation and non-optimistic rows remain observable. */
+    schoolxCodeRemovalDelayMs?: number;
+    /** Initial lifecycle state keyed by exact Codex thread id. */
+    schoolxCodeThreadLifecycles?: Record<string, CodeThreadLifecycleState>;
+    /** Hold the first Code replay so synchronization-gated UI can be asserted. */
+    schoolxCodeBlockInitialEventReplay?: boolean;
     /** Builderlab account returned by hosted-community onboarding. Null/omitted = signed out. */
     builderlabAuth?: {
       email?: string;
@@ -1107,6 +1169,19 @@ declare global {
       command: string,
       payload?: Record<string, unknown>,
     ) => Promise<unknown>;
+    /** Emit one normalized Code event through the mocked Tauri event channel. */
+    __BUZZ_E2E_EMIT_CODE_WORKSPACE_EVENT__?: (
+      event: CodeWorkspaceEvent,
+    ) => Promise<void>;
+    /** Release a configured first Code replay that is intentionally pending. */
+    __BUZZ_E2E_RELEASE_CODE_EVENT_REPLAY__?: () => void;
+    __BUZZ_E2E_RELEASE_CODE_WORKTREE_REMOVAL__?: () => void;
+    /** Mark the mocked native Code runtime failed until the UI retries it. */
+    __BUZZ_E2E_CRASH_CODE_RUNTIME__?: (error?: string) => void;
+    /** Force read-only managed-worktree inventory reads to fail until cleared. */
+    __BUZZ_E2E_SET_CODE_WORKTREE_INVENTORY_ERROR__?: (
+      error: string | null,
+    ) => void;
     __BUZZ_E2E_SET_MOCK_HUDDLE_SNAPSHOT__?: (input: {
       members: MockHuddleMemberSeed[];
       transcriptionEnabled: boolean;
@@ -1315,6 +1390,9 @@ const REACTION_TARGET_CONTENT = "React to me with a custom emoji";
 // REACTION_TARGET_EVENT_ID.
 const SYSTEM_REACTION_TARGET_EVENT_ID = "e".repeat(64);
 const E2E_IDENTITY_OVERRIDE_STORAGE_KEY = "buzz:e2e-identity-override.v1";
+const MOCK_CODE_WORKSPACE_STORAGE_KEY = "buzz.e2e.schoolx-code-workspace.v1";
+const MOCK_CODE_MODEL_SELECTION_STORAGE_KEY =
+  "buzz.e2e.schoolx-code-model-selection.v1";
 /** Stands in for `tauri.conf.json`'s version, which no mock IPC call can read. */
 const MOCK_APP_VERSION = "0.0.0-e2e";
 const DEFAULT_MOCK_IDENTITY = {
@@ -9949,7 +10027,89 @@ export function maybeInstallE2eTauriMocks() {
   }> = [];
   const mockCodeRepositoryIdentity = "c4".repeat(32);
   const mockCodeBaseRef = "main";
-  const mockCodeRuntimeGeneration = 7;
+  let mockCodeRuntimeGeneration = 7;
+  const mockCodeModels: CodeModelsCatalog["models"] = [
+    {
+      id: "gpt-5.2-codex",
+      model: "gpt-5.2-codex",
+      displayName: "GPT-5.2 Codex",
+      description: "Coding model for agentic workflows",
+      isDefault: true,
+      defaultReasoningEffort: "medium",
+      supportedReasoningEfforts: [
+        {
+          reasoningEffort: "medium",
+          description: "Balanced reasoning for everyday tasks",
+        },
+        {
+          reasoningEffort: "high",
+          description: "Deeper reasoning for complex tasks",
+        },
+      ],
+    },
+    {
+      id: "codex-mini",
+      model: "codex-mini-latest",
+      displayName: "Codex Mini",
+      description: "Fast coding model for focused tasks",
+      isDefault: false,
+      defaultReasoningEffort: "low",
+      supportedReasoningEfforts: [
+        {
+          reasoningEffort: "low",
+          description: "Fast responses for straightforward tasks",
+        },
+        {
+          reasoningEffort: "medium",
+          description: "Balanced reasoning for everyday tasks",
+        },
+      ],
+    },
+  ];
+  const isMockCodeModelSelection = (
+    value: unknown,
+  ): value is CodeModelSelection => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return false;
+    }
+    const selection = value as Record<string, unknown>;
+    if (
+      Object.keys(selection).sort().join(",") !== "model,reasoningEffort" ||
+      typeof selection.model !== "string" ||
+      typeof selection.reasoningEffort !== "string"
+    ) {
+      return false;
+    }
+    const model = mockCodeModels.find(
+      (candidate) => candidate.model === selection.model,
+    );
+    return (
+      model?.supportedReasoningEfforts.some(
+        (effort) => effort.reasoningEffort === selection.reasoningEffort,
+      ) ?? false
+    );
+  };
+  const loadMockCodeModelSelection = (): CodeModelSelection => {
+    const persisted = window.sessionStorage.getItem(
+      MOCK_CODE_MODEL_SELECTION_STORAGE_KEY,
+    );
+    if (persisted) {
+      try {
+        const parsed: unknown = JSON.parse(persisted);
+        if (isMockCodeModelSelection(parsed)) return parsed;
+      } catch {
+        // Invalid mock persistence falls back to the advertised default below.
+      }
+      window.sessionStorage.removeItem(MOCK_CODE_MODEL_SELECTION_STORAGE_KEY);
+    }
+    return { model: "gpt-5.2-codex", reasoningEffort: "medium" };
+  };
+  let mockCodeModelSelection = loadMockCodeModelSelection();
+  const mockCodeModelCatalog = (): CodeModelsCatalog => ({
+    runtimeGeneration: mockCodeRuntimeGeneration,
+    models: structuredClone(mockCodeModels),
+    recentSelection: structuredClone(mockCodeModelSelection),
+  });
   const mockCodeScope = {
     communityId: "e2e-default-community",
     projectDtag: "buzz",
@@ -9963,7 +10123,7 @@ export function maybeInstallE2eTauriMocks() {
   const mockCodeBinding = {
     ...mockCodeScope,
     codexThreadId: "thread-e2e-1",
-    executionMode: "local",
+    executionMode: "local" as const,
     executionRoot: "/mock/buzz",
     baseRef: mockCodeBaseRef,
     worktreeId: null,
@@ -10005,25 +10165,658 @@ export function maybeInstallE2eTauriMocks() {
     binding: mockCodeBinding,
     thread: mockCodeThread,
     instructionSources: ["AGENTS.md"],
+    model: "gpt-5.2-codex",
+    reasoningEffort: "medium",
   };
   const mockCodeThreadListSummary = {
     ...mockCodeThread,
     turns: [],
   };
-  let mockCodeRuntimeReady = false;
+  const mockCodeExistingPreparation = {
+    preparationId: "preparation-e2e-existing",
+    ...mockCodeScope,
+    executionMode: "worktree",
+    executionRoot: "/mock/buzz-worktrees/prepared-e2e",
+    baseRef: mockCodeBaseRef,
+    worktreeId: "99999999-8888-4777-8666-555555555555",
+    operation: "start",
+    sourceThreadId: null,
+    state: "prepared",
+  } satisfies CodeThreadPreparation;
+  const mockCodeInventoryBaseRef = "0123456789abcdef0123456789abcdef01234567";
+  const mockCodeInventoryDescriptor = (worktreeId: string, suffix: string) => ({
+    executionMode: "worktree" as const,
+    repositoryIdentity: mockCodeRepositoryIdentity,
+    executionRoot: `/mock/buzz-worktrees/${suffix}`,
+    baseRef: mockCodeInventoryBaseRef,
+    worktreeId,
+  });
+  const mockCodeWorktreeInventory: CodeWorktreeInventoryRow[] = [
+    {
+      scope: mockCodeScope,
+      authority: {
+        type: "binding",
+        threadId: "thread-inventory-active",
+        lifecycle: "active",
+      },
+      descriptor: mockCodeInventoryDescriptor(
+        "11111111-1111-4111-8111-111111111111",
+        "inventory-active",
+      ),
+      inspection: {
+        status: "available",
+        headCommit: mockCodeInventoryBaseRef,
+        branch: null,
+        dirty: false,
+      },
+      preserved: true,
+      canRemove: false,
+      blockers: ["activeBinding"],
+    },
+    {
+      scope: mockCodeScope,
+      authority: {
+        type: "binding",
+        threadId: "thread-inventory-archived",
+        lifecycle: "archived",
+      },
+      descriptor: mockCodeInventoryDescriptor(
+        "22222222-2222-4222-8222-222222222222",
+        "inventory-archived",
+      ),
+      inspection: {
+        status: "available",
+        headCommit: mockCodeInventoryBaseRef,
+        branch: null,
+        dirty: false,
+      },
+      preserved: true,
+      canRemove: false,
+      blockers: ["mergeProofUnavailable"],
+    },
+    {
+      scope: mockCodeScope,
+      authority: {
+        type: "binding",
+        threadId: "thread-inventory-removable",
+        lifecycle: "archived",
+      },
+      descriptor: mockCodeInventoryDescriptor(
+        "66666666-6666-4666-8666-666666666666",
+        "inventory-removable",
+      ),
+      inspection: {
+        status: "available",
+        headCommit: "abcdefabcdefabcdefabcdefabcdefabcdefabcd",
+        branch: null,
+        dirty: false,
+      },
+      preserved: true,
+      canRemove: true,
+      blockers: [],
+    },
+    {
+      scope: mockCodeScope,
+      authority: {
+        type: "binding",
+        threadId: "thread-inventory-unavailable",
+        lifecycle: "archived",
+      },
+      descriptor: mockCodeInventoryDescriptor(
+        "33333333-3333-4333-8333-333333333333",
+        "inventory-unavailable",
+      ),
+      inspection: {
+        status: "unavailable",
+        error: "Mock managed worktree root is unavailable",
+      },
+      preserved: true,
+      canRemove: false,
+      blockers: ["unavailableRoot", "mergeProofUnavailable"],
+    },
+    {
+      scope: mockCodeScope,
+      authority: {
+        type: "preparation",
+        preparationId: "preparation-inventory-start",
+        operation: "start",
+        state: "prepared",
+        sourceThreadId: null,
+      },
+      descriptor: mockCodeInventoryDescriptor(
+        "44444444-4444-4444-8444-444444444444",
+        "inventory-start-preparation",
+      ),
+      inspection: {
+        status: "available",
+        headCommit: mockCodeInventoryBaseRef,
+        branch: null,
+        dirty: false,
+      },
+      preserved: true,
+      canRemove: false,
+      blockers: ["unfinishedPreparation"],
+    },
+    {
+      scope: mockCodeScope,
+      authority: {
+        type: "preparation",
+        preparationId: "preparation-inventory-fork",
+        operation: "fork",
+        state: "starting",
+        sourceThreadId: "thread-inventory-active",
+      },
+      descriptor: mockCodeInventoryDescriptor(
+        "55555555-5555-4555-8555-555555555555",
+        "inventory-fork-preparation",
+      ),
+      inspection: {
+        status: "available",
+        headCommit: mockCodeInventoryBaseRef,
+        branch: null,
+        dirty: false,
+      },
+      preserved: true,
+      canRemove: false,
+      blockers: ["unfinishedPreparation"],
+    },
+  ];
+  const mockCodeRemovableThreadId = "thread-inventory-removable";
+  const mockCodeCreatedThreadId = "thread-e2e-new";
+  const mockCodeForkedThreadId = "thread-e2e-forked";
+  const mockCodeForkPreparationId = "preparation-e2e-fork";
+  const mockCodeThreadLifecycles = new Map<string, CodeThreadLifecycleState>([
+    [
+      mockCodeBinding.codexThreadId,
+      config.mock?.schoolxCodeThreadLifecycles?.[
+        mockCodeBinding.codexThreadId
+      ] ?? "active",
+    ],
+  ]);
+  const mockCodeScopesMatch = (
+    left: CodeThreadBindingScope,
+    right: CodeThreadBindingScope,
+  ) =>
+    left.communityId === right.communityId &&
+    left.projectDtag === right.projectDtag &&
+    left.repositoryIdentity === right.repositoryIdentity;
+  const mockCodeStartError = (
+    code: string,
+    message: string,
+  ): Error & { payload: CodeThreadStartError } =>
+    Object.assign(new Error(message), {
+      payload: {
+        code,
+        message,
+        preparationId: null,
+        threadId: null,
+        executionRoot: null,
+      },
+    });
+  const createMockCodeOpenResult = (
+    prepared: CodePreparedWorktree,
+  ): CodeBoundThreadOpenResult => {
+    const binding = {
+      ...prepared.scope,
+      codexThreadId: mockCodeCreatedThreadId,
+      ...prepared.worktree.descriptor,
+    };
+    return {
+      binding,
+      thread: {
+        id: mockCodeCreatedThreadId,
+        sessionId: "session-e2e-new",
+        forkedFromId: null,
+        parentThreadId: null,
+        preview: "Continue the managed-worktree task",
+        ephemeral: false,
+        modelProvider: "openai",
+        createdAt: 1_723_600_020,
+        updatedAt: 1_723_600_020,
+        cwd: binding.executionRoot,
+        name: "Managed worktree task",
+        status: { type: "idle" },
+        turns: [],
+      },
+      instructionSources: ["AGENTS.md"],
+      model: mockCodeModelSelection.model,
+      reasoningEffort: mockCodeModelSelection.reasoningEffort,
+    };
+  };
+  const createMockCodeForkPreparation = (
+    source: CodeBoundThreadOpenResult,
+  ): CodeThreadPreparation => ({
+    preparationId: mockCodeForkPreparationId,
+    ...mockCodeScope,
+    executionMode: "worktree",
+    executionRoot: "/mock/buzz-worktrees/code-e2e-fork",
+    baseRef: source.binding.baseRef,
+    worktreeId: "22222222-3333-4444-8555-666666666666",
+    operation: "fork",
+    sourceThreadId: source.thread.id,
+    state: "prepared",
+  });
+  const createMockCodeForkResult = (
+    source: CodeBoundThreadOpenResult,
+    preparation: CodeThreadPreparation,
+  ): CodeBoundThreadOpenResult => {
+    const binding = {
+      ...mockCodeScope,
+      codexThreadId: mockCodeForkedThreadId,
+      executionMode: "worktree" as const,
+      executionRoot: preparation.executionRoot,
+      baseRef: preparation.baseRef,
+      worktreeId: preparation.worktreeId,
+    };
+    return {
+      binding,
+      thread: {
+        ...source.thread,
+        id: mockCodeForkedThreadId,
+        sessionId: "session-e2e-forked",
+        forkedFromId: source.thread.id,
+        parentThreadId: source.thread.id,
+        createdAt: 1_723_600_030,
+        updatedAt: 1_723_600_030,
+        cwd: binding.executionRoot,
+        name: "Forked managed worktree task",
+      },
+      instructionSources: [...source.instructionSources],
+      model: source.model,
+      reasoningEffort: source.reasoningEffort,
+    };
+  };
+  const loadMockCodeOpenResult = (): CodeBoundThreadOpenResult | null => {
+    const persisted = window.sessionStorage.getItem(
+      MOCK_CODE_WORKSPACE_STORAGE_KEY,
+    );
+    if (!persisted) return null;
+    try {
+      const opened = JSON.parse(persisted) as CodeBoundThreadOpenResult;
+      if (
+        opened.binding.codexThreadId !== mockCodeCreatedThreadId ||
+        opened.thread.id !== mockCodeCreatedThreadId ||
+        opened.thread.cwd !== opened.binding.executionRoot ||
+        opened.binding.executionMode !== "worktree" ||
+        !mockCodeScopesMatch(opened.binding, mockCodeScope)
+      ) {
+        throw new Error("Invalid persisted SchoolX Code mock thread");
+      }
+      return opened;
+    } catch {
+      window.sessionStorage.removeItem(MOCK_CODE_WORKSPACE_STORAGE_KEY);
+      return null;
+    }
+  };
+  let mockCodePreparedWorktree: CodePreparedWorktree | null = null;
+  let mockCodeNewPreparation: CodeThreadPreparation | null = null;
+  let mockCodeCreatedOpenResult = loadMockCodeOpenResult();
+  let mockCodeForkedOpenResult: CodeBoundThreadOpenResult | null = null;
+  if (mockCodeCreatedOpenResult) {
+    mockCodeThreadLifecycles.set(
+      mockCodeCreatedThreadId,
+      config.mock?.schoolxCodeThreadLifecycles?.[mockCodeCreatedThreadId] ??
+        "active",
+    );
+  }
+  let mockCodeEventBacklogCallCount = 0;
+  let mockCodeChangesCallCount = 0;
+  let mockCodeGitStatusCallCount = 0;
+  let mockCodeGitCommitCallCount = 0;
+  let mockCodeGitReceipt: CodeGitMutationReceipt | null = null;
+  let mockCodeModelCatalogCallCount = 0;
+  let mockCodeModelSelectionCallCount = 0;
+  let mockCodeRenameCallCount = 0;
+  let mockCodeForkCallCount = 0;
+  let mockCodeRemovalCallCount = 0;
+  let mockCodeWorktreeInventoryError: string | null = null;
+  const mockCodeRemovalReceipts = new Map<string, CodeWorktreeRemovalReceipt>();
+  const mockCodeRemovalInFlight = new Map<
+    string,
+    Promise<CodeWorktreeRemovalReceipt>
+  >();
+  let mockCodeTerminalId = 0;
+  let releaseMockCodeInitialEventReplay: (() => void) | null = null;
+  const mockCodeInitialEventReplayGate = config.mock
+    ?.schoolxCodeBlockInitialEventReplay
+    ? new Promise<void>((resolve) => {
+        releaseMockCodeInitialEventReplay = resolve;
+      })
+    : null;
+  let releaseMockCodeRemoval: (() => void) | null = null;
+  const mockCodeRemovalGate = config.mock?.schoolxCodeBlockRemoval
+    ? new Promise<void>((resolve) => {
+        releaseMockCodeRemoval = resolve;
+      })
+    : null;
+  let mockCodeRuntimePhase: CodeRuntimePhase = "stopped";
+  let mockCodeRuntimeError: string | null = null;
   const mockCodeRuntimeStatus = () => ({
-    phase: mockCodeRuntimeReady ? "ready" : "stopped",
+    phase: mockCodeRuntimePhase,
     generation: mockCodeRuntimeGeneration,
     executable: "/usr/local/bin/codex",
     version: "codex-cli 0.145.0",
-    pid: mockCodeRuntimeReady ? 4_321 : null,
-    userAgent: mockCodeRuntimeReady ? "schoolx-code-e2e" : null,
+    pid: mockCodeRuntimePhase === "ready" ? 4_321 : null,
+    userAgent: mockCodeRuntimePhase === "ready" ? "schoolx-code-e2e" : null,
     codexHome: "/mock/codex-home",
     platformFamily: "unix",
     platformOs: "macos",
     queuedNotifications: 0,
-    lastError: null,
+    lastError: mockCodeRuntimeError,
   });
+  type MockCodeTerminalChannel = {
+    onmessage?: (event: CodeTerminalEvent) => void;
+  };
+  type MockCodeTerminal = CodeTerminalSession & {
+    channel: MockCodeTerminalChannel;
+    sequence: number;
+  };
+  const mockCodeTerminals = new Map<string, MockCodeTerminal>();
+  const isMockBoundCodeThread = (input: {
+    scope: CodeThreadBindingScope;
+    threadId: string;
+  }) =>
+    (input.threadId === mockCodeBinding.codexThreadId &&
+      mockCodeScopesMatch(input.scope, mockCodeBinding)) ||
+    (mockCodeCreatedOpenResult !== null &&
+      input.threadId === mockCodeCreatedOpenResult.binding.codexThreadId &&
+      mockCodeScopesMatch(input.scope, mockCodeCreatedOpenResult.binding)) ||
+    (mockCodeForkedOpenResult !== null &&
+      input.threadId === mockCodeForkedOpenResult.binding.codexThreadId &&
+      mockCodeScopesMatch(input.scope, mockCodeForkedOpenResult.binding));
+  const requireMockCodeThreadLifecycle = (
+    input: { scope: CodeThreadBindingScope; threadId: string },
+    allowed: readonly CodeThreadLifecycleState[],
+  ) => {
+    if (!isMockBoundCodeThread(input)) {
+      throw new Error(
+        "Codex thread is not bound to the requested SchoolX community, project, and repository",
+      );
+    }
+    const lifecycle = mockCodeThreadLifecycles.get(input.threadId);
+    if (lifecycle === undefined || !allowed.includes(lifecycle)) {
+      throw new Error(
+        "SchoolX Code thread lifecycle does not allow this command",
+      );
+    }
+    return lifecycle;
+  };
+  const mockCodeLifecycleMutationResult = (
+    input: CodeThreadLifecycleMutationInput,
+    lifecycle: CodeThreadLifecycleState,
+  ): CodeThreadLifecycleMutationResult => {
+    if (input.threadId === mockCodeBinding.codexThreadId) {
+      return {
+        binding: structuredClone(mockCodeBinding),
+        lifecycle,
+        thread: structuredClone(mockCodeThread),
+      };
+    }
+    if (
+      mockCodeCreatedOpenResult &&
+      input.threadId === mockCodeCreatedOpenResult.thread.id
+    ) {
+      return {
+        binding: structuredClone(mockCodeCreatedOpenResult.binding),
+        lifecycle,
+        thread: structuredClone(mockCodeCreatedOpenResult.thread),
+      };
+    }
+    if (
+      mockCodeForkedOpenResult &&
+      input.threadId === mockCodeForkedOpenResult.thread.id
+    ) {
+      return {
+        binding: structuredClone(mockCodeForkedOpenResult.binding),
+        lifecycle,
+        thread: structuredClone(mockCodeForkedOpenResult.thread),
+      };
+    }
+    throw new Error(
+      "Codex thread is not bound to the requested SchoolX community, project, and repository",
+    );
+  };
+  const parseMockCodeBoundThreadInput = (
+    payload: unknown,
+    action: "Thread fork" | "Thread lifecycle" | "Worktree removal",
+  ): CodeThreadLifecycleMutationInput => {
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      throw new Error(`${action} requires an exact input envelope`);
+    }
+    if (
+      Object.keys(payload).length !== 1 ||
+      !("input" in payload) ||
+      !payload.input ||
+      typeof payload.input !== "object" ||
+      Array.isArray(payload.input)
+    ) {
+      throw new Error(`${action} requires an exact input envelope`);
+    }
+    const input = payload.input as Record<string, unknown>;
+    const inputKeys = Object.keys(input).sort();
+    if (
+      inputKeys.length !== 2 ||
+      inputKeys[0] !== "scope" ||
+      inputKeys[1] !== "threadId" ||
+      !input.scope ||
+      typeof input.scope !== "object" ||
+      Array.isArray(input.scope) ||
+      typeof input.threadId !== "string"
+    ) {
+      throw new Error(`${action} crossed its native trust boundary`);
+    }
+    const scope = input.scope as Record<string, unknown>;
+    const scopeKeys = Object.keys(scope).sort();
+    if (
+      scopeKeys.length !== 3 ||
+      scopeKeys[0] !== "communityId" ||
+      scopeKeys[1] !== "projectDtag" ||
+      scopeKeys[2] !== "repositoryIdentity" ||
+      typeof scope.communityId !== "string" ||
+      typeof scope.projectDtag !== "string" ||
+      typeof scope.repositoryIdentity !== "string"
+    ) {
+      throw new Error(`${action} crossed its native trust boundary`);
+    }
+    return {
+      scope: scope as CodeThreadBindingScope,
+      threadId: input.threadId,
+    };
+  };
+  const parseMockCodeThreadLifecycleInput = (payload: unknown) =>
+    parseMockCodeBoundThreadInput(payload, "Thread lifecycle");
+  const parseMockCodeScopeInput = (
+    payload: unknown,
+    action: string,
+  ): { scope: CodeThreadBindingScope } => {
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      throw new Error(`${action} requires an exact input envelope`);
+    }
+    if (
+      Object.keys(payload).length !== 1 ||
+      !("input" in payload) ||
+      !payload.input ||
+      typeof payload.input !== "object" ||
+      Array.isArray(payload.input)
+    ) {
+      throw new Error(`${action} requires an exact input envelope`);
+    }
+    const input = payload.input as Record<string, unknown>;
+    if (
+      Object.keys(input).length !== 1 ||
+      !("scope" in input) ||
+      !input.scope ||
+      typeof input.scope !== "object" ||
+      Array.isArray(input.scope)
+    ) {
+      throw new Error(`${action} crossed its native trust boundary`);
+    }
+    const scope = input.scope as Record<string, unknown>;
+    const scopeKeys = Object.keys(scope).sort();
+    if (
+      scopeKeys.length !== 3 ||
+      scopeKeys[0] !== "communityId" ||
+      scopeKeys[1] !== "projectDtag" ||
+      scopeKeys[2] !== "repositoryIdentity" ||
+      typeof scope.communityId !== "string" ||
+      typeof scope.projectDtag !== "string" ||
+      typeof scope.repositoryIdentity !== "string"
+    ) {
+      throw new Error(`${action} crossed its native trust boundary`);
+    }
+    return { scope: scope as CodeThreadBindingScope };
+  };
+  const parseMockCodeWorktreesListInput = (payload: unknown) =>
+    parseMockCodeScopeInput(payload, "Worktree inventory");
+  const parseMockCodeThreadForkInput = (
+    payload: unknown,
+  ): CodeThreadForkInput =>
+    parseMockCodeBoundThreadInput(payload, "Thread fork");
+  const parseMockCodeThreadListInput = (payload: unknown) =>
+    parseMockCodeScopeInput(payload, "Code task list");
+  const requireMockCodeNoArgs = (payload: unknown, action: string) => {
+    if (
+      !payload ||
+      typeof payload !== "object" ||
+      Array.isArray(payload) ||
+      Object.keys(payload).length !== 0
+    ) {
+      throw new Error(`${action} requires an exact no-argument envelope`);
+    }
+  };
+  const parseMockCodeModelSelectionInput = (
+    payload: unknown,
+  ): CodeModelSelection => {
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      throw new Error("Model selection requires an exact input envelope");
+    }
+    const envelope = payload as Record<string, unknown>;
+    if (
+      Object.keys(envelope).length !== 1 ||
+      !("input" in envelope) ||
+      !isMockCodeModelSelection(envelope.input)
+    ) {
+      throw new Error("Model selection crossed its native trust boundary");
+    }
+    return envelope.input;
+  };
+  const parseMockCodeWorktreeRemoveInput = (
+    payload: unknown,
+  ): CodeWorktreeRemoveInput =>
+    parseMockCodeBoundThreadInput(payload, "Worktree removal");
+  const requireMockCodeForkSource = (
+    input: CodeThreadForkInput,
+  ): CodeBoundThreadOpenResult => {
+    requireMockCodeThreadLifecycle(input, ["active"]);
+    if (
+      !mockCodeCreatedOpenResult ||
+      input.threadId !== mockCodeCreatedOpenResult.thread.id ||
+      mockCodeCreatedOpenResult.binding.executionMode !== "worktree" ||
+      mockCodeCreatedOpenResult.binding.worktreeId === null
+    ) {
+      throw new Error(
+        "Only an available active managed-worktree task can be forked",
+      );
+    }
+    return mockCodeCreatedOpenResult;
+  };
+  const completeMockCodeFork = (
+    preparation: CodeThreadPreparation,
+  ): CodeBoundThreadOpenResult => {
+    if (
+      preparation.operation !== "fork" ||
+      preparation.sourceThreadId === null
+    ) {
+      throw new Error("SchoolX Code fork preparation is invalid");
+    }
+    const source = requireMockCodeForkSource({
+      scope: mockCodeScope,
+      threadId: preparation.sourceThreadId,
+    });
+    mockCodeForkedOpenResult = createMockCodeForkResult(source, preparation);
+    mockCodeThreadLifecycles.set(mockCodeForkedThreadId, "active");
+    mockCodeNewPreparation = null;
+    return structuredClone(mockCodeForkedOpenResult);
+  };
+  const parseMockCodeThreadRenameInput = (payload: unknown) => {
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      throw new Error("Thread rename requires an exact input envelope");
+    }
+    if (
+      Object.keys(payload).length !== 1 ||
+      !("input" in payload) ||
+      !payload.input ||
+      typeof payload.input !== "object" ||
+      Array.isArray(payload.input)
+    ) {
+      throw new Error("Thread rename requires an exact input envelope");
+    }
+    const input = payload.input as Record<string, unknown>;
+    const inputKeys = Object.keys(input).sort();
+    if (
+      inputKeys.length !== 3 ||
+      inputKeys[0] !== "name" ||
+      inputKeys[1] !== "scope" ||
+      inputKeys[2] !== "threadId" ||
+      !input.scope ||
+      typeof input.scope !== "object" ||
+      Array.isArray(input.scope)
+    ) {
+      throw new Error("Thread rename input crossed its native trust boundary");
+    }
+    const scope = input.scope as Record<string, unknown>;
+    const scopeKeys = Object.keys(scope).sort();
+    if (
+      scopeKeys.length !== 3 ||
+      scopeKeys[0] !== "communityId" ||
+      scopeKeys[1] !== "projectDtag" ||
+      scopeKeys[2] !== "repositoryIdentity" ||
+      typeof scope.communityId !== "string" ||
+      typeof scope.projectDtag !== "string" ||
+      typeof scope.repositoryIdentity !== "string" ||
+      typeof input.threadId !== "string" ||
+      typeof input.name !== "string"
+    ) {
+      throw new Error("Thread rename input crossed its native trust boundary");
+    }
+    return {
+      scope: scope as CodeThreadBindingScope,
+      threadId: input.threadId,
+      name: input.name,
+    };
+  };
+  const requireMockCodeTerminal = (input: {
+    scope: CodeThreadBindingScope;
+    threadId: string;
+    sessionId: string;
+  }) => {
+    const terminal = mockCodeTerminals.get(input.sessionId);
+    if (
+      !terminal ||
+      terminal.threadId !== input.threadId ||
+      !mockCodeScopesMatch(terminal.scope, input.scope)
+    ) {
+      throw new Error(
+        "Terminal session is not owned by the requested SchoolX Code thread",
+      );
+    }
+    return terminal;
+  };
+  const emitMockCodeTerminalEvent = (
+    terminal: MockCodeTerminal,
+    event:
+      | { type: "output"; data: number[] }
+      | { type: "exit"; exitCode: number; signal: string | null },
+  ) => {
+    terminal.sequence += 1;
+    terminal.channel.onmessage?.({
+      ...event,
+      scope: structuredClone(terminal.scope),
+      threadId: terminal.threadId,
+      sessionId: terminal.sessionId,
+      sequence: terminal.sequence,
+    } as CodeTerminalEvent);
+  };
   const handleMockCommand = async (
     command: string,
     payload: unknown,
@@ -10783,23 +11576,145 @@ export function maybeInstallE2eTauriMocks() {
         };
       case "code_runtime_start":
         requireSchoolxCodeWorkspace();
-        mockCodeRuntimeReady = true;
+        if (mockCodeRuntimePhase === "failed") {
+          mockCodeRuntimeGeneration += 1;
+        }
+        mockCodeRuntimePhase = "ready";
+        mockCodeRuntimeError = null;
         return mockCodeRuntimeStatus();
       case "code_runtime_stop":
         requireSchoolxCodeWorkspace();
-        mockCodeRuntimeReady = false;
+        mockCodeRuntimePhase = "stopped";
+        mockCodeRuntimeError = null;
         return mockCodeRuntimeStatus();
       case "code_runtime_status":
         requireSchoolxCodeWorkspace();
         return mockCodeRuntimeStatus();
+      case "code_models_list":
+        requireSchoolxCodeWorkspace();
+        requireMockCodeNoArgs(payload, "Model catalog");
+        {
+          const configuredError =
+            activeConfig?.mock?.schoolxCodeModelCatalogErrors?.[
+              mockCodeModelCatalogCallCount
+            ] ?? null;
+          mockCodeModelCatalogCallCount += 1;
+          if (configuredError) throw new Error(configuredError);
+        }
+        return mockCodeModelCatalog();
+      case "code_model_selection_set": {
+        requireSchoolxCodeWorkspace();
+        const selection = parseMockCodeModelSelectionInput(payload);
+        const configuredError =
+          activeConfig?.mock?.schoolxCodeModelSelectionErrors?.[
+            mockCodeModelSelectionCallCount
+          ] ?? null;
+        mockCodeModelSelectionCallCount += 1;
+        if (configuredError) throw new Error(configuredError);
+        mockCodeModelSelection = structuredClone(selection);
+        window.sessionStorage.setItem(
+          MOCK_CODE_MODEL_SELECTION_STORAGE_KEY,
+          JSON.stringify(mockCodeModelSelection),
+        );
+        return structuredClone(mockCodeModelSelection);
+      }
+      case "code_terminal_open": {
+        requireSchoolxCodeWorkspace();
+        const { input, onEvent } = payload as {
+          input: CodeTerminalOpenInput;
+          onEvent: MockCodeTerminalChannel;
+        };
+        requireMockCodeThreadLifecycle(input, ["active"]);
+        mockCodeTerminalId += 1;
+        const session: CodeTerminalSession = {
+          scope: structuredClone(input.scope),
+          threadId: input.threadId,
+          sessionId: `00000000-0000-4000-8000-${String(mockCodeTerminalId).padStart(12, "0")}`,
+          cols: input.cols,
+          rows: input.rows,
+        };
+        const terminal: MockCodeTerminal = {
+          ...session,
+          channel: onEvent,
+          sequence: 0,
+        };
+        mockCodeTerminals.set(session.sessionId, terminal);
+        queueMicrotask(() => {
+          if (!mockCodeTerminals.has(session.sessionId)) return;
+          emitMockCodeTerminalEvent(terminal, {
+            type: "output",
+            data: [
+              ...new TextEncoder().encode("SchoolX bound terminal ready.\r\n"),
+            ],
+          });
+        });
+        return structuredClone(session);
+      }
+      case "code_terminal_resize": {
+        requireSchoolxCodeWorkspace();
+        const input = (payload as { input: CodeTerminalResizeInput }).input;
+        const terminal = requireMockCodeTerminal(input);
+        requireMockCodeThreadLifecycle(input, ["active"]);
+        terminal.cols = input.cols;
+        terminal.rows = input.rows;
+        return null;
+      }
+      case "code_terminal_stdin": {
+        requireSchoolxCodeWorkspace();
+        const input = (payload as { input: CodeTerminalStdinInput }).input;
+        const terminal = requireMockCodeTerminal(input);
+        requireMockCodeThreadLifecycle(input, ["active"]);
+        emitMockCodeTerminalEvent(terminal, {
+          type: "output",
+          data: [...input.data],
+        });
+        return null;
+      }
+      case "code_terminal_terminate": {
+        requireSchoolxCodeWorkspace();
+        const input = (payload as { input: CodeTerminalTerminateInput }).input;
+        const terminal = requireMockCodeTerminal(input);
+        mockCodeTerminals.delete(input.sessionId);
+        emitMockCodeTerminalEvent(terminal, {
+          type: "exit",
+          exitCode: 0,
+          signal: null,
+        });
+        return null;
+      }
       case "code_runtime_events":
         requireSchoolxCodeWorkspace();
-        return {
-          runtimeGeneration: mockCodeRuntimeGeneration,
-          latestSequence: 0,
-          truncated: false,
-          events: [],
-        };
+        {
+          const callIndex = mockCodeEventBacklogCallCount;
+          mockCodeEventBacklogCallCount += 1;
+          if (callIndex === 0 && mockCodeInitialEventReplayGate) {
+            await mockCodeInitialEventReplayGate;
+          }
+          if (
+            activeConfig?.mock?.schoolxCodeEventBacklogs &&
+            activeConfig.mock.schoolxCodeEventBacklogs.length > 0
+          ) {
+            const index = Math.min(
+              callIndex,
+              activeConfig.mock.schoolxCodeEventBacklogs.length - 1,
+            );
+            return structuredClone(
+              activeConfig.mock.schoolxCodeEventBacklogs[index],
+            );
+          }
+          return {
+            runtimeGeneration: mockCodeRuntimeGeneration,
+            latestSequence: 0,
+            truncated: false,
+            checkpoint: {
+              runtimeGeneration: mockCodeRuntimeGeneration,
+              sequenceWatermark: 0,
+              activeTurns: [],
+              pendingApprovals: [],
+            },
+            events: [],
+          };
+        }
       case "code_repository_inspect":
         requireSchoolxCodeWorkspace();
         return structuredClone(mockCodeRepository);
@@ -10828,7 +11743,7 @@ export function maybeInstallE2eTauriMocks() {
               ? "11111111-2222-4333-8444-555555555555"
               : null,
         };
-        return {
+        const prepared = {
           preparationId: "preparation-e2e-new",
           scope: input.scope,
           worktree: {
@@ -10838,7 +11753,17 @@ export function maybeInstallE2eTauriMocks() {
             branch: input.executionMode === "local" ? "main" : null,
             dirty: false,
           },
+        } satisfies CodePreparedWorktree;
+        mockCodePreparedWorktree = prepared;
+        mockCodeNewPreparation = {
+          preparationId: prepared.preparationId,
+          ...prepared.scope,
+          ...prepared.worktree.descriptor,
+          operation: "start",
+          sourceThreadId: null,
+          state: "prepared",
         };
+        return structuredClone(prepared);
       }
       case "code_worktree_status": {
         requireSchoolxCodeWorkspace();
@@ -10860,49 +11785,556 @@ export function maybeInstallE2eTauriMocks() {
           dirty: false,
         };
       }
+      case "code_worktrees_list": {
+        requireSchoolxCodeWorkspace();
+        const input = parseMockCodeWorktreesListInput(payload);
+        if (mockCodeWorktreeInventoryError !== null) {
+          throw new Error(mockCodeWorktreeInventoryError);
+        }
+        if (!mockCodeScopesMatch(input.scope, mockCodeScope)) return [];
+        return structuredClone(mockCodeWorktreeInventory);
+      }
+      case "code_worktree_remove": {
+        requireSchoolxCodeWorkspace();
+        const input = parseMockCodeWorktreeRemoveInput(payload);
+        if (!mockCodeScopesMatch(input.scope, mockCodeScope)) {
+          throw new Error(
+            "SchoolX Code worktree removal requires its exact native scope",
+          );
+        }
+        const existing = mockCodeRemovalReceipts.get(input.threadId);
+        if (existing) return structuredClone(existing);
+        const inFlight = mockCodeRemovalInFlight.get(input.threadId);
+        if (inFlight) return structuredClone(await inFlight);
+        const rowIndex = mockCodeWorktreeInventory.findIndex(
+          (row) =>
+            row.authority.type === "binding" &&
+            row.authority.threadId === input.threadId,
+        );
+        const row = mockCodeWorktreeInventory[rowIndex];
+        if (
+          rowIndex < 0 ||
+          !row ||
+          !row.canRemove ||
+          row.authority.type !== "binding" ||
+          row.inspection.status !== "available"
+        ) {
+          throw new Error(
+            "SchoolX Code managed worktree is not eligible for removal",
+          );
+        }
+        const removedWorktreeId = row.descriptor.worktreeId;
+        const removedHeadCommit = row.inspection.headCommit;
+        const configuredError =
+          activeConfig?.mock?.schoolxCodeRemovalErrors?.[
+            mockCodeRemovalCallCount
+          ] ?? null;
+        const responseLoss =
+          activeConfig?.mock?.schoolxCodeRemovalResponseLosses?.[
+            mockCodeRemovalCallCount
+          ] ?? null;
+        mockCodeRemovalCallCount += 1;
+        const delayMs = activeConfig?.mock?.schoolxCodeRemovalDelayMs ?? 0;
+        const operation = (async () => {
+          if (mockCodeRemovalGate) await mockCodeRemovalGate;
+          if (delayMs > 0) {
+            await new Promise((resolve) =>
+              globalThis.setTimeout(resolve, delayMs),
+            );
+          }
+          if (configuredError) throw new Error(configuredError);
+          const currentRowIndex = mockCodeWorktreeInventory.findIndex(
+            (candidate) =>
+              candidate.authority.type === "binding" &&
+              candidate.authority.threadId === input.threadId,
+          );
+          if (currentRowIndex < 0) {
+            throw new Error(
+              "SchoolX Code managed worktree disappeared before removal committed",
+            );
+          }
+          const receipt = {
+            removalId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            scope: structuredClone(mockCodeScope),
+            threadId: input.threadId,
+            worktreeId: removedWorktreeId,
+            headCommit: removedHeadCommit,
+            mergedIntoRef: "refs/heads/main",
+            mergedIntoCommit: "f".repeat(40),
+            transcriptDisposition: "preserved",
+            executionDisposition: "removed",
+          } satisfies CodeWorktreeRemovalReceipt;
+          mockCodeWorktreeInventory.splice(currentRowIndex, 1);
+          mockCodeRemovalReceipts.set(input.threadId, receipt);
+          if (responseLoss) throw new Error(responseLoss);
+          return receipt;
+        })();
+        mockCodeRemovalInFlight.set(input.threadId, operation);
+        try {
+          return structuredClone(await operation);
+        } finally {
+          if (mockCodeRemovalInFlight.get(input.threadId) === operation) {
+            mockCodeRemovalInFlight.delete(input.threadId);
+          }
+        }
+      }
       case "code_thread_preparations_list":
         requireSchoolxCodeWorkspace();
-        return [
-          {
-            preparationId: "preparation-e2e-existing",
-            ...mockCodeScope,
-            executionMode: "worktree",
-            executionRoot: "/mock/buzz-worktrees/prepared-e2e",
-            baseRef: mockCodeBaseRef,
-            worktreeId: "99999999-8888-4777-8666-555555555555",
-            state: "prepared",
-          },
-        ];
-      case "code_threads_list":
+        return structuredClone([
+          ...(mockCodeNewPreparation ? [mockCodeNewPreparation] : []),
+          mockCodeExistingPreparation,
+        ]);
+      case "code_threads_list": {
         requireSchoolxCodeWorkspace();
+        const input = parseMockCodeThreadListInput(payload);
+        if (!mockCodeScopesMatch(input.scope, mockCodeScope)) {
+          return { data: [], nextCursor: null, backwardsCursor: null };
+        }
+        const existingLifecycle =
+          mockCodeThreadLifecycles.get(mockCodeBinding.codexThreadId) ??
+          "unknown";
         return {
           data: [
+            ...(mockCodeForkedOpenResult
+              ? [
+                  {
+                    binding: structuredClone(mockCodeForkedOpenResult.binding),
+                    lifecycle:
+                      mockCodeThreadLifecycles.get(mockCodeForkedThreadId) ??
+                      "unknown",
+                    thread: {
+                      ...structuredClone(mockCodeForkedOpenResult.thread),
+                      turns: [],
+                    },
+                    unavailable: null,
+                  },
+                ]
+              : []),
+            ...(mockCodeCreatedOpenResult
+              ? [
+                  {
+                    binding: structuredClone(mockCodeCreatedOpenResult.binding),
+                    lifecycle:
+                      mockCodeThreadLifecycles.get(mockCodeCreatedThreadId) ??
+                      "unknown",
+                    thread:
+                      mockCodeThreadLifecycles.get(mockCodeCreatedThreadId) ===
+                      "active"
+                        ? {
+                            ...structuredClone(
+                              mockCodeCreatedOpenResult.thread,
+                            ),
+                            turns: [],
+                          }
+                        : structuredClone(mockCodeCreatedOpenResult.thread),
+                    unavailable: null,
+                  },
+                ]
+              : []),
             {
               binding: structuredClone(mockCodeBinding),
-              thread: structuredClone(mockCodeThreadListSummary),
+              lifecycle: existingLifecycle,
+              thread:
+                existingLifecycle === "active"
+                  ? structuredClone(mockCodeThreadListSummary)
+                  : structuredClone(mockCodeThread),
               unavailable: null,
             },
+            ...mockCodeWorktreeInventory.flatMap((row) => {
+              if (row.authority.type !== "binding") return [];
+              const threadId = row.authority.threadId;
+              return [
+                {
+                  binding: {
+                    ...structuredClone(row.scope),
+                    codexThreadId: threadId,
+                    ...structuredClone(row.descriptor),
+                  },
+                  lifecycle: row.authority.lifecycle,
+                  thread: {
+                    ...structuredClone(mockCodeThreadListSummary),
+                    id: threadId,
+                    sessionId: `session-${threadId}`,
+                    preview: `Managed worktree for ${threadId}`,
+                    cwd: row.descriptor.executionRoot,
+                    name:
+                      threadId === mockCodeRemovableThreadId
+                        ? "Removable archived task"
+                        : `Managed task ${threadId}`,
+                  },
+                  unavailable: null,
+                },
+              ];
+            }),
           ],
           nextCursor: null,
           backwardsCursor: null,
         };
-      case "code_thread_start":
-      case "code_thread_binding_recover":
-      case "code_thread_resume":
+      }
+      case "code_thread_fork": {
         requireSchoolxCodeWorkspace();
+        const input = parseMockCodeThreadForkInput(payload);
+        const source = requireMockCodeForkSource(input);
+        if (
+          mockCodeNewPreparation?.operation === "fork" &&
+          mockCodeNewPreparation.sourceThreadId === input.threadId
+        ) {
+          throw new Error(
+            "This task already has an unfinished SchoolX Code fork",
+          );
+        }
+        const preparation = createMockCodeForkPreparation(source);
+        mockCodeNewPreparation = preparation;
+        const configuredError =
+          activeConfig?.mock?.schoolxCodeForkErrors?.[mockCodeForkCallCount] ??
+          null;
+        mockCodeForkCallCount += 1;
+        const delayMs = activeConfig?.mock?.schoolxCodeForkDelayMs ?? 0;
+        if (delayMs > 0) {
+          await new Promise((resolve) =>
+            globalThis.setTimeout(resolve, delayMs),
+          );
+        }
+        if (configuredError) throw new Error(configuredError);
+        return completeMockCodeFork(preparation);
+      }
+      case "code_thread_start": {
+        requireSchoolxCodeWorkspace();
+        const input = (payload as { input: CodeThreadStartInput }).input;
+        if (
+          mockCodePreparedWorktree?.preparationId === input.preparationId &&
+          mockCodeScopesMatch(mockCodePreparedWorktree.scope, input.scope)
+        ) {
+          mockCodeCreatedOpenResult = createMockCodeOpenResult(
+            mockCodePreparedWorktree,
+          );
+          mockCodeThreadLifecycles.set(mockCodeCreatedThreadId, "active");
+          mockCodePreparedWorktree = null;
+          mockCodeNewPreparation = null;
+          window.sessionStorage.setItem(
+            MOCK_CODE_WORKSPACE_STORAGE_KEY,
+            JSON.stringify(mockCodeCreatedOpenResult),
+          );
+          return structuredClone(mockCodeCreatedOpenResult);
+        }
+        throw mockCodeStartError(
+          "preparationUnavailable",
+          "SchoolX Code preparation was not found in the requested scope",
+        );
+      }
+      case "code_thread_binding_recover": {
+        requireSchoolxCodeWorkspace();
+        const input = (payload as { input: CodeThreadStartInput }).input;
+        if (
+          mockCodeNewPreparation?.operation === "fork" &&
+          mockCodeNewPreparation.preparationId === input.preparationId &&
+          mockCodeScopesMatch(mockCodeNewPreparation, input.scope)
+        ) {
+          return completeMockCodeFork(mockCodeNewPreparation);
+        }
         return structuredClone(mockCodeOpenResult);
-      case "code_turn_start":
+      }
+      case "code_thread_resume": {
         requireSchoolxCodeWorkspace();
+        const input = (payload as { input: CodeThreadResumeInput }).input;
+        requireMockCodeThreadLifecycle(input, ["active"]);
+        if (
+          input.threadId === mockCodeOpenResult.thread.id &&
+          input.threadId === mockCodeOpenResult.binding.codexThreadId &&
+          mockCodeScopesMatch(input.scope, mockCodeOpenResult.binding)
+        ) {
+          return structuredClone(mockCodeOpenResult);
+        }
+        if (
+          mockCodeCreatedOpenResult &&
+          input.threadId === mockCodeCreatedOpenResult.thread.id &&
+          input.threadId === mockCodeCreatedOpenResult.binding.codexThreadId &&
+          mockCodeScopesMatch(input.scope, mockCodeCreatedOpenResult.binding)
+        ) {
+          return structuredClone(mockCodeCreatedOpenResult);
+        }
+        if (
+          mockCodeForkedOpenResult &&
+          input.threadId === mockCodeForkedOpenResult.thread.id &&
+          input.threadId === mockCodeForkedOpenResult.binding.codexThreadId &&
+          mockCodeScopesMatch(input.scope, mockCodeForkedOpenResult.binding)
+        ) {
+          return structuredClone(mockCodeForkedOpenResult);
+        }
+        throw new Error(
+          "Codex thread is not bound to the requested SchoolX community, project, and repository",
+        );
+      }
+      case "code_thread_rename": {
+        requireSchoolxCodeWorkspace();
+        const input = parseMockCodeThreadRenameInput(payload);
+        requireMockCodeThreadLifecycle(input, ["active", "archived"]);
+        const configuredError =
+          activeConfig?.mock?.schoolxCodeRenameErrors?.[
+            mockCodeRenameCallCount
+          ] ?? null;
+        mockCodeRenameCallCount += 1;
+        if (configuredError) throw new Error(configuredError);
+
+        if (input.threadId === mockCodeBinding.codexThreadId) {
+          mockCodeThread.name = input.name;
+          mockCodeThreadListSummary.name = input.name;
+          return structuredClone(mockCodeThread);
+        }
+        if (
+          mockCodeCreatedOpenResult &&
+          input.threadId === mockCodeCreatedOpenResult.thread.id
+        ) {
+          mockCodeCreatedOpenResult.thread.name = input.name;
+          window.sessionStorage.setItem(
+            MOCK_CODE_WORKSPACE_STORAGE_KEY,
+            JSON.stringify(mockCodeCreatedOpenResult),
+          );
+          return structuredClone(mockCodeCreatedOpenResult.thread);
+        }
+        if (
+          mockCodeForkedOpenResult &&
+          input.threadId === mockCodeForkedOpenResult.thread.id
+        ) {
+          mockCodeForkedOpenResult.thread.name = input.name;
+          return structuredClone(mockCodeForkedOpenResult.thread);
+        }
+        throw new Error(
+          "Codex thread is not bound to the requested SchoolX community, project, and repository",
+        );
+      }
+      case "code_thread_archive": {
+        requireSchoolxCodeWorkspace();
+        const input = parseMockCodeThreadLifecycleInput(payload);
+        requireMockCodeThreadLifecycle(input, ["active"]);
+        mockCodeThreadLifecycles.set(input.threadId, "archived");
+        for (const terminal of [...mockCodeTerminals.values()]) {
+          if (
+            terminal.threadId !== input.threadId ||
+            !mockCodeScopesMatch(terminal.scope, input.scope)
+          ) {
+            continue;
+          }
+          mockCodeTerminals.delete(terminal.sessionId);
+          emitMockCodeTerminalEvent(terminal, {
+            type: "exit",
+            exitCode: 0,
+            signal: null,
+          });
+        }
+        return mockCodeLifecycleMutationResult(input, "archived");
+      }
+      case "code_thread_unarchive": {
+        requireSchoolxCodeWorkspace();
+        const input = parseMockCodeThreadLifecycleInput(payload);
+        requireMockCodeThreadLifecycle(input, ["archived"]);
+        mockCodeThreadLifecycles.set(input.threadId, "active");
+        return mockCodeLifecycleMutationResult(input, "active");
+      }
+      case "code_turn_start": {
+        requireSchoolxCodeWorkspace();
+        const input = (
+          payload as {
+            input: { scope: CodeThreadBindingScope; threadId: string };
+          }
+        ).input;
+        requireMockCodeThreadLifecycle(input, ["active"]);
         return { id: "turn-e2e-new", status: "inProgress" };
+      }
       case "code_turn_steer": {
         requireSchoolxCodeWorkspace();
-        const input = (payload as { input: { expectedTurnId: string } }).input;
+        const input = (
+          payload as {
+            input: {
+              scope: CodeThreadBindingScope;
+              threadId: string;
+              expectedTurnId: string;
+            };
+          }
+        ).input;
+        requireMockCodeThreadLifecycle(input, ["active"]);
         return { id: input.expectedTurnId, status: "inProgress" };
       }
       case "code_turn_interrupt":
-      case "code_approval_respond":
+      case "code_approval_respond": {
         requireSchoolxCodeWorkspace();
+        const input = (
+          payload as {
+            input: { scope: CodeThreadBindingScope; threadId: string };
+          }
+        ).input;
+        requireMockCodeThreadLifecycle(input, ["active"]);
         return null;
+      }
+      case "code_thread_changes": {
+        requireSchoolxCodeWorkspace();
+        const input = (
+          payload as {
+            input: { scope: CodeThreadBindingScope; threadId: string };
+          }
+        ).input;
+        requireMockCodeThreadLifecycle(input, ["active", "archived"]);
+        const configuredChanges = activeConfig?.mock?.schoolxCodeChanges;
+        if (configuredChanges && configuredChanges.length > 0) {
+          const index = Math.min(
+            mockCodeChangesCallCount,
+            configuredChanges.length - 1,
+          );
+          mockCodeChangesCallCount += 1;
+          return structuredClone(configuredChanges[index]);
+        }
+        mockCodeChangesCallCount += 1;
+        return {
+          files: [
+            {
+              path: "desktop/src/features/code/ui/CodeWorkspaceScreen.tsx",
+              status: "modified",
+              binary: false,
+              additions: 18,
+              deletions: 3,
+              patch: [
+                "@@ -1,3 +1,4 @@",
+                ' import { CodeTimeline } from "./CodeTimeline";',
+                '+import { CodeChangesPanel } from "./CodeChangesPanel";',
+              ].join("\n"),
+              truncated: false,
+            },
+            {
+              path: "desktop/src/features/code/state/codeSessionReducer.ts",
+              status: "modified",
+              binary: false,
+              additions: 9,
+              deletions: 1,
+              patch: "@@ -1,2 +1,3 @@\n+// Preserve exact replay identity.",
+              truncated: false,
+            },
+          ],
+          additions: 27,
+          deletions: 4,
+          commitBody: null,
+          totalFiles: 2,
+          filesTruncated: false,
+        };
+      }
+      case "code_thread_git_status": {
+        requireSchoolxCodeWorkspace();
+        const input = parseMockCodeThreadLifecycleInput(payload);
+        requireMockCodeThreadLifecycle(input, ["active"]);
+        const configuredStatuses = activeConfig?.mock?.schoolxCodeGitStatuses;
+        if (configuredStatuses && configuredStatuses.length > 0) {
+          const index = Math.min(
+            mockCodeGitStatusCallCount,
+            configuredStatuses.length - 1,
+          );
+          mockCodeGitStatusCallCount += 1;
+          return structuredClone(configuredStatuses[index]);
+        }
+        mockCodeGitStatusCallCount += 1;
+        return {
+          state: "blocked",
+          runtimeGeneration: 7,
+          statusRevision: 1,
+          writeGeneration: 0,
+          scope: structuredClone(input.scope),
+          threadId: input.threadId,
+          reason: "Git write fixture is not configured.",
+          remediation: "Use the read-only task diff fixture.",
+        } satisfies CodeGitStatus;
+      }
+      case "code_thread_git_stage":
+      case "code_thread_git_unstage": {
+        requireSchoolxCodeWorkspace();
+        const input = (
+          payload as {
+            input: {
+              scope: CodeThreadBindingScope;
+              threadId: string;
+              writeGeneration: number;
+              snapshotId: string;
+              fileId: string;
+            };
+          }
+        ).input;
+        requireMockCodeThreadLifecycle(input, ["active"]);
+        const operation =
+          command === "code_thread_git_stage" ? "stage" : "unstage";
+        mockCodeGitReceipt = {
+          operationId: "e".repeat(64),
+          operation,
+          scope: structuredClone(input.scope),
+          threadId: input.threadId,
+          requestGeneration: input.writeGeneration,
+          beforeSnapshotId: input.snapshotId,
+          fileId: input.fileId,
+          disposition: operation === "stage" ? "staged" : "unstaged",
+        };
+        return structuredClone(mockCodeGitReceipt);
+      }
+      case "code_thread_git_commit": {
+        requireSchoolxCodeWorkspace();
+        const input = (
+          payload as {
+            input: {
+              scope: CodeThreadBindingScope;
+              threadId: string;
+              writeGeneration: number;
+              snapshotId: string;
+            };
+          }
+        ).input;
+        requireMockCodeThreadLifecycle(input, ["active"]);
+        mockCodeGitReceipt = {
+          operationId: "f".repeat(64),
+          operation: "commit",
+          scope: structuredClone(input.scope),
+          threadId: input.threadId,
+          requestGeneration: input.writeGeneration,
+          beforeSnapshotId: input.snapshotId,
+          previousHead: "1".repeat(40),
+          commit: "2".repeat(40),
+          tree: "3".repeat(40),
+          disposition: "committed",
+        };
+        const responseLoss =
+          activeConfig?.mock?.schoolxCodeGitCommitResponseLosses?.[
+            mockCodeGitCommitCallCount
+          ] ?? null;
+        mockCodeGitCommitCallCount += 1;
+        if (responseLoss) throw new Error(responseLoss);
+        return structuredClone(mockCodeGitReceipt);
+      }
+      case "code_thread_git_reconcile": {
+        requireSchoolxCodeWorkspace();
+        const input = parseMockCodeThreadLifecycleInput(payload);
+        requireMockCodeThreadLifecycle(input, ["active"]);
+        return mockCodeGitReceipt
+          ? { state: "completed", receipt: structuredClone(mockCodeGitReceipt) }
+          : {
+              state: "none",
+              scope: structuredClone(input.scope),
+              threadId: input.threadId,
+            };
+      }
+      case "code_thread_git_acknowledge": {
+        requireSchoolxCodeWorkspace();
+        const input = (
+          payload as {
+            input: {
+              scope: CodeThreadBindingScope;
+              threadId: string;
+              operationId: string;
+            };
+          }
+        ).input;
+        requireMockCodeThreadLifecycle(input, ["active"]);
+        mockCodeGitReceipt = null;
+        return {
+          scope: structuredClone(input.scope),
+          threadId: input.threadId,
+          operationId: input.operationId,
+          disposition: "acknowledged",
+        };
+      }
       case "get_project_repo_diff":
         return {
           additions: 27,
@@ -12448,21 +13880,25 @@ export function maybeInstallE2eTauriMocks() {
   window.__BUZZ_E2E_INVOKE_MOCK_COMMAND__ = (command, payload) =>
     handleMockCommand(command, payload ?? null);
   mockIPC(handleMockCommand, { shouldMockEvents: true });
-  const tauriInternals = (
-    window as typeof window & {
-      __TAURI_INTERNALS__: {
-        listen?: (
-          event: string,
-          callback: () => void,
-        ) => Promise<() => Promise<void>>;
-      };
-    }
-  ).__TAURI_INTERNALS__;
-  // Page-evaluated E2E specs use this surface; delegate to Tauri's mocked channel
-  // so their listeners observe the same events emitted by application test seams.
-  tauriInternals.listen = async (event, callback) => {
-    const unlisten = await listen(event, () => callback());
-    return async () => unlisten();
+  window.__BUZZ_E2E_EMIT_CODE_WORKSPACE_EVENT__ = async (event) => {
+    await emit("schoolx-code-workspace-event", structuredClone(event));
+  };
+  window.__BUZZ_E2E_RELEASE_CODE_EVENT_REPLAY__ = () => {
+    releaseMockCodeInitialEventReplay?.();
+    releaseMockCodeInitialEventReplay = null;
+  };
+  window.__BUZZ_E2E_RELEASE_CODE_WORKTREE_REMOVAL__ = () => {
+    releaseMockCodeRemoval?.();
+    releaseMockCodeRemoval = null;
+  };
+  window.__BUZZ_E2E_CRASH_CODE_RUNTIME__ = (
+    error = "The fixture Codex process exited unexpectedly.",
+  ) => {
+    mockCodeRuntimePhase = "failed";
+    mockCodeRuntimeError = error;
+  };
+  window.__BUZZ_E2E_SET_CODE_WORKTREE_INVENTORY_ERROR__ = (error) => {
+    mockCodeWorktreeInventoryError = error;
   };
 
   installed = true;

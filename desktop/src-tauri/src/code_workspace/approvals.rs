@@ -1,13 +1,17 @@
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 
 use super::bindings::CodeThreadBindingScope;
-use super::protocol::{redact_protocol_value, validate_id, CodeRequestId, CodeWorkspaceEventDraft};
+use super::protocol::{
+    redact_protocol_text, redact_protocol_value, validate_id, CodeRequestId,
+    CodeWorkspaceEventDraft,
+};
 
 const MAX_PENDING_APPROVALS: usize = 128;
+const MAX_SAFE_JSON_INTEGER: u64 = 9_007_199_254_740_991;
 
 /// Decisions supported by stable command and file-change approval responses.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -19,7 +23,7 @@ pub enum CodeApprovalDecision {
     Cancel,
 }
 
-/// Lifetime of an explicitly granted permission subset.
+/// Lifetime of an explicitly granted permission request.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum CodePermissionScope {
@@ -27,7 +31,16 @@ pub enum CodePermissionScope {
     Session,
 }
 
-/// Normalized frontend response for either a decision or permission grant.
+/// Opaque permission response intent. Requested permissions never round-trip
+/// through the frontend as authority-bearing response data.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CodePermissionIntent {
+    Grant,
+    Decline,
+}
+
+/// Normalized frontend response for either a decision or permission intent.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(
     tag = "type",
@@ -40,10 +53,8 @@ pub enum CodeApprovalResponse {
         decision: CodeApprovalDecision,
     },
     Permissions {
-        permissions: Value,
+        intent: CodePermissionIntent,
         scope: CodePermissionScope,
-        #[serde(default)]
-        strict_auto_review: bool,
     },
 }
 
@@ -51,13 +62,79 @@ impl CodeApprovalResponse {
     /// Whether this response would grant the requested operation rather than
     /// decline or cancel it.
     pub(crate) fn approves_execution(&self) -> bool {
-        matches!(
-            self,
+        match self {
             Self::Decision {
-                decision: CodeApprovalDecision::Accept | CodeApprovalDecision::AcceptForSession
-            } | Self::Permissions { .. }
-        )
+                decision: CodeApprovalDecision::Accept | CodeApprovalDecision::AcceptForSession,
+            } => true,
+            Self::Permissions {
+                intent: CodePermissionIntent::Grant,
+                ..
+            } => true,
+            Self::Decision { .. } | Self::Permissions { .. } => false,
+        }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PermissionDisplay {
+    grantable: bool,
+    network: Option<PermissionNetworkDisplay>,
+    file_system: Option<PermissionFileSystemDisplay>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PermissionNetworkDisplay {
+    enabled: Option<bool>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PermissionFileSystemDisplay {
+    entries: Option<Vec<PermissionFileSystemEntryDisplay>>,
+    glob_scan_max_depth: Option<u64>,
+    read: Option<Vec<String>>,
+    write: Option<Vec<String>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PermissionFileSystemEntryDisplay {
+    access: PermissionAccessDisplay,
+    path: PermissionPathDisplay,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum PermissionAccessDisplay {
+    Read,
+    Write,
+    Deny,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(tag = "type", rename_all = "camelCase")]
+enum PermissionPathDisplay {
+    Path { path: String },
+    GlobPattern { pattern: String },
+    Special { value: PermissionSpecialPathDisplay },
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum PermissionSpecialPathDisplay {
+    Root,
+    Minimal,
+    ProjectRoots {
+        subpath: Option<String>,
+    },
+    Tmpdir,
+    SlashTmp,
+    Unknown {
+        path: String,
+        subpath: Option<String>,
+    },
 }
 
 /// Identity-bound response to one pending app-server approval request.
@@ -98,6 +175,7 @@ struct PendingApproval {
     method: String,
     kind: ApprovalKind,
     params: Value,
+    permission_display: Option<PermissionDisplay>,
 }
 
 impl PendingApproval {
@@ -118,11 +196,8 @@ impl PendingApproval {
         let thread_id = required_string(&params, "threadId", method)?;
         let turn_id = required_string(&params, "turnId", method)?;
         let item_id = required_string(&params, "itemId", method)?;
-        if kind == ApprovalKind::Permissions
-            && !params.get("permissions").is_some_and(Value::is_object)
-        {
-            return Err("Codex permission approval request has invalid permissions".to_string());
-        }
+        let permission_display = (kind == ApprovalKind::Permissions)
+            .then(|| permission_display_from_raw(params.get("permissions")));
         Ok(Some(Self {
             generation,
             request_id,
@@ -132,6 +207,7 @@ impl PendingApproval {
             method: method.to_string(),
             kind,
             params,
+            permission_display,
         }))
     }
 
@@ -146,9 +222,33 @@ impl PendingApproval {
             payload: json!({
                 "requestId": self.request_id,
                 "approvalKind": approval_kind,
-                "request": redact_protocol_value(self.params.clone())
+                "request": self.public_request()?
             }),
         })
+    }
+
+    fn public_request(&self) -> Result<Value, String> {
+        if self.kind != ApprovalKind::Permissions {
+            return Ok(redact_protocol_value(self.params.clone()));
+        }
+        let display = self.permission_display.as_ref().ok_or_else(|| {
+            "pending Codex permission request has no display snapshot".to_string()
+        })?;
+        let mut request = Map::new();
+        request.insert("threadId".to_string(), json!(self.thread_id));
+        request.insert("turnId".to_string(), json!(self.turn_id));
+        request.insert("itemId".to_string(), json!(self.item_id));
+        for key in ["startedAtMs", "cwd", "environmentId", "reason"] {
+            if let Some(value) = self.params.get(key) {
+                request.insert(key.to_string(), redact_protocol_value(value.clone()));
+            }
+        }
+        request.insert(
+            "permissionDisplay".to_string(),
+            serde_json::to_value(display)
+                .map_err(|error| format!("failed to encode permission display: {error}"))?,
+        );
+        Ok(Value::Object(request))
     }
 
     fn response_value(&self, response: &CodeApprovalResponse) -> Result<Value, String> {
@@ -160,32 +260,39 @@ impl PendingApproval {
                 self.validate_available_decision(*decision)?;
                 Ok(json!({ "decision": decision }))
             }
-            (
-                ApprovalKind::Permissions,
-                CodeApprovalResponse::Permissions {
-                    permissions,
-                    scope,
-                    strict_auto_review,
-                },
-            ) => {
-                if !permissions.is_object() {
-                    return Err("granted Codex permissions must be an object".to_string());
+            (ApprovalKind::Permissions, CodeApprovalResponse::Permissions { intent, scope }) => {
+                match intent {
+                    CodePermissionIntent::Decline => Ok(json!({
+                        "permissions": {},
+                        "scope": CodePermissionScope::Turn,
+                        "strictAutoReview": false
+                    })),
+                    CodePermissionIntent::Grant => {
+                        if !self
+                            .permission_display
+                            .as_ref()
+                            .is_some_and(|display| display.grantable)
+                        {
+                            return Err(
+                            "Codex permission request cannot be granted because its display is incomplete or inaccurate"
+                                .to_string(),
+                        );
+                        }
+                        let requested =
+                            self.params.get("permissions").cloned().ok_or_else(|| {
+                                "pending Codex permission request has no permissions".to_string()
+                            })?;
+                        Ok(json!({
+                            "permissions": requested,
+                            "scope": scope,
+                            "strictAutoReview": *scope == CodePermissionScope::Turn
+                        }))
+                    }
                 }
-                let requested = self.params.get("permissions").ok_or_else(|| {
-                    "pending Codex permission request has no permissions".to_string()
-                })?;
-                if !is_json_subset(permissions, requested) {
-                    return Err("granted Codex permissions exceed the pending request".to_string());
-                }
-                Ok(json!({
-                    "permissions": permissions,
-                    "scope": scope,
-                    "strictAutoReview": strict_auto_review
-                }))
             }
-            (ApprovalKind::Permissions, CodeApprovalResponse::Decision { .. }) => Err(
-                "permission approvals require an explicit granted permission subset".to_string(),
-            ),
+            (ApprovalKind::Permissions, CodeApprovalResponse::Decision { .. }) => {
+                Err("permission approvals require an explicit grant or decline intent".to_string())
+            }
             (_, CodeApprovalResponse::Permissions { .. }) => {
                 Err("only permission requests accept a permission grant".to_string())
             }
@@ -242,6 +349,12 @@ pub(crate) struct PendingApprovalStore {
     inner: Mutex<ApprovalState>,
 }
 
+/// Held across one guarded lifecycle write so an approval cannot be inserted
+/// or reserved between the exact-thread check and JSON-RPC byte admission.
+pub(crate) struct PendingApprovalAdmissionGuard<'a> {
+    _state: MutexGuard<'a, ApprovalState>,
+}
+
 impl PendingApprovalStore {
     pub(crate) fn reset(&self, generation: u64) {
         if let Ok(mut state) = self.inner.lock() {
@@ -272,6 +385,52 @@ impl PendingApprovalStore {
                 });
             }
         }
+    }
+
+    /// Check both pending and response-reserved approvals for one exact thread
+    /// in the current runtime generation.
+    pub(crate) fn has_for_thread(&self, generation: u64, thread_id: &str) -> Result<bool, String> {
+        validate_id("approval thread", thread_id)?;
+        let state = self.inner.lock().map_err(|error| error.to_string())?;
+        if state.generation != generation {
+            return Err("Codex approval lookup belongs to a stale runtime generation".to_string());
+        }
+        Ok(state
+            .pending
+            .values()
+            .any(|approval| approval.thread_id == thread_id)
+            || state
+                .reserved
+                .values()
+                .any(|reserved| reserved.approval.thread_id == thread_id))
+    }
+
+    /// Lock the current approval generation and prove one exact thread has no
+    /// pending or response-reserved request.
+    pub(crate) fn lock_without_thread_approval(
+        &self,
+        generation: u64,
+        thread_id: &str,
+    ) -> Result<PendingApprovalAdmissionGuard<'_>, String> {
+        validate_id("approval admission thread", thread_id)?;
+        let state = self.inner.lock().map_err(|error| error.to_string())?;
+        if state.generation != generation {
+            return Err(
+                "Codex approval admission belongs to a stale runtime generation".to_string(),
+            );
+        }
+        if state
+            .pending
+            .values()
+            .any(|approval| approval.thread_id == thread_id)
+            || state
+                .reserved
+                .values()
+                .any(|reserved| reserved.approval.thread_id == thread_id)
+        {
+            return Err("Codex thread has a pending or response-reserved approval".to_string());
+        }
+        Ok(PendingApprovalAdmissionGuard { _state: state })
     }
 
     pub(crate) fn insert_request(
@@ -439,12 +598,59 @@ impl PendingApprovalStore {
         Ok(())
     }
 
+    /// Snapshot every approval owned by one runtime generation while the
+    /// caller holds the event watermark lock. Reserved approvals remain
+    /// visible but cannot be answered a second time.
+    pub(crate) fn checkpoint_events(
+        &self,
+        generation: u64,
+    ) -> Result<Vec<(CodeWorkspaceEventDraft, bool)>, String> {
+        let state = self.inner.lock().map_err(|error| error.to_string())?;
+        if state.generation != generation {
+            return Err(
+                "Codex approval checkpoint belongs to a stale runtime generation".to_string(),
+            );
+        }
+        let mut approvals = state
+            .pending
+            .values()
+            .map(|approval| (approval, true))
+            .chain(
+                state
+                    .reserved
+                    .values()
+                    .map(|reserved| (&reserved.approval, false)),
+            )
+            .collect::<Vec<_>>();
+        approvals.sort_by(|(left, _), (right, _)| {
+            left.thread_id
+                .cmp(&right.thread_id)
+                .then_with(|| left.turn_id.cmp(&right.turn_id))
+                .then_with(|| left.item_id.cmp(&right.item_id))
+                .then_with(|| {
+                    request_id_sort_key(&left.request_id)
+                        .cmp(&request_id_sort_key(&right.request_id))
+                })
+        });
+        approvals
+            .into_iter()
+            .map(|(approval, respondable)| Ok((approval.event()?, respondable)))
+            .collect()
+    }
+
     #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
         self.inner
             .lock()
             .map(|state| state.pending.len() + state.reserved.len())
             .unwrap_or_default()
+    }
+}
+
+fn request_id_sort_key(request_id: &CodeRequestId) -> (u8, String) {
+    match request_id {
+        CodeRequestId::Number(value) => (0, format!("{value:020}")),
+        CodeRequestId::String(value) => (1, value.clone()),
     }
 }
 
@@ -457,18 +663,355 @@ fn required_string(value: &Value, key: &str, method: &str) -> Result<String, Str
     Ok(string.to_string())
 }
 
-fn is_json_subset(granted: &Value, requested: &Value) -> bool {
-    match (granted, requested) {
-        (Value::Object(granted), Value::Object(requested)) => granted.iter().all(|(key, value)| {
-            requested
-                .get(key)
-                .is_some_and(|requested| is_json_subset(value, requested))
-        }),
-        (Value::Array(granted), Value::Array(requested)) => granted
-            .iter()
-            .all(|value| requested.iter().any(|candidate| candidate == value)),
-        _ => granted == requested,
+struct PermissionDisplayValidation {
+    accurate: bool,
+    non_empty: bool,
+}
+
+impl PermissionDisplayValidation {
+    fn new() -> Self {
+        Self {
+            accurate: true,
+            non_empty: false,
+        }
     }
+
+    fn invalidate(&mut self) {
+        self.accurate = false;
+    }
+}
+
+fn permission_display_from_raw(raw: Option<&Value>) -> PermissionDisplay {
+    let mut validation = PermissionDisplayValidation::new();
+    let Some(permissions) = raw.and_then(Value::as_object) else {
+        validation.invalidate();
+        return PermissionDisplay {
+            grantable: false,
+            network: None,
+            file_system: None,
+        };
+    };
+    if !has_only_keys(permissions, &["network", "fileSystem"]) {
+        validation.invalidate();
+    }
+    let network = permissions
+        .get("network")
+        .and_then(|value| parse_network_display(value, &mut validation));
+    let file_system = permissions
+        .get("fileSystem")
+        .and_then(|value| parse_file_system_display(value, &mut validation));
+    PermissionDisplay {
+        grantable: validation.accurate && validation.non_empty,
+        network,
+        file_system,
+    }
+}
+
+fn parse_network_display(
+    value: &Value,
+    validation: &mut PermissionDisplayValidation,
+) -> Option<PermissionNetworkDisplay> {
+    if value.is_null() {
+        return None;
+    }
+    let Some(network) = value.as_object() else {
+        validation.invalidate();
+        return None;
+    };
+    if !has_only_keys(network, &["enabled"]) {
+        validation.invalidate();
+    }
+    let enabled = match network.get("enabled") {
+        None | Some(Value::Null) => None,
+        Some(Value::Bool(enabled)) => {
+            validation.non_empty |= *enabled;
+            Some(*enabled)
+        }
+        Some(_) => {
+            validation.invalidate();
+            None
+        }
+    };
+    Some(PermissionNetworkDisplay { enabled })
+}
+
+fn parse_file_system_display(
+    value: &Value,
+    validation: &mut PermissionDisplayValidation,
+) -> Option<PermissionFileSystemDisplay> {
+    if value.is_null() {
+        return None;
+    }
+    let Some(file_system) = value.as_object() else {
+        validation.invalidate();
+        return None;
+    };
+    if !has_only_keys(
+        file_system,
+        &["entries", "globScanMaxDepth", "read", "write"],
+    ) {
+        validation.invalidate();
+    }
+    let entries = file_system
+        .get("entries")
+        .and_then(|value| parse_file_system_entries(value, validation));
+    let glob_scan_max_depth = match file_system.get("globScanMaxDepth") {
+        None | Some(Value::Null) => None,
+        Some(value) => match value
+            .as_u64()
+            .filter(|depth| *depth > 0 && *depth <= MAX_SAFE_JSON_INTEGER)
+        {
+            Some(depth) => Some(depth),
+            None => {
+                validation.invalidate();
+                None
+            }
+        },
+    };
+    let read = file_system
+        .get("read")
+        .and_then(|value| parse_permission_paths(value, validation));
+    let write = file_system
+        .get("write")
+        .and_then(|value| parse_permission_paths(value, validation));
+    validation.non_empty |= entries.as_ref().is_some_and(|entries| !entries.is_empty())
+        || read.as_ref().is_some_and(|paths| !paths.is_empty())
+        || write.as_ref().is_some_and(|paths| !paths.is_empty());
+    Some(PermissionFileSystemDisplay {
+        entries,
+        glob_scan_max_depth,
+        read,
+        write,
+    })
+}
+
+fn parse_permission_paths(
+    value: &Value,
+    validation: &mut PermissionDisplayValidation,
+) -> Option<Vec<String>> {
+    if value.is_null() {
+        return None;
+    }
+    let Some(paths) = value.as_array() else {
+        validation.invalidate();
+        return None;
+    };
+    Some(
+        paths
+            .iter()
+            .filter_map(|path| permission_text(path, validation))
+            .collect(),
+    )
+}
+
+fn parse_file_system_entries(
+    value: &Value,
+    validation: &mut PermissionDisplayValidation,
+) -> Option<Vec<PermissionFileSystemEntryDisplay>> {
+    if value.is_null() {
+        return None;
+    }
+    let Some(entries) = value.as_array() else {
+        validation.invalidate();
+        return None;
+    };
+    Some(
+        entries
+            .iter()
+            .filter_map(|entry| parse_file_system_entry(entry, validation))
+            .collect(),
+    )
+}
+
+fn parse_file_system_entry(
+    value: &Value,
+    validation: &mut PermissionDisplayValidation,
+) -> Option<PermissionFileSystemEntryDisplay> {
+    let Some(entry) = value.as_object() else {
+        validation.invalidate();
+        return None;
+    };
+    if !has_only_keys(entry, &["access", "path"]) {
+        validation.invalidate();
+    }
+    let access = match entry.get("access").and_then(Value::as_str) {
+        Some("read") => Some(PermissionAccessDisplay::Read),
+        Some("write") => Some(PermissionAccessDisplay::Write),
+        Some("deny") => Some(PermissionAccessDisplay::Deny),
+        _ => {
+            validation.invalidate();
+            None
+        }
+    };
+    let path = match entry.get("path") {
+        Some(path) => parse_permission_path(path, validation),
+        None => {
+            validation.invalidate();
+            None
+        }
+    };
+    match (access, path) {
+        (Some(access), Some(path)) => Some(PermissionFileSystemEntryDisplay { access, path }),
+        _ => None,
+    }
+}
+
+fn parse_permission_path(
+    value: &Value,
+    validation: &mut PermissionDisplayValidation,
+) -> Option<PermissionPathDisplay> {
+    let Some(path) = value.as_object() else {
+        validation.invalidate();
+        return None;
+    };
+    match path.get("type").and_then(Value::as_str) {
+        Some("path") => {
+            if !has_only_keys(path, &["type", "path"]) {
+                validation.invalidate();
+            }
+            match path.get("path") {
+                Some(path) => permission_text(path, validation)
+                    .map(|path| PermissionPathDisplay::Path { path }),
+                None => {
+                    validation.invalidate();
+                    None
+                }
+            }
+        }
+        Some("glob_pattern") => {
+            if !has_only_keys(path, &["type", "pattern"]) {
+                validation.invalidate();
+            }
+            match path.get("pattern") {
+                Some(pattern) => permission_text(pattern, validation)
+                    .map(|pattern| PermissionPathDisplay::GlobPattern { pattern }),
+                None => {
+                    validation.invalidate();
+                    None
+                }
+            }
+        }
+        Some("special") => {
+            if !has_only_keys(path, &["type", "value"]) {
+                validation.invalidate();
+            }
+            match path.get("value") {
+                Some(value) => parse_special_path(value, validation)
+                    .map(|value| PermissionPathDisplay::Special { value }),
+                None => {
+                    validation.invalidate();
+                    None
+                }
+            }
+        }
+        _ => {
+            validation.invalidate();
+            None
+        }
+    }
+}
+
+fn parse_special_path(
+    value: &Value,
+    validation: &mut PermissionDisplayValidation,
+) -> Option<PermissionSpecialPathDisplay> {
+    let Some(special) = value.as_object() else {
+        validation.invalidate();
+        return None;
+    };
+    match special.get("kind").and_then(Value::as_str) {
+        Some("root") => exact_special(
+            special,
+            &["kind"],
+            PermissionSpecialPathDisplay::Root,
+            validation,
+        ),
+        Some("minimal") => exact_special(
+            special,
+            &["kind"],
+            PermissionSpecialPathDisplay::Minimal,
+            validation,
+        ),
+        Some("tmpdir") => exact_special(
+            special,
+            &["kind"],
+            PermissionSpecialPathDisplay::Tmpdir,
+            validation,
+        ),
+        Some("slash_tmp") => exact_special(
+            special,
+            &["kind"],
+            PermissionSpecialPathDisplay::SlashTmp,
+            validation,
+        ),
+        Some("project_roots") => {
+            if !has_only_keys(special, &["kind", "subpath"]) {
+                validation.invalidate();
+            }
+            optional_permission_text(special.get("subpath"), validation)
+                .map(|subpath| PermissionSpecialPathDisplay::ProjectRoots { subpath })
+        }
+        Some("unknown") => {
+            if !has_only_keys(special, &["kind", "path", "subpath"]) {
+                validation.invalidate();
+            }
+            let path = match special.get("path") {
+                Some(path) => permission_text(path, validation),
+                None => {
+                    validation.invalidate();
+                    None
+                }
+            };
+            let subpath = optional_permission_text(special.get("subpath"), validation);
+            path.zip(subpath)
+                .map(|(path, subpath)| PermissionSpecialPathDisplay::Unknown { path, subpath })
+        }
+        _ => {
+            validation.invalidate();
+            None
+        }
+    }
+}
+
+fn exact_special(
+    special: &Map<String, Value>,
+    keys: &[&str],
+    display: PermissionSpecialPathDisplay,
+    validation: &mut PermissionDisplayValidation,
+) -> Option<PermissionSpecialPathDisplay> {
+    if !has_only_keys(special, keys) {
+        validation.invalidate();
+    }
+    Some(display)
+}
+
+fn optional_permission_text(
+    value: Option<&Value>,
+    validation: &mut PermissionDisplayValidation,
+) -> Option<Option<String>> {
+    match value {
+        None | Some(Value::Null) => Some(None),
+        Some(value) => permission_text(value, validation).map(Some),
+    }
+}
+
+fn permission_text(value: &Value, validation: &mut PermissionDisplayValidation) -> Option<String> {
+    let Some(text) = value.as_str() else {
+        validation.invalidate();
+        return None;
+    };
+    if text.is_empty() {
+        validation.invalidate();
+    }
+    let redacted = redact_protocol_text(text);
+    if redacted != text {
+        validation.invalidate();
+    }
+    Some(redacted)
+}
+
+fn has_only_keys(object: &Map<String, Value>, allowed: &[&str]) -> bool {
+    object.keys().all(|key| allowed.contains(&key.as_str()))
 }
 
 #[cfg(test)]
@@ -517,11 +1060,54 @@ mod tests {
             "threadId": "thread-1",
             "turnId": "turn-1",
             "itemId": "item-1",
+            "cwd": "/tmp/project",
             "permissions": {
                 "network": { "enabled": true },
-                "fileSystem": { "read": ["/tmp/read"], "write": ["/tmp/write"] }
+                "fileSystem": {
+                    "entries": [
+                        {
+                            "access": "write",
+                            "path": { "type": "path", "path": "/tmp/generated" }
+                        },
+                        {
+                            "access": "read",
+                            "path": {
+                                "type": "glob_pattern",
+                                "pattern": "/tmp/project/**/*.rs"
+                            }
+                        },
+                        {
+                            "access": "deny",
+                            "path": {
+                                "type": "special",
+                                "value": {
+                                    "kind": "project_roots",
+                                    "subpath": ".git"
+                                }
+                            }
+                        }
+                    ],
+                    "globScanMaxDepth": 12,
+                    "read": ["/tmp/read"],
+                    "write": ["/tmp/write"]
+                }
             }
         })
+    }
+
+    fn permission_input(
+        request_id: CodeRequestId,
+        intent: CodePermissionIntent,
+        scope: CodePermissionScope,
+    ) -> CodeApprovalResponseInput {
+        CodeApprovalResponseInput {
+            runtime_generation: 1,
+            request_id,
+            scope: binding_scope(),
+            thread_id: "thread-1".to_string(),
+            turn_id: "turn-1".to_string(),
+            response: CodeApprovalResponse::Permissions { intent, scope },
+        }
     }
 
     #[test]
@@ -546,35 +1132,200 @@ mod tests {
     }
 
     #[test]
-    fn permission_grants_cannot_exceed_the_requested_subset() -> Result<(), String> {
+    fn permission_event_exposes_only_deterministic_redacted_display() -> Result<(), String> {
         let store = PendingApprovalStore::default();
         store.reset(1);
+        let event = store
+            .insert_request(
+                1,
+                json!(9),
+                "item/permissions/requestApproval",
+                Some(permission_request()),
+            )?
+            .ok_or_else(|| "permission request was not recognized".to_string())?;
+        let request = &event.payload["request"];
+        assert!(request.get("permissions").is_none());
+        assert_eq!(request["permissionDisplay"]["grantable"], true);
+        assert_eq!(request["permissionDisplay"]["network"]["enabled"], true);
+        assert_eq!(
+            request["permissionDisplay"]["fileSystem"]["entries"][0],
+            json!({
+                "access": "write",
+                "path": { "type": "path", "path": "/tmp/generated" }
+            })
+        );
+        assert_eq!(
+            request["permissionDisplay"]["fileSystem"]["entries"][1],
+            json!({
+                "access": "read",
+                "path": {
+                    "type": "globPattern",
+                    "pattern": "/tmp/project/**/*.rs"
+                }
+            })
+        );
+        assert_eq!(
+            request["permissionDisplay"]["fileSystem"]["entries"][2],
+            json!({
+                "access": "deny",
+                "path": {
+                    "type": "special",
+                    "value": { "kind": "project_roots", "subpath": ".git" }
+                }
+            })
+        );
+        assert_eq!(
+            request["permissionDisplay"]["fileSystem"]["globScanMaxDepth"],
+            12
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn permission_grant_uses_whole_raw_request_and_canonical_turn_flags() -> Result<(), String> {
+        let store = PendingApprovalStore::default();
+        store.reset(1);
+        let request = permission_request();
+        let requested_permissions = request["permissions"].clone();
         store.insert_request(
             1,
             json!(9),
             "item/permissions/requestApproval",
-            Some(permission_request()),
+            Some(request),
         )?;
 
-        let response = CodeApprovalResponseInput {
-            runtime_generation: 1,
-            request_id: CodeRequestId::Number(9),
-            scope: binding_scope(),
-            thread_id: "thread-1".to_string(),
-            turn_id: "turn-1".to_string(),
-            response: CodeApprovalResponse::Permissions {
-                permissions: json!({ "fileSystem": { "write": ["/tmp/not-requested"] } }),
-                scope: CodePermissionScope::Turn,
-                strict_auto_review: false,
-            },
-        };
-        assert!(store.reserve_response(&response).is_err());
+        let response = permission_input(
+            CodeRequestId::Number(9),
+            CodePermissionIntent::Grant,
+            CodePermissionScope::Turn,
+        );
+        let reservation = store.reserve_response(&response)?;
+        let (_, result) = reservation.wire_response();
+        assert_eq!(result["permissions"], requested_permissions);
+        assert_eq!(result["scope"], "turn");
+        assert_eq!(result["strictAutoReview"], true);
         assert_eq!(store.len(), 1);
         Ok(())
     }
 
     #[test]
-    fn approval_json_is_strict_and_maps_strict_auto_review() -> Result<(), String> {
+    fn permission_session_and_decline_results_are_canonical() -> Result<(), String> {
+        let store = PendingApprovalStore::default();
+        store.reset(1);
+        let request = permission_request();
+        let requested_permissions = request["permissions"].clone();
+        store.insert_request(
+            1,
+            json!(10),
+            "item/permissions/requestApproval",
+            Some(request),
+        )?;
+        let grant = permission_input(
+            CodeRequestId::Number(10),
+            CodePermissionIntent::Grant,
+            CodePermissionScope::Session,
+        );
+        let reservation = store.reserve_response(&grant)?;
+        let (_, result) = reservation.wire_response();
+        assert_eq!(result["permissions"], requested_permissions);
+        assert_eq!(result["scope"], "session");
+        assert_eq!(result["strictAutoReview"], false);
+        store.commit_response(&reservation)?;
+
+        store.insert_request(
+            1,
+            json!(11),
+            "item/permissions/requestApproval",
+            Some(permission_request()),
+        )?;
+        let decline = permission_input(
+            CodeRequestId::Number(11),
+            CodePermissionIntent::Decline,
+            CodePermissionScope::Session,
+        );
+        let reservation = store.reserve_response(&decline)?;
+        let (_, result) = reservation.wire_response();
+        assert_eq!(
+            result,
+            json!({
+                "permissions": {},
+                "scope": "turn",
+                "strictAutoReview": false
+            })
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn malformed_empty_or_inaccurately_redacted_permissions_cannot_be_granted() -> Result<(), String>
+    {
+        for (index, permissions) in [
+            json!({}),
+            json!({ "futurePermission": { "enabled": true } }),
+            json!({ "fileSystem": { "read": ["/tmp/sk-project-secret"] } }),
+            json!({
+                "fileSystem": {
+                    "entries": [{
+                        "access": "write",
+                        "path": { "type": "future", "path": "/tmp/write" }
+                    }]
+                }
+            }),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let store = PendingApprovalStore::default();
+            store.reset(1);
+            let request_id = CodeRequestId::Number(index as u64);
+            let event = store
+                .insert_request(
+                    1,
+                    request_id.to_value(),
+                    "item/permissions/requestApproval",
+                    Some(json!({
+                        "threadId": "thread-1",
+                        "turnId": "turn-1",
+                        "itemId": "item-1",
+                        "permissions": permissions
+                    })),
+                )?
+                .ok_or_else(|| "permission request was not recognized".to_string())?;
+            assert_eq!(
+                event.payload["request"]["permissionDisplay"]["grantable"],
+                false
+            );
+            if index == 2 {
+                let public_payload = event.payload.to_string();
+                assert!(!public_payload.contains("sk-project-secret"));
+                assert!(public_payload.contains("[REDACTED]"));
+            }
+            assert!(store
+                .reserve_response(&permission_input(
+                    request_id.clone(),
+                    CodePermissionIntent::Grant,
+                    CodePermissionScope::Turn,
+                ))
+                .is_err());
+            let decline = store.reserve_response(&permission_input(
+                request_id,
+                CodePermissionIntent::Decline,
+                CodePermissionScope::Session,
+            ))?;
+            assert_eq!(
+                decline.wire_response().1,
+                json!({
+                    "permissions": {},
+                    "scope": "turn",
+                    "strictAutoReview": false
+                })
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn approval_json_is_strict_and_contains_only_permission_intent() -> Result<(), String> {
         let input: CodeApprovalResponseInput = serde_json::from_value(json!({
             "runtimeGeneration": 7,
             "requestId": "approval-1",
@@ -583,18 +1334,18 @@ mod tests {
             "turnId": "turn-1",
             "response": {
                 "type": "permissions",
-                "permissions": { "network": { "enabled": true } },
-                "scope": "turn",
-                "strictAutoReview": true
+                "intent": "grant",
+                "scope": "turn"
             }
         }))
         .map_err(|error| error.to_string())?;
 
         assert!(input.approves_execution());
         match input.response {
-            CodeApprovalResponse::Permissions {
-                strict_auto_review, ..
-            } => assert!(strict_auto_review),
+            CodeApprovalResponse::Permissions { intent, scope } => {
+                assert_eq!(intent, CodePermissionIntent::Grant);
+                assert_eq!(scope, CodePermissionScope::Turn);
+            }
             CodeApprovalResponse::Decision { .. } => {
                 return Err("expected a permission response".to_string());
             }
@@ -620,7 +1371,14 @@ mod tests {
             "type": "permissions",
             "permissions": {},
             "scope": "turn",
-            "strict_auto_review": true
+            "intent": "grant"
+        }))
+        .is_err());
+        assert!(serde_json::from_value::<CodeApprovalResponse>(json!({
+            "type": "permissions",
+            "intent": "grant",
+            "scope": "turn",
+            "strictAutoReview": true
         }))
         .is_err());
         Ok(())
@@ -637,10 +1395,14 @@ mod tests {
         for decision in [CodeApprovalDecision::Decline, CodeApprovalDecision::Cancel] {
             assert!(!CodeApprovalResponse::Decision { decision }.approves_execution());
         }
-        assert!(CodeApprovalResponse::Permissions {
-            permissions: json!({}),
+        assert!(!CodeApprovalResponse::Permissions {
+            intent: CodePermissionIntent::Decline,
             scope: CodePermissionScope::Turn,
-            strict_auto_review: false,
+        }
+        .approves_execution());
+        assert!(CodeApprovalResponse::Permissions {
+            intent: CodePermissionIntent::Grant,
+            scope: CodePermissionScope::Turn,
         }
         .approves_execution());
     }
@@ -661,6 +1423,47 @@ mod tests {
         store.commit_response(&retry)?;
         assert_eq!(store.len(), 0);
         assert!(store.reserve_response(&input).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn checkpoint_marks_reserved_approval_non_respondable_until_restore() -> Result<(), String> {
+        let store = PendingApprovalStore::default();
+        store.reset(1);
+        insert_file_approval(&store, 1)?;
+        let pending = store.checkpoint_events(1)?;
+        assert_eq!(pending.len(), 1);
+        assert!(pending[0].1);
+
+        let reservation = store.reserve_response(&decision_input(1))?;
+        let reserved = store.checkpoint_events(1)?;
+        assert_eq!(reserved.len(), 1);
+        assert!(!reserved[0].1);
+
+        store.restore_response(&reservation)?;
+        let restored = store.checkpoint_events(1)?;
+        assert_eq!(restored.len(), 1);
+        assert!(restored[0].1);
+        Ok(())
+    }
+
+    #[test]
+    fn exact_thread_lookup_includes_pending_and_reserved_current_generation() -> Result<(), String>
+    {
+        let store = PendingApprovalStore::default();
+        store.reset(1);
+        drop(store.lock_without_thread_approval(1, "thread-1")?);
+        insert_file_approval(&store, 1)?;
+        assert!(store.has_for_thread(1, "thread-1")?);
+        assert!(store.lock_without_thread_approval(1, "thread-1").is_err());
+        assert!(!store.has_for_thread(1, "thread-2")?);
+        assert!(store.has_for_thread(2, "thread-1").is_err());
+
+        let reservation = store.reserve_response(&decision_input(1))?;
+        assert!(store.has_for_thread(1, "thread-1")?);
+        assert!(store.lock_without_thread_approval(1, "thread-1").is_err());
+        store.commit_response(&reservation)?;
+        assert!(!store.has_for_thread(1, "thread-1")?);
         Ok(())
     }
 

@@ -37,14 +37,11 @@ mod templates;
 #[cfg(target_os = "macos")]
 mod tray_menu;
 
-/// Dispatch the private, descriptor-bound Git helper before Tauri starts.
-///
-/// Normal launches return `Ok(false)`. A helper launch either replaces the
-/// process with Git or returns an error; the boolean keeps the startup contract
-/// explicit if a platform-specific helper ever completes without replacement.
-#[cfg(unix)]
-pub fn run_code_pinned_git_helper_if_requested() -> Result<bool, String> {
-    code_workspace::run_pinned_git_helper_if_requested()
+/// Enter the mutually authenticated embedded Git XPC service before Tauri
+/// initializes when launchd starts the nested helper executable.
+#[cfg(target_os = "macos")]
+pub fn run_code_git_xpc_service_if_requested() -> Result<bool, String> {
+    code_workspace::macos_git_xpc::run_service_if_requested()
 }
 mod util;
 #[cfg(target_os = "linux")]
@@ -689,18 +686,37 @@ pub fn run() {
             code_runtime_stop,
             code_runtime_status,
             code_runtime_events,
+            code_models_list,
+            code_model_selection_set,
+            code_terminal_open,
+            code_terminal_resize,
+            code_terminal_stdin,
+            code_terminal_terminate,
             code_repository_inspect,
             code_worktree_prepare,
             code_worktree_status,
+            code_worktrees_list,
+            code_worktree_remove,
             code_thread_preparations_list,
             code_threads_list,
+            code_thread_archive,
+            code_thread_unarchive,
+            code_thread_rename,
+            code_thread_changes,
             code_thread_start,
+            code_thread_fork,
             code_thread_binding_recover,
             code_thread_resume,
             code_turn_start,
             code_turn_steer,
             code_turn_interrupt,
             code_approval_respond,
+            code_thread_git_status,
+            code_thread_git_stage,
+            code_thread_git_unstage,
+            code_thread_git_commit,
+            code_thread_git_reconcile,
+            code_thread_git_acknowledge,
             get_builderlab_nostr_identity,
             bind_builderlab_nostr_identity,
             delete_builderlab_nostr_identity,
@@ -993,11 +1009,7 @@ pub fn run() {
         } if label == "main" => {
             // Keep the webview alive so Buzz can be reopened from its tray menu.
             api.prevent_close();
-            if let Some(window) = app_handle.get_webview_window("main") {
-                if let Err(error) = window.hide() {
-                    eprintln!("buzz-desktop: failed to hide main window: {error}");
-                }
-            }
+            shutdown::hide_main_window_for_tray(app_handle);
         }
         RunEvent::ExitRequested { code, .. } => {
             if is_restart_request(code) {

@@ -3,12 +3,16 @@ use std::sync::OnceLock;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 
-use super::bindings::{CodeExecutionMode, CodeThreadBinding, CodeThreadBindingScope};
+use super::bindings::{
+    CodeExecutionMode, CodeThreadBinding, CodeThreadBindingScope, CodeThreadLifecycleStatus,
+};
 use super::worktrees::{CodeWorktreePrepareInput, CodeWorktreePrepareResult};
 
 const MAX_PROMPT_BYTES: usize = 1024 * 1024;
 const MAX_ID_BYTES: usize = 512;
 const MAX_CURSOR_BYTES: usize = 16 * 1024;
+const MAX_THREAD_NAME_SCALARS: usize = 128;
+const MAX_THREAD_NAME_BYTES: usize = 512;
 pub(crate) const CODE_RECOVERY_THREAD_PAGE_LIMIT: u32 = 100;
 const CODE_THREAD_SOURCE_PREFIX: &str = "schoolx-code/";
 
@@ -98,6 +102,35 @@ pub(crate) struct CodeWorkspaceEventDraft {
     pub payload: Value,
 }
 
+/// One active turn captured at an exact runtime event watermark.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodeActiveTurnCheckpoint {
+    pub thread_id: String,
+    pub turn_id: String,
+    pub status: String,
+    pub started_sequence: u64,
+}
+
+/// One pending native approval captured at an exact runtime event watermark.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodeApprovalCheckpoint {
+    pub event: CodeWorkspaceEvent,
+    /// False only while native has reserved the response for an in-flight write.
+    pub respondable: bool,
+}
+
+/// Authoritative transient runtime state paired with one replay watermark.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodeEventCheckpoint {
+    pub runtime_generation: u64,
+    pub sequence_watermark: u64,
+    pub active_turns: Vec<CodeActiveTurnCheckpoint>,
+    pub pending_approvals: Vec<CodeApprovalCheckpoint>,
+}
+
 /// Replay snapshot for a frontend listener that was detached temporarily.
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -105,7 +138,30 @@ pub struct CodeEventBacklog {
     pub runtime_generation: u64,
     pub latest_sequence: u64,
     pub truncated: bool,
+    pub checkpoint: Option<CodeEventCheckpoint>,
     pub events: Vec<CodeWorkspaceEvent>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct CodeRuntimeActiveTurnCheckpoint {
+    pub(crate) thread_id: String,
+    pub(crate) turn_id: String,
+    pub(crate) status: String,
+    pub(crate) started_sequence: u64,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct CodeRuntimeApprovalCheckpoint {
+    pub(crate) event: CodeRuntimeEvent,
+    pub(crate) respondable: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct CodeRuntimeEventCheckpoint {
+    pub(crate) runtime_generation: u64,
+    pub(crate) sequence_watermark: u64,
+    pub(crate) active_turns: Vec<CodeRuntimeActiveTurnCheckpoint>,
+    pub(crate) pending_approvals: Vec<CodeRuntimeApprovalCheckpoint>,
 }
 
 /// Runtime replay snapshot before binding-scope filtering and enrichment.
@@ -114,6 +170,7 @@ pub(crate) struct CodeRuntimeEventBacklog {
     pub(crate) runtime_generation: u64,
     pub(crate) latest_sequence: u64,
     pub(crate) truncated: bool,
+    pub(crate) checkpoint: Option<CodeRuntimeEventCheckpoint>,
     pub(crate) events: Vec<CodeRuntimeEvent>,
 }
 
@@ -152,6 +209,43 @@ pub(crate) fn code_thread_source(preparation_id: &str) -> Result<String, String>
     let source = format!("{CODE_THREAD_SOURCE_PREFIX}{preparation_id}");
     validate_id("thread source", &source)?;
     Ok(source)
+}
+
+/// Exact bound source accepted for a whole-history `thread/fork`.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CodeThreadForkInput {
+    /// Exact community/project/repository scope that owns the source binding.
+    pub scope: CodeThreadBindingScope,
+    /// Stable-active managed source whose complete history will be copied.
+    pub thread_id: String,
+}
+
+impl CodeThreadForkInput {
+    pub(crate) fn validate(&self) -> Result<(), String> {
+        self.scope.validate()?;
+        validate_id("fork source thread", &self.thread_id)?;
+        Ok(())
+    }
+
+    pub(crate) fn rpc_params(
+        &self,
+        workspace_root: &str,
+        preparation_id: &str,
+    ) -> Result<Value, String> {
+        self.validate()?;
+        if workspace_root.is_empty() {
+            return Err("SchoolX Code fork destination root cannot be empty".to_string());
+        }
+        let thread_source = code_thread_source(preparation_id)?;
+        Ok(Value::Object(Map::from_iter([
+            ("threadId".to_string(), json!(self.thread_id)),
+            ("cwd".to_string(), json!(workspace_root)),
+            ("approvalPolicy".to_string(), json!("on-request")),
+            ("sandbox".to_string(), json!("workspace-write")),
+            ("threadSource".to_string(), json!(thread_source)),
+        ])))
+    }
 }
 
 /// Scope plus Git selection used by the native worktree preparation command.
@@ -198,15 +292,15 @@ pub struct CodeThreadPreparationListInput {
     pub scope: CodeThreadBindingScope,
 }
 
-/// Explicit reconciliation input for an ambiguous or failed binding commit.
+/// Explicit continuation or reconciliation input for an unfinished binding.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CodeThreadBindingRecoverInput {
-    /// Exact scope that owns the durable `starting` preparation.
+    /// Exact scope that owns the durable preparation.
     pub scope: CodeThreadBindingScope,
-    /// Opaque preparation UUID returned before `thread/start`.
+    /// Opaque preparation UUID returned before `thread/start` or `thread/fork`.
     pub preparation_id: String,
-    /// Optional model override forwarded while resuming the orphan thread.
+    /// Optional model override forwarded only for root-thread recovery.
     #[serde(default)]
     pub model: Option<String>,
 }
@@ -254,6 +348,16 @@ impl CodeThreadStartError {
             execution_root,
         }
     }
+
+    pub(crate) fn preserved_root(code: &str, message: String, execution_root: String) -> Self {
+        Self {
+            code: code.to_string(),
+            message,
+            preparation_id: None,
+            thread_id: None,
+            execution_root: Some(execution_root),
+        }
+    }
 }
 
 /// Parameters for reconnecting a bound Codex thread in its persisted scope.
@@ -286,6 +390,101 @@ impl CodeThreadResumeInput {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CodeThreadListInput {
     pub scope: CodeThreadBindingScope,
+}
+
+/// Exact bound thread and user-facing title accepted by the native rename gate.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CodeThreadRenameInput {
+    /// Community, project, and repository coordinate that must own the thread.
+    pub scope: CodeThreadBindingScope,
+    /// Opaque Codex thread identifier within the exact binding scope.
+    pub thread_id: String,
+    /// Trimmed user-facing title forwarded to Codex without path authority.
+    pub name: String,
+}
+
+impl CodeThreadRenameInput {
+    pub(crate) fn validate(&self) -> Result<(), String> {
+        self.scope.validate()?;
+        validate_id("thread", &self.thread_id)?;
+        validate_thread_name(&self.name)
+    }
+
+    pub(crate) fn rpc_params(&self) -> Result<Value, String> {
+        self.validate()?;
+        Ok(json!({
+            "threadId": self.thread_id,
+            "name": self.name,
+        }))
+    }
+}
+
+/// Exact bound thread whose persisted execution root should be inspected for
+/// current Git changes.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CodeThreadChangesInput {
+    /// Community, project, and native repository identity of the binding.
+    pub scope: CodeThreadBindingScope,
+    /// Opaque Codex thread identifier within the exact binding scope.
+    pub thread_id: String,
+}
+
+/// Base-relative Git status for one SchoolX Code change.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CodeThreadChangeStatus {
+    /// The path did not exist in the persisted base tree.
+    Added,
+    /// The path content or executable mode changed.
+    Modified,
+    /// The path was removed from the current execution root.
+    Deleted,
+    /// The Git object type changed, for example from a regular file to a symlink.
+    TypeChanged,
+    /// Git reports an unresolved index entry for the path.
+    Unmerged,
+    /// The path is not tracked and is not excluded by Git ignore rules.
+    Untracked,
+}
+
+/// One bounded, read-only file diff in a SchoolX Code execution root.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodeThreadChangedFile {
+    /// Repository-relative path reported by Git.
+    pub path: String,
+    /// Base-relative Git status from the native bounded inventory.
+    pub status: CodeThreadChangeStatus,
+    /// Whether Git classified this path as binary rather than textual.
+    pub binary: bool,
+    /// Saturating count of added lines before patch truncation.
+    pub additions: usize,
+    /// Saturating count of deleted lines before patch truncation.
+    pub deletions: usize,
+    /// Bounded unified diff suitable for the existing read-only renderer.
+    pub patch: String,
+    /// Whether the native reader truncated this file's patch.
+    pub truncated: bool,
+}
+
+/// Current execution-root changes relative to the binding's persisted base.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodeThreadChanges {
+    /// Bounded changed files in stable path order.
+    pub files: Vec<CodeThreadChangedFile>,
+    /// Total distinct changed paths before the response file limit is applied.
+    pub total_files: usize,
+    /// Whether `files` omits paths because the native file limit was reached.
+    pub files_truncated: bool,
+    /// Saturating additions total for the returned file subset.
+    pub additions: usize,
+    /// Saturating deletions total for the returned file subset.
+    pub deletions: usize,
+    /// Commit body slot retained for compatibility with the project diff UI.
+    pub commit_body: Option<String>,
 }
 
 /// Narrow thread metadata exposed to the frontend.
@@ -322,6 +521,8 @@ pub struct CodeTurnSnapshot {
 #[serde(rename_all = "camelCase")]
 pub struct CodeBoundThreadSummary {
     pub binding: CodeThreadBinding,
+    /// Public five-state lifecycle projection stored beside the frozen binding.
+    pub lifecycle: CodeThreadLifecycleStatus,
     /// App-server metadata when both the execution root and thread are available.
     pub thread: Option<CodeThreadSummary>,
     /// Per-binding recovery detail; one unavailable binding does not hide healthy peers.
@@ -335,6 +536,22 @@ pub struct CodeBoundThreadOpenResult {
     pub binding: CodeThreadBinding,
     pub thread: CodeThreadSummary,
     pub instruction_sources: Vec<String>,
+    /// App-server-authoritative model after start, resume, or fork.
+    pub model: String,
+    /// App-server-authoritative effort when Codex reports one.
+    pub reasoning_effort: Option<String>,
+}
+
+/// Stable result of an archive or unarchive lifecycle mutation.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodeThreadLifecycleMutationResult {
+    /// Exact persisted native binding after lifecycle reconciliation.
+    pub binding: CodeThreadBinding,
+    /// Public five-state lifecycle projection; operation ids stay native-only.
+    pub lifecycle: CodeThreadLifecycleStatus,
+    /// Normalized app-server thread metadata when the resulting state is active.
+    pub thread: Option<CodeThreadSummary>,
 }
 
 /// One page of project-scoped app-server threads.
@@ -364,6 +581,7 @@ impl CodeTurnStartInput {
         self.scope.validate()?;
         validate_id("thread", &self.thread_id)?;
         validate_prompt(&self.prompt)?;
+        super::model_catalog::turn_selection(self.model.as_deref(), self.effort.as_deref())?;
         let mut params = Map::from_iter([
             ("threadId".to_string(), json!(self.thread_id)),
             (
@@ -452,7 +670,7 @@ struct WireThread {
     #[serde(default)]
     preview: Option<String>,
     #[serde(default)]
-    ephemeral: bool,
+    ephemeral: Option<bool>,
     #[serde(default)]
     model_provider: Option<String>,
     #[serde(default)]
@@ -465,6 +683,8 @@ struct WireThread {
     name: Option<String>,
     #[serde(default)]
     status: Option<Value>,
+    #[serde(default)]
+    source: Option<Value>,
     #[serde(default)]
     thread_source: Option<String>,
     #[serde(default)]
@@ -493,8 +713,13 @@ struct WireTurnSnapshot {
 #[serde(rename_all = "camelCase")]
 struct WireThreadOpenResult {
     thread: WireThread,
+    model: String,
+    #[serde(default)]
+    reasoning_effort: Option<String>,
     #[serde(default)]
     instruction_sources: Vec<String>,
+    #[serde(default)]
+    cwd: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -533,7 +758,12 @@ struct WireTurnSteerResult {
 pub(crate) struct CodeThreadRpcOpenResult {
     pub(crate) thread: CodeThreadSummary,
     pub(crate) instruction_sources: Vec<String>,
+    pub(crate) model: String,
+    pub(crate) reasoning_effort: Option<String>,
     pub(crate) thread_source: Option<String>,
+    pub(crate) session_source: Option<Value>,
+    pub(crate) response_cwd: Option<String>,
+    pub(crate) ephemeral_present: bool,
 }
 
 /// One app-server thread returned while reconciling a native start attempt.
@@ -546,6 +776,8 @@ pub(crate) struct CodeThreadRpcOpenResult {
 pub(crate) struct CodeRecoveryThread {
     pub(crate) thread: CodeThreadSummary,
     pub(crate) thread_source: Option<String>,
+    pub(crate) session_source: Option<Value>,
+    pub(crate) ephemeral_present: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -563,14 +795,25 @@ pub(crate) struct CodeLoadedThreadPage {
 pub(crate) fn parse_thread_open(value: Value) -> Result<CodeThreadRpcOpenResult, String> {
     let result: WireThreadOpenResult = serde_json::from_value(value)
         .map_err(|error| format!("invalid Codex thread response: {error}"))?;
+    validate_model_value("model", &result.model)?;
+    if let Some(reasoning_effort) = result.reasoning_effort.as_deref() {
+        validate_model_value("reasoning effort", reasoning_effort)?;
+    }
     let thread_source = result.thread.thread_source.clone();
+    let session_source = result.thread.source.clone();
+    let ephemeral_present = result.thread.ephemeral.is_some();
     if let Some(thread_source) = thread_source.as_deref() {
         validate_id("thread source", thread_source)?;
     }
     Ok(CodeThreadRpcOpenResult {
         thread: normalize_thread(result.thread)?,
         instruction_sources: result.instruction_sources,
+        model: result.model,
+        reasoning_effort: result.reasoning_effort,
         thread_source,
+        session_source,
+        response_cwd: result.cwd,
+        ephemeral_present,
     })
 }
 
@@ -614,12 +857,16 @@ pub(crate) fn parse_recovery_thread_list(value: Value) -> Result<CodeRecoveryThr
     let mut data = Vec::with_capacity(result.data.len());
     for thread in result.data {
         let thread_source = thread.thread_source.clone();
+        let session_source = thread.source.clone();
+        let ephemeral_present = thread.ephemeral.is_some();
         if let Some(thread_source) = thread_source.as_deref() {
             validate_id("thread source", thread_source)?;
         }
         data.push(CodeRecoveryThread {
             thread: normalize_thread(thread)?,
             thread_source,
+            session_source,
+            ephemeral_present,
         });
     }
     if let Some(cursor) = result.next_cursor.as_deref() {
@@ -639,12 +886,16 @@ pub(crate) fn parse_recovery_thread_read(value: Value) -> Result<CodeRecoveryThr
     let result: WireThreadReadResult = serde_json::from_value(value)
         .map_err(|error| format!("invalid Codex recovery thread response: {error}"))?;
     let thread_source = result.thread.thread_source.clone();
+    let session_source = result.thread.source.clone();
+    let ephemeral_present = result.thread.ephemeral.is_some();
     if let Some(thread_source) = thread_source.as_deref() {
         validate_id("thread source", thread_source)?;
     }
     Ok(CodeRecoveryThread {
         thread: normalize_thread(result.thread)?,
         thread_source,
+        session_source,
+        ephemeral_present,
     })
 }
 
@@ -681,6 +932,14 @@ pub(crate) fn parse_thread_read(value: Value) -> Result<CodeThreadSummary, Strin
     normalize_thread(result.thread)
 }
 
+/// Validate the exact empty result frozen for Codex 0.145 `thread/name/set`.
+pub(crate) fn parse_thread_name_set(value: Value) -> Result<(), String> {
+    match value.as_object() {
+        Some(result) if result.is_empty() => Ok(()),
+        _ => Err("invalid Codex thread name response: expected an empty object".to_string()),
+    }
+}
+
 fn normalize_thread(thread: WireThread) -> Result<CodeThreadSummary, String> {
     validate_id("thread", &thread.id)?;
     let mut turns = Vec::with_capacity(thread.turns.len());
@@ -699,7 +958,7 @@ fn normalize_thread(thread: WireThread) -> Result<CodeThreadSummary, String> {
         forked_from_id: thread.forked_from_id,
         parent_thread_id: thread.parent_thread_id,
         preview: thread.preview.map(|preview| redact_protocol_text(&preview)),
-        ephemeral: thread.ephemeral,
+        ephemeral: thread.ephemeral.unwrap_or(false),
         model_provider: thread.model_provider,
         created_at: thread.created_at,
         updated_at: thread.updated_at,
@@ -742,6 +1001,28 @@ pub(crate) fn normalize_notification(
         return Err(format!(
             "Codex `{method}` notification params must be an object"
         ));
+    }
+    if matches!(method, "thread/archived" | "thread/unarchived") {
+        let object = payload
+            .as_object()
+            .ok_or_else(|| format!("Codex `{method}` notification params must be an object"))?;
+        if object.len() != 1 || !object.contains_key("threadId") {
+            return Err(format!(
+                "Codex `{method}` notification must contain only `threadId`"
+            ));
+        }
+        let thread_id = object
+            .get("threadId")
+            .and_then(Value::as_str)
+            .ok_or_else(|| format!("Codex `{method}` notification has invalid `threadId`"))?;
+        validate_id("threadId", thread_id)?;
+        return Ok(Some(CodeWorkspaceEventDraft {
+            thread_id: Some(thread_id.to_string()),
+            turn_id: None,
+            item_id: None,
+            kind: method.to_string(),
+            payload: redact_protocol_value(payload),
+        }));
     }
     let thread_id = nested_id(&payload, "threadId", "thread")?;
     let turn_id = nested_id(&payload, "turnId", "turn")?;
@@ -786,7 +1067,12 @@ pub(crate) fn redact_protocol_text(text: &str) -> String {
             .collect()
     });
     let secret_refs = secrets.iter().map(String::as_str).collect::<Vec<_>>();
-    let mut redacted = crate::managed_agents::redact_secrets_with(text, &secret_refs);
+    redact_protocol_text_with_sensitive_values(text, &secret_refs)
+}
+
+/// Apply the protocol diagnostic scrubber with an explicit sensitive-value set.
+pub(crate) fn redact_protocol_text_with_sensitive_values(text: &str, secrets: &[&str]) -> String {
+    let mut redacted = crate::managed_agents::redact_secrets_with(text, secrets);
     for prefix in ["sk-"] {
         while let Some(position) = redacted.find(prefix) {
             let end = redacted[position..]
@@ -841,6 +1127,8 @@ fn is_supported_notification(method: &str) -> bool {
             | "thread/started"
             | "thread/status/changed"
             | "thread/closed"
+            | "thread/archived"
+            | "thread/unarchived"
             | "turn/started"
             | "turn/completed"
             | "turn/diff/updated"
@@ -895,6 +1183,26 @@ pub(crate) fn validate_id(label: &str, value: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn validate_thread_name(name: &str) -> Result<(), String> {
+    if name.is_empty() || name.trim() != name {
+        return Err("Codex thread name must be non-empty and trimmed".to_string());
+    }
+    if name.chars().count() > MAX_THREAD_NAME_SCALARS {
+        return Err(format!(
+            "Codex thread name exceeds the {MAX_THREAD_NAME_SCALARS}-character limit"
+        ));
+    }
+    if name.len() > MAX_THREAD_NAME_BYTES {
+        return Err(format!(
+            "Codex thread name exceeds the {MAX_THREAD_NAME_BYTES}-byte limit"
+        ));
+    }
+    if name.chars().any(char::is_control) {
+        return Err("Codex thread name cannot contain control characters".to_string());
+    }
+    Ok(())
+}
+
 fn validate_prompt(prompt: &str) -> Result<(), String> {
     if prompt.trim().is_empty() {
         return Err("SchoolX Code prompt cannot be empty".to_string());
@@ -923,7 +1231,20 @@ fn insert_optional_string(
     Ok(())
 }
 
-fn validate_cursor(cursor: &str) -> Result<(), String> {
+fn validate_model_value(label: &str, value: &str) -> Result<(), String> {
+    if value.is_empty()
+        || value.len() > MAX_ID_BYTES
+        || value.trim() != value
+        || value.chars().any(char::is_control)
+    {
+        return Err(format!(
+            "Codex {label} must be a trimmed, non-control string between 1 and {MAX_ID_BYTES} bytes"
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_cursor(cursor: &str) -> Result<(), String> {
     if cursor.is_empty()
         || cursor.len() > MAX_CURSOR_BYTES
         || cursor.trim() != cursor
@@ -979,6 +1300,52 @@ mod tests {
     }
 
     #[test]
+    fn thread_fork_uses_only_the_exact_non_experimental_fields() -> Result<(), String> {
+        let input = CodeThreadForkInput {
+            scope: scope(),
+            thread_id: "thread-source".to_string(),
+        };
+
+        let params = input.rpc_params(
+            "/native/fork-destination",
+            "67f11a1d-0274-4d40-9b0c-e406e51c64fb",
+        )?;
+
+        assert_eq!(
+            params,
+            json!({
+                "threadId": "thread-source",
+                "cwd": "/native/fork-destination",
+                "approvalPolicy": "on-request",
+                "sandbox": "workspace-write",
+                "threadSource": "schoolx-code/67f11a1d-0274-4d40-9b0c-e406e51c64fb"
+            })
+        );
+        for forbidden in [
+            "lastTurnId",
+            "serviceName",
+            "ephemeral",
+            "model",
+            "modelProvider",
+            "config",
+            "baseInstructions",
+            "developerInstructions",
+            "scope",
+            "workspaceRoot",
+        ] {
+            assert!(params.get(forbidden).is_none(), "unexpected {forbidden}");
+        }
+
+        let caller_field = serde_json::from_value::<CodeThreadForkInput>(json!({
+            "scope": scope(),
+            "threadId": "thread-source",
+            "lastTurnId": "caller-turn"
+        }));
+        assert!(caller_field.is_err());
+        Ok(())
+    }
+
+    #[test]
     fn thread_resume_uses_only_the_native_workspace_root_and_stable_fields() -> Result<(), String> {
         let input = CodeThreadResumeInput {
             scope: scope(),
@@ -1019,6 +1386,31 @@ mod tests {
         assert!(params.get("scope").is_none());
         assert!(params.get("workspaceRoot").is_none());
         assert!(params.get("runtimeWorkspaceRoots").is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn thread_open_preserves_nullable_reasoning_effort() -> Result<(), String> {
+        for response in [
+            json!({"thread": {"id": "thread-1"}, "model": "gpt-test"}),
+            json!({
+                "thread": {"id": "thread-1"},
+                "model": "gpt-test",
+                "reasoningEffort": null
+            }),
+        ] {
+            let opened = parse_thread_open(response)?;
+            assert_eq!(opened.model, "gpt-test");
+            assert_eq!(opened.reasoning_effort, None);
+        }
+
+        let opened = parse_thread_open(json!({
+            "thread": {"id": "thread-1"},
+            "model": "gpt-test",
+            "reasoningEffort": "xhigh"
+        }))?;
+        assert_eq!(opened.model, "gpt-test");
+        assert_eq!(opened.reasoning_effort.as_deref(), Some("xhigh"));
         Ok(())
     }
 
@@ -1164,6 +1556,18 @@ mod tests {
     }
 
     #[test]
+    fn redacts_injected_sensitive_env_values_without_mutating_process_env() {
+        let canary = "schoolx-arbitrary-sensitive-env-canary";
+        let redacted = redact_protocol_text_with_sensitive_values(
+            &format!("probe.error={canary} start.error={canary} status.lastError={canary}"),
+            &[canary],
+        );
+
+        assert!(!redacted.contains(canary));
+        assert_eq!(redacted.matches("[REDACTED]").count(), 3);
+    }
+
+    #[test]
     fn normalizes_delta_ids_and_redacts_known_secret_shapes() -> Result<(), String> {
         let event = normalize_notification(
             "item/agentMessage/delta",
@@ -1182,6 +1586,25 @@ mod tests {
         assert_eq!(event.item_id.as_deref(), Some("item-1"));
         assert_eq!(event.payload["delta"], "tokens [REDACTED] and [REDACTED]");
         assert_eq!(event.payload["accessToken"], "[REDACTED]");
+        Ok(())
+    }
+
+    #[test]
+    fn lifecycle_notifications_are_strict_refetch_signals() -> Result<(), String> {
+        for method in ["thread/archived", "thread/unarchived"] {
+            let event = normalize_notification(method, Some(json!({ "threadId": "thread-1" })))?
+                .ok_or_else(|| "expected a lifecycle notification".to_string())?;
+            assert_eq!(event.thread_id.as_deref(), Some("thread-1"));
+            assert!(event.turn_id.is_none());
+            assert!(event.item_id.is_none());
+            assert_eq!(event.kind, method);
+            assert!(normalize_notification(method, Some(json!({}))).is_err());
+            assert!(normalize_notification(
+                method,
+                Some(json!({ "threadId": "thread-1", "cwd": "/forged" }))
+            )
+            .is_err());
+        }
         Ok(())
     }
 

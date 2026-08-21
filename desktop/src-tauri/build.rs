@@ -3,6 +3,8 @@
 include!("src/commands/reconnect_hook_config.rs");
 
 use base64::Engine as _;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
 fn main() {
     println!("cargo:rerun-if-env-changed=BUZZ_RELAY_URL");
@@ -125,6 +127,10 @@ fn main() {
         );
     }
 
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
+        build_macos_git_xpc_bridge();
+    }
+
     tauri_build::try_build(
         tauri_build::Attributes::new().plugin(
             "websocket",
@@ -134,4 +140,146 @@ fn main() {
         ),
     )
     .expect("failed to build Tauri application");
+}
+
+fn build_macos_git_xpc_bridge() {
+    const BRIDGE_SOURCE: &str = "src/code_workspace/macos_git_xpc.rs";
+    const SWIFT_SOURCES: &[&str] = &[
+        "macos/SchoolXGitXpc.swift",
+        "macos/SchoolXGitXpcSession.swift",
+        "macos/SchoolXGitXpcMessages.swift",
+        "macos/SchoolXGitXpcService.swift",
+        "macos/SchoolXGitXpcLifecycle.swift",
+        "macos/SchoolXGitXpcSupport.swift",
+    ];
+    const LIBRARY_NAME: &str = "schoolx_git_xpc";
+
+    println!("cargo:rerun-if-changed={BRIDGE_SOURCE}");
+    for source in SWIFT_SOURCES {
+        println!("cargo:rerun-if-changed={source}");
+    }
+    println!("cargo:rerun-if-env-changed=MACOSX_DEPLOYMENT_TARGET");
+
+    let out_dir = required_path_env("OUT_DIR");
+    let target = required_env("TARGET");
+    let swift_target = match target.as_str() {
+        "aarch64-apple-darwin" => "arm64-apple-macosx11.0",
+        "x86_64-apple-darwin" => "x86_64-apple-macosx10.15",
+        other => panic!("unsupported macOS XPC bridge target {other}"),
+    };
+    let generated = out_dir.join("schoolx-git-xpc-generated");
+    swift_bridge_build::parse_bridges([BRIDGE_SOURCE])
+        .write_all_concatenated(&generated, LIBRARY_NAME);
+
+    let bridge_header = out_dir.join("schoolx-git-xpc-bridge.h");
+    let header = format!(
+        "#include \"{}\"\n#include \"{}\"\n",
+        generated.join("SwiftBridgeCore.h").display(),
+        generated
+            .join(LIBRARY_NAME)
+            .join(format!("{LIBRARY_NAME}.h"))
+            .display()
+    );
+    std::fs::write(&bridge_header, header)
+        .unwrap_or_else(|error| panic!("failed to write macOS XPC bridge header: {error}"));
+
+    let sdk = command_stdout(
+        Command::new("xcrun").args(["--sdk", "macosx", "--show-sdk-path"]),
+        "resolve the macOS SDK",
+    );
+    let sdk = sdk.trim();
+    if sdk.is_empty() {
+        panic!("xcrun returned an empty macOS SDK path");
+    }
+
+    let target_info = command_stdout(
+        Command::new("xcrun").args([
+            "--sdk",
+            "macosx",
+            "swiftc",
+            "-print-target-info",
+            "-target",
+            swift_target,
+            "-sdk",
+            sdk,
+        ]),
+        "read Swift target information",
+    );
+    let target_info: serde_json::Value = serde_json::from_str(&target_info)
+        .unwrap_or_else(|error| panic!("invalid swiftc target information: {error}"));
+    let runtime_paths = target_info
+        .pointer("/paths/runtimeLibraryPaths")
+        .and_then(serde_json::Value::as_array)
+        .unwrap_or_else(|| panic!("swiftc target information omitted runtimeLibraryPaths"));
+
+    let library = out_dir.join(format!("lib{LIBRARY_NAME}.a"));
+    let mut swiftc = Command::new("xcrun");
+    swiftc
+        .args([
+            "--sdk",
+            "macosx",
+            "swiftc",
+            "-emit-library",
+            "-static",
+            "-parse-as-library",
+            "-target",
+            swift_target,
+            "-sdk",
+            sdk,
+            "-module-name",
+            "SchoolXGitXpc",
+            "-import-objc-header",
+        ])
+        .arg(&bridge_header)
+        .args(SWIFT_SOURCES)
+        .arg(
+            generated
+                .join(LIBRARY_NAME)
+                .join(format!("{LIBRARY_NAME}.swift")),
+        )
+        .arg(generated.join("SwiftBridgeCore.swift"))
+        .arg("-o")
+        .arg(&library);
+    if std::env::var("PROFILE").as_deref() == Ok("release") {
+        swiftc.arg("-O");
+    }
+    let status = swiftc
+        .status()
+        .unwrap_or_else(|error| panic!("failed to start swiftc for macOS XPC bridge: {error}"));
+    if !status.success() {
+        panic!("swiftc failed while building the macOS XPC bridge");
+    }
+
+    println!("cargo:rustc-link-search=native={}", out_dir.display());
+    for path in runtime_paths {
+        let path = path
+            .as_str()
+            .unwrap_or_else(|| panic!("swiftc returned a non-string runtime library path"));
+        println!("cargo:rustc-link-search=native={path}");
+    }
+    println!("cargo:rustc-link-lib=static={LIBRARY_NAME}");
+    println!("cargo:rustc-link-lib=framework=Foundation");
+    println!("cargo:rustc-link-lib=framework=Security");
+}
+
+fn required_env(name: &str) -> String {
+    std::env::var(name).unwrap_or_else(|error| panic!("missing build environment {name}: {error}"))
+}
+
+fn required_path_env(name: &str) -> PathBuf {
+    Path::new(&required_env(name)).to_path_buf()
+}
+
+fn command_stdout(command: &mut Command, label: &str) -> String {
+    let output = command
+        .output()
+        .unwrap_or_else(|error| panic!("failed to {label}: {error}"));
+    if !output.status.success() {
+        panic!(
+            "failed to {label}: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    String::from_utf8(output.stdout)
+        .unwrap_or_else(|error| panic!("{label} returned non-UTF-8 output: {error}"))
 }

@@ -597,9 +597,37 @@ function projectLocalPrompts(
   threadId: string,
   prompts: readonly CodeTimelineLocalPrompt[],
 ): void {
+  const persistedPromptCounts = new Map<string, number>();
+  for (const row of accumulator.rows) {
+    if (
+      row.kind !== "user" ||
+      row.threadId !== threadId ||
+      row.turnId === null
+    ) {
+      continue;
+    }
+    const identity = JSON.stringify([row.turnId, row.text]);
+    persistedPromptCounts.set(
+      identity,
+      (persistedPromptCounts.get(identity) ?? 0) + 1,
+    );
+  }
+
   prompts.forEach((prompt, index) => {
     if (prompt.text.length === 0) return;
     const turnId = prompt.turnId ?? null;
+    if (turnId !== null) {
+      const identity = JSON.stringify([turnId, prompt.text]);
+      const persistedCount = persistedPromptCounts.get(identity) ?? 0;
+      if (persistedCount > 0) {
+        if (persistedCount === 1) {
+          persistedPromptCounts.delete(identity);
+        } else {
+          persistedPromptCounts.set(identity, persistedCount - 1);
+        }
+        return;
+      }
+    }
     const key = itemKey("user", turnId, prompt.id, `local:${index}`);
     upsertUser(
       accumulator,

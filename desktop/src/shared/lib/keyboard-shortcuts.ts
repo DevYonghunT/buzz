@@ -2,6 +2,7 @@ import { isMacPlatform } from "@/shared/lib/platform";
 
 export type ShortcutCategory =
   | "Navigation"
+  | "Code"
   | "Messages"
   | "Formatting"
   | "Zoom";
@@ -112,6 +113,16 @@ export const KEYBOARD_SHORTCUTS: KeyboardShortcut[] = [
     keys: "⇧Escape",
     keysWindows: "Shift+Escape",
     category: "Navigation",
+  },
+
+  // Code
+  {
+    id: "toggle-code-terminal",
+    label: "Toggle terminal",
+    description: "Show or hide the selected Code task terminal",
+    keys: "⌘J",
+    keysWindows: "Ctrl+J",
+    category: "Code",
   },
 
   // Zoom
@@ -228,6 +239,7 @@ export const KEYBOARD_SHORTCUTS: KeyboardShortcut[] = [
 
 const CATEGORY_ORDER: ShortcutCategory[] = [
   "Navigation",
+  "Code",
   "Messages",
   "Formatting",
   "Zoom",

@@ -117,8 +117,12 @@ jobs:
           ./scripts/bundle-sidecars.sh
       - name: Build macOS app (unsigned)
         # `--no-sign` is where release.yml stops before handing the bundle to
-        # Block's signing action. Stopping here is the whole difference.
+        # Block's signing action. The embedded Code Git XPC is still packaged,
+        # but its empty TeamIdentifier makes the runtime authority gate return
+        # unsupported before mutation in this unsigned tester build.
         run: cd desktop && pnpm tauri build --verbose --no-sign --config src-tauri/tauri.team.conf.json
+        env:
+          SCHOOLX_CODE_GIT_CARGO_LAYOUT: native
       - name: Locate DMG
         id: artifact
         run: |
@@ -190,6 +194,11 @@ jobs:
           ./scripts/bundle-sidecars.sh "$TARGET"
       - name: Build macOS app (unsigned)
         run: cd desktop && pnpm tauri build --verbose --no-sign --target "$TARGET" --config src-tauri/tauri.team.conf.json
+        # Keep the helper in the unsigned artifact for bundle parity. Runtime
+        # peer authentication rejects the missing TeamIdentifier before any
+        # Code Git mutation is attempted.
+        env:
+          SCHOOLX_CODE_GIT_CARGO_LAYOUT: target-triple
       - name: Locate DMG
         id: artifact
         run: |

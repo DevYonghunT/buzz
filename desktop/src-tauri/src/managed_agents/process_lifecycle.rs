@@ -3,7 +3,8 @@
 //! The Unix teardown uses `process_group(0)` + group signals (in `runtime.rs`).
 //! Windows has no process groups, so the harness's 24 agent workers + MCP
 //! servers are reaped two ways here:
-//!   - [`JobHandle`] / [`create_job_for_child`] — the in-process stop path. A
+//!   - [`JobHandle`] / [`create_kill_on_close_job_for_child`] — the in-process
+//!     stop path. A
 //!     Job Object owns the tree and `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` kills
 //!     it when the handle drops.
 //!   - [`taskkill_tree`] — the after-restart path, where only the PID survives
@@ -41,9 +42,9 @@ impl Drop for JobHandle {
 }
 
 /// Create a Job Object, assign `pid` to it, and configure it to kill the whole
-/// tree when the returned handle is dropped. Returns `None` on any failure so
-/// the caller can fall back to `Child::kill()` — a degraded teardown beats a
-/// failed spawn.
+/// tree when the returned handle is dropped. Returns `None` on any failure;
+/// callers choose whether their lifecycle can tolerate a leader-only fallback
+/// or must fail the spawn closed.
 ///
 /// Assignment happens immediately after spawn, on the same parent thread. The
 /// child (buzz-acp) does spawn its 24 workers before it connects to the relay,
@@ -58,7 +59,7 @@ impl Drop for JobHandle {
 /// regardless of child timing, but it requires raw `CreateProcessW`/`ResumeThread`
 /// (materially more unsafe Win32) to close a microsecond race, so it is
 /// deliberately not used here.
-fn create_job_for_child(pid: u32) -> Option<JobHandle> {
+pub(crate) fn create_kill_on_close_job_for_child(pid: u32) -> Option<JobHandle> {
     use std::ptr::null;
     use windows_sys::Win32::Foundation::{CloseHandle, FALSE};
     use windows_sys::Win32::System::JobObjects::{
@@ -139,7 +140,7 @@ pub fn finish_spawn(
     start_nonce: String,
     agent_name: &str,
 ) -> super::ManagedAgentProcess {
-    let job = create_job_for_child(child.id());
+    let job = create_kill_on_close_job_for_child(child.id());
     if job.is_none() {
         eprintln!(
             "buzz-desktop: failed to assign agent {agent_name} to a Job Object; \

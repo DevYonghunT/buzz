@@ -1,10 +1,4 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  GitBranch,
-  LoaderCircle,
-  PanelLeftClose,
-  PanelLeftOpen,
-} from "lucide-react";
 import * as React from "react";
 
 import {
@@ -13,6 +7,7 @@ import {
 } from "../api/codeWorkspace";
 import type {
   CodeBoundThreadOpenResult,
+  CodeModelSelection,
   CodeRepositoryDescriptor,
   CodeThreadBindingScope,
   CodeThreadPreparation,
@@ -22,10 +17,13 @@ import {
   type CodeTimelineLocalPrompt,
   projectCodeTimeline,
 } from "../lib/codeTimeline";
-import { codeThreadLabel, selectCodeThreadId } from "../lib/codeWorkspaceView";
+import {
+  codeThreadLabel,
+  codeThreadLifecycleCapabilities,
+  selectCodeThreadId,
+} from "../lib/codeWorkspaceView";
 import {
   selectCanRespondToCodeApproval,
-  selectCodeActiveTurns,
   selectCodePendingApprovals,
   selectCodeThreadEvents,
 } from "../state/codeSessionReducer";
@@ -35,11 +33,23 @@ import {
   codeThreadsQueryOptions,
 } from "../state/codeSessionQueries";
 import { useCodeSessionStore } from "../state/codeSessionStore";
-import { Button } from "@/shared/ui/button";
+import { useCodeModelSelection } from "../state/useCodeModelSelection";
+import {
+  type CodePendingTurn,
+  useCodeSelectedTurn,
+} from "../state/useCodeSelectedTurn";
+import { useCodeThreadLifecycleSync } from "../state/useCodeThreadLifecycleSync";
+import { useCodeThreadMutations } from "../state/useCodeThreadMutations";
+import { useCodeWorkspaceGitHandoff } from "../state/useCodeWorkspaceGitHandoff";
+import { CodeChangesPanel } from "./CodeChangesPanel";
 import { CodeComposer } from "./CodeComposer";
 import { CodeRuntimeStatus } from "./CodeRuntimeStatus";
+import { CodeTerminalDrawer } from "./CodeTerminalDrawer";
 import { CodeThreadSidebar } from "./CodeThreadSidebar";
+import { CodeThreadLifecycleNotice } from "./CodeThreadLifecycleNotice";
 import { CodeTimeline } from "./CodeTimeline";
+import { CodeWorkspaceHeader } from "./CodeWorkspaceHeader";
+import { useCodeTerminalVisibility } from "./useCodeTerminalVisibility";
 
 function errorMessage(error: unknown): string {
   const threadStartError = getCodeThreadStartError(error);
@@ -48,10 +58,6 @@ function errorMessage(error: unknown): string {
 }
 
 type OpenedThreads = ReadonlyMap<string, CodeBoundThreadOpenResult>;
-type PendingTurn = {
-  readonly runtimeGeneration: number;
-  readonly turnId: string;
-};
 
 export function CodeWorkspaceScreen({
   baseRef,
@@ -76,7 +82,10 @@ export function CodeWorkspaceScreen({
   const runtimeReady = session.state.runtimeStatus?.phase === "ready";
   const replayReady = session.state.replay.status === "synchronized";
   const interactionReady =
-    runtimeReady && replayReady && session.subscriptionError === null;
+    runtimeReady &&
+    replayReady &&
+    !session.state.replay.needsAuthoritativeRefresh &&
+    session.subscriptionError === null;
   const preparationsQuery = useQuery({
     ...codeThreadPreparationsQueryOptions(scope),
     refetchInterval: 5_000,
@@ -102,21 +111,34 @@ export function CodeWorkspaceScreen({
   );
   const [actionError, setActionError] = React.useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = React.useState(true);
+  const [inspectorOpen, setInspectorOpen] = React.useState(
+    () =>
+      typeof window !== "undefined" &&
+      window.matchMedia("(min-width: 1280px)").matches,
+  );
   const [localPrompts, setLocalPrompts] = React.useState<
     ReadonlyMap<string, readonly CodeTimelineLocalPrompt[]>
   >(() => new Map());
   const [pendingTurns, setPendingTurns] = React.useState<
-    ReadonlyMap<string, PendingTurn>
+    ReadonlyMap<string, CodePendingTurn>
   >(() => new Map());
   const localPromptIdRef = React.useRef(0);
   const resumeAttemptedRef = React.useRef(new Set<string>());
   const resumeInFlightRef = React.useRef<string | null>(null);
+  const authoritativeRefreshAttemptedRef = React.useRef(new Set<string>());
+  const authoritativeRefreshDiscardedRef = React.useRef(new Set<string>());
   const mountedRef = React.useRef(true);
   const runtimeGenerationRef = React.useRef(session.state.runtimeGeneration);
+  const subscriptionEpochRef = React.useRef(
+    session.state.replay.subscriptionEpoch,
+  );
+  const selectedThreadIdRef = React.useRef(selectedThreadId);
   const previousRuntimeGenerationRef = React.useRef(
     session.state.runtimeGeneration,
   );
   runtimeGenerationRef.current = session.state.runtimeGeneration;
+  subscriptionEpochRef.current = session.state.replay.subscriptionEpoch;
+  selectedThreadIdRef.current = selectedThreadId;
 
   React.useEffect(() => {
     mountedRef.current = true;
@@ -137,6 +159,8 @@ export function CodeWorkspaceScreen({
       return;
     }
     resumeAttemptedRef.current.clear();
+    authoritativeRefreshAttemptedRef.current.clear();
+    authoritativeRefreshDiscardedRef.current.clear();
     setOpenedThreads(new Map());
     setPendingTurns(new Map());
     setActionError(null);
@@ -171,6 +195,12 @@ export function CodeWorkspaceScreen({
     : null;
   const selectedThread: CodeThreadSummary | null =
     openedThread?.thread ?? selectedRow?.thread ?? null;
+  const modelSelection = useCodeModelSelection({
+    openedThread,
+    runtimeGeneration: session.state.runtimeGeneration,
+    runtimeReady,
+    selectedThreadId,
+  });
 
   const refreshLists = React.useCallback(async () => {
     await Promise.all([
@@ -180,12 +210,19 @@ export function CodeWorkspaceScreen({
       queryClient.invalidateQueries({
         queryKey: codeSessionQueryKeys.threads(scope),
       }),
+      queryClient.invalidateQueries({
+        queryKey: codeSessionQueryKeys.worktrees(scope),
+      }),
     ]);
   }, [queryClient, scope]);
 
   const retainOpenedThread = React.useCallback(
-    (opened: CodeBoundThreadOpenResult) => {
+    (
+      opened: CodeBoundThreadOpenResult,
+      pendingSelection: CodeModelSelection | null = null,
+    ) => {
       if (!mountedRef.current) return;
+      modelSelection.seedOpenedThread(opened, pendingSelection);
       setOpenedThreads((current) => {
         const next = new Map(current);
         next.set(opened.thread.id, opened);
@@ -193,8 +230,78 @@ export function CodeWorkspaceScreen({
       });
       resumeAttemptedRef.current.add(opened.thread.id);
     },
+    [modelSelection.seedOpenedThread],
+  );
+
+  const retainThreadSnapshot = React.useCallback(
+    (threadId: string, thread: CodeThreadSummary) => {
+      if (!mountedRef.current) return;
+      setOpenedThreads((current) => {
+        const opened = current.get(threadId);
+        if (!opened) return current;
+        const next = new Map(current);
+        next.set(threadId, {
+          ...opened,
+          thread: { ...thread, turns: opened.thread.turns },
+        });
+        return next;
+      });
+    },
     [],
   );
+  const threadMutations = useCodeThreadMutations({
+    mutationsReady: interactionReady,
+    onThreadSnapshot: retainThreadSnapshot,
+    scope,
+  });
+  const selectedCapabilities = selectedRow
+    ? codeThreadLifecycleCapabilities(selectedRow.lifecycle)
+    : null;
+  const selectedLifecycleBlocked =
+    threadMutations.isLifecycleLocallyBlocked(selectedThreadId);
+  const selectedCanExecute =
+    selectedCapabilities?.canExecute === true && !selectedLifecycleBlocked;
+  const cachedRows = threadsQuery.data?.data;
+  const terminalRow =
+    selectedRow ??
+    cachedRows?.find((row) => row.binding.codexThreadId === selectedThreadId);
+  const terminalCanExecute = codeThreadLifecycleCapabilities(
+    terminalRow?.lifecycle ?? "unknown",
+  ).canExecute;
+  const terminalThreadId =
+    terminalCanExecute && !selectedLifecycleBlocked ? selectedThreadId : null;
+  const terminal = useCodeTerminalVisibility(scope, terminalThreadId);
+  useCodeThreadLifecycleSync({
+    acknowledgeAuthoritativeForkRefresh:
+      threadMutations.acknowledgeAuthoritativeForkRefresh,
+    acknowledgeAuthoritativeListRefresh:
+      threadMutations.acknowledgeAuthoritativeListRefresh,
+    events: session.state.events,
+    preparationsDataUpdatedAt: preparationsQuery.dataUpdatedAt,
+    preparationsQuerySucceeded: preparationsQuery.isSuccess,
+    queryClient,
+    scope,
+    threadsDataUpdatedAt: threadsQuery.dataUpdatedAt,
+    threadsQuerySucceeded: threadsQuery.isSuccess,
+  });
+
+  React.useEffect(() => {
+    if (selectedThreadId === null || selectedRow?.lifecycle === "active")
+      return;
+    resumeAttemptedRef.current.delete(selectedThreadId);
+    setOpenedThreads((current) => {
+      if (!current.has(selectedThreadId)) return current;
+      const next = new Map(current);
+      next.delete(selectedThreadId);
+      return next;
+    });
+    setPendingTurns((current) => {
+      if (!current.has(selectedThreadId)) return current;
+      const next = new Map(current);
+      next.delete(selectedThreadId);
+      return next;
+    });
+  }, [selectedRow?.lifecycle, selectedThreadId]);
 
   const resumeThread = React.useCallback(
     async (threadId: string, force = false) => {
@@ -204,13 +311,23 @@ export function CodeWorkspaceScreen({
       const row = threads.find(
         (thread) => thread.binding.codexThreadId === threadId,
       );
-      if (!row || row.unavailable) {
+      if (
+        !row ||
+        row.unavailable ||
+        !codeThreadLifecycleCapabilities(row.lifecycle).canExecute ||
+        threadMutations.isLifecycleLocallyBlocked(threadId)
+      ) {
         if (mountedRef.current) {
-          setActionError(row?.unavailable ?? "This task is unavailable.");
+          setActionError(
+            row?.unavailable ??
+              "This task is not active and cannot be resumed.",
+          );
         }
         return;
       }
       if (resumeInFlightRef.current !== null) return;
+      const authoritativeRefresh =
+        session.captureAuthoritativeRefreshCompletion();
       resumeAttemptedRef.current.add(threadId);
       resumeInFlightRef.current = threadId;
       setResumingThreadId(threadId);
@@ -221,8 +338,31 @@ export function CodeWorkspaceScreen({
           threadId,
           model: null,
         });
-        if (runtimeGenerationRef.current !== runtimeGeneration) return;
+        if (
+          !mountedRef.current ||
+          runtimeGenerationRef.current !== runtimeGeneration
+        ) {
+          return;
+        }
         retainOpenedThread(opened);
+        if (
+          authoritativeRefresh !== null &&
+          authoritativeRefresh.runtimeGeneration === runtimeGeneration &&
+          subscriptionEpochRef.current ===
+            authoritativeRefresh.subscriptionEpoch &&
+          selectedThreadIdRef.current === threadId
+        ) {
+          if (authoritativeRefresh.complete()) {
+            void queryClient.invalidateQueries({
+              exact: true,
+              queryKey: codeSessionQueryKeys.threadChanges({
+                scope,
+                threadId,
+                runtimeGeneration,
+              }),
+            });
+          }
+        }
       } catch (error) {
         if (mountedRef.current) setActionError(errorMessage(error));
       } finally {
@@ -232,50 +372,150 @@ export function CodeWorkspaceScreen({
         if (mountedRef.current) setResumingThreadId(null);
       }
     },
-    [openedThreads, retainOpenedThread, runtimeReady, scope, threads],
+    [
+      openedThreads,
+      queryClient,
+      retainOpenedThread,
+      runtimeReady,
+      scope,
+      session.captureAuthoritativeRefreshCompletion,
+      threadMutations.isLifecycleLocallyBlocked,
+      threads,
+    ],
   );
+
+  React.useEffect(() => {
+    if (!session.state.replay.needsAuthoritativeRefresh) {
+      authoritativeRefreshAttemptedRef.current.clear();
+      authoritativeRefreshDiscardedRef.current.clear();
+      return;
+    }
+    const runtimeGeneration = session.state.runtimeGeneration;
+    const subscriptionEpoch = session.state.replay.subscriptionEpoch;
+    if (
+      !runtimeReady ||
+      runtimeGeneration === null ||
+      subscriptionEpoch === null
+    ) {
+      return;
+    }
+    const refreshIdentity = JSON.stringify([
+      runtimeGeneration,
+      subscriptionEpoch,
+      selectedThreadId,
+    ]);
+    if (selectedThreadId === null || !selectedCanExecute) {
+      if (authoritativeRefreshAttemptedRef.current.has(refreshIdentity)) return;
+      const completion = session.captureAuthoritativeRefreshCompletion();
+      if (
+        completion?.runtimeGeneration === runtimeGeneration &&
+        completion.subscriptionEpoch === subscriptionEpoch &&
+        completion.complete()
+      ) {
+        authoritativeRefreshAttemptedRef.current.add(refreshIdentity);
+      }
+      return;
+    }
+
+    if (!authoritativeRefreshDiscardedRef.current.has(refreshIdentity)) {
+      authoritativeRefreshDiscardedRef.current.add(refreshIdentity);
+      resumeAttemptedRef.current.delete(selectedThreadId);
+      setOpenedThreads((current) => {
+        if (!current.has(selectedThreadId)) return current;
+        const next = new Map(current);
+        next.delete(selectedThreadId);
+        return next;
+      });
+    }
+    if (
+      selectedRow === null ||
+      resumingThreadId !== null ||
+      resumeInFlightRef.current !== null ||
+      authoritativeRefreshAttemptedRef.current.has(refreshIdentity)
+    ) {
+      return;
+    }
+    authoritativeRefreshAttemptedRef.current.add(refreshIdentity);
+    void resumeThread(selectedThreadId, true);
+  }, [
+    resumeThread,
+    resumingThreadId,
+    runtimeReady,
+    selectedCanExecute,
+    selectedRow,
+    selectedThreadId,
+    session.captureAuthoritativeRefreshCompletion,
+    session.state.replay.needsAuthoritativeRefresh,
+    session.state.replay.subscriptionEpoch,
+    session.state.runtimeGeneration,
+  ]);
 
   React.useEffect(() => {
     if (
       !runtimeReady ||
       !selectedThreadId ||
+      !selectedCanExecute ||
+      session.state.replay.needsAuthoritativeRefresh ||
       resumingThreadId !== null ||
       resumeAttemptedRef.current.has(selectedThreadId)
     ) {
       return;
     }
     void resumeThread(selectedThreadId);
-  }, [resumeThread, resumingThreadId, runtimeReady, selectedThreadId]);
+  }, [
+    resumeThread,
+    resumingThreadId,
+    runtimeReady,
+    selectedCanExecute,
+    selectedThreadId,
+    session.state.replay.needsAuthoritativeRefresh,
+  ]);
 
   const openPreparation = React.useCallback(
     async (preparation: CodeThreadPreparation) => {
-      if (!interactionReady || creating || actionPendingId !== null) return;
+      if (
+        !interactionReady ||
+        creating ||
+        actionPendingId !== null ||
+        modelSelection.saving
+      )
+        return;
       const runtimeGeneration = runtimeGenerationRef.current;
       if (runtimeGeneration === null) return;
+      const recovering =
+        preparation.operation === "fork" || preparation.state === "starting";
+      let threadStartPending = !recovering;
       setActionPendingId(preparation.preparationId);
       setActionError(null);
       try {
+        const pendingSelection = recovering
+          ? null
+          : modelSelection.newThreadSelection;
         const input = {
           scope,
           preparationId: preparation.preparationId,
-          model: null,
+          model: pendingSelection?.model ?? null,
         };
-        const opened =
-          preparation.state === "starting"
-            ? await codeWorkspaceApi.recoverCodeThreadBinding(input)
-            : await codeWorkspaceApi.startCodeThread(input);
+        const opened = recovering
+          ? await codeWorkspaceApi.recoverCodeThreadBinding({
+              ...input,
+              model: null,
+            })
+          : await codeWorkspaceApi.startCodeThread(input);
+        threadStartPending = false;
         if (
           !mountedRef.current ||
           runtimeGenerationRef.current !== runtimeGeneration
         ) {
           return;
         }
-        retainOpenedThread(opened);
+        retainOpenedThread(opened, pendingSelection);
         await refreshLists();
         if (!mountedRef.current) return;
         onSelectedThreadIdChange(opened.thread.id);
       } catch (error) {
         if (!mountedRef.current) return;
+        if (threadStartPending) modelSelection.revalidateCatalog();
         setActionError(errorMessage(error));
         await refreshLists();
       } finally {
@@ -286,6 +526,9 @@ export function CodeWorkspaceScreen({
       actionPendingId,
       creating,
       interactionReady,
+      modelSelection.newThreadSelection,
+      modelSelection.revalidateCatalog,
+      modelSelection.saving,
       onSelectedThreadIdChange,
       refreshLists,
       retainOpenedThread,
@@ -293,12 +536,36 @@ export function CodeWorkspaceScreen({
     ],
   );
 
+  const forkThread = React.useCallback(
+    async (threadId: string) => {
+      const runtimeGeneration = runtimeGenerationRef.current;
+      if (runtimeGeneration === null) return;
+      const opened = await threadMutations.forkThread(threadId);
+      if (
+        !mountedRef.current ||
+        runtimeGenerationRef.current !== runtimeGeneration
+      )
+        return;
+      retainOpenedThread(opened);
+      onSelectedThreadIdChange(opened.thread.id);
+    },
+    [onSelectedThreadIdChange, retainOpenedThread, threadMutations.forkThread],
+  );
+
   const createTask = React.useCallback(async () => {
-    if (!interactionReady || creating || actionPendingId !== null) return;
+    if (
+      !interactionReady ||
+      creating ||
+      actionPendingId !== null ||
+      modelSelection.saving
+    )
+      return;
     const runtimeGeneration = runtimeGenerationRef.current;
     if (runtimeGeneration === null) return;
     setCreating(true);
     setActionError(null);
+    const pendingSelection = modelSelection.newThreadSelection;
+    let threadStartAttempted = false;
     try {
       const prepared = await codeWorkspaceApi.prepareCodeWorktree({
         scope,
@@ -312,23 +579,26 @@ export function CodeWorkspaceScreen({
       ) {
         return;
       }
+      threadStartAttempted = true;
       const opened = await codeWorkspaceApi.startCodeThread({
         scope,
         preparationId: prepared.preparationId,
-        model: null,
+        model: pendingSelection?.model ?? null,
       });
+      threadStartAttempted = false;
       if (
         !mountedRef.current ||
         runtimeGenerationRef.current !== runtimeGeneration
       ) {
         return;
       }
-      retainOpenedThread(opened);
+      retainOpenedThread(opened, pendingSelection);
       await refreshLists();
       if (!mountedRef.current) return;
       onSelectedThreadIdChange(opened.thread.id);
     } catch (error) {
       if (!mountedRef.current) return;
+      if (threadStartAttempted) modelSelection.revalidateCatalog();
       setActionError(errorMessage(error));
       await refreshLists();
     } finally {
@@ -339,6 +609,9 @@ export function CodeWorkspaceScreen({
     creating,
     actionPendingId,
     interactionReady,
+    modelSelection.newThreadSelection,
+    modelSelection.revalidateCatalog,
+    modelSelection.saving,
     onSelectedThreadIdChange,
     refreshLists,
     repository.repositoryRoot,
@@ -346,10 +619,6 @@ export function CodeWorkspaceScreen({
     scope,
   ]);
 
-  const activeTurns = selectedThreadId
-    ? selectCodeActiveTurns(session.state, selectedThreadId)
-    : [];
-  const activeTurn = activeTurns.at(-1) ?? null;
   const selectedThreadEvents = React.useMemo(
     () =>
       selectedThreadId
@@ -357,25 +626,26 @@ export function CodeWorkspaceScreen({
         : [],
     [selectedThreadId, session.state],
   );
-  const selectedPendingTurn = selectedThreadId
-    ? (pendingTurns.get(selectedThreadId) ?? null)
-    : null;
-  const selectedPendingTurnObserved =
-    selectedPendingTurn !== null &&
-    selectedThreadEvents.some(
-      (event) =>
-        event.runtimeGeneration === selectedPendingTurn.runtimeGeneration &&
-        event.turnId === selectedPendingTurn.turnId &&
-        (event.kind === "turn/started" || event.kind === "turn/completed"),
-    );
-  const pendingTurn =
-    selectedPendingTurn !== null &&
-    !selectedPendingTurnObserved &&
-    runtimeReady &&
-    session.state.runtimeGeneration === selectedPendingTurn.runtimeGeneration
-      ? selectedPendingTurn
-      : null;
-  const effectiveTurnId = activeTurn?.turnId ?? pendingTurn?.turnId ?? null;
+  const changesRuntimeGeneration = session.state.runtimeGeneration;
+  const { changesEnabled, controller: gitHandoff } = useCodeWorkspaceGitHandoff(
+    {
+      interactionReady,
+      lifecycleBlocked: selectedLifecycleBlocked,
+      runtimeGeneration: changesRuntimeGeneration,
+      runtimeReady,
+      scope,
+      selectedRow,
+      selectedThreadEvents,
+    },
+  );
+  const { activeTurn, effectiveTurnId } = useCodeSelectedTurn({
+    pendingTurns,
+    runtimeReady,
+    selectedThreadEvents,
+    selectedThreadId,
+    sessionState: session.state,
+    setPendingTurns,
+  });
   const pendingApprovals = selectedThreadId
     ? selectCodePendingApprovals(session.state, selectedThreadId)
     : [];
@@ -390,44 +660,20 @@ export function CodeWorkspaceScreen({
         : [],
     [localPrompts, selectedThread, selectedThreadEvents],
   );
-
-  React.useEffect(() => {
-    if (pendingTurns.size === 0) return;
-    setPendingTurns((current) => {
-      let next: Map<string, PendingTurn> | null = null;
-      for (const [threadId, pending] of current) {
-        const generationStillReady =
-          session.state.runtimeStatus?.phase === "ready" &&
-          session.state.runtimeGeneration === pending.runtimeGeneration;
-        const observedActiveTurn = selectCodeActiveTurns(
-          session.state,
-          threadId,
-        ).some(
-          (turn) =>
-            turn.turnId === pending.turnId &&
-            turn.runtimeGeneration === pending.runtimeGeneration,
-        );
-        const observedTurnEvent = session.state.events.some(
-          (event) =>
-            event.runtimeGeneration === pending.runtimeGeneration &&
-            event.threadId === threadId &&
-            event.turnId === pending.turnId &&
-            (event.kind === "turn/started" || event.kind === "turn/completed"),
-        );
-        if (!generationStillReady || observedActiveTurn || observedTurnEvent) {
-          next ??= new Map(current);
-          next.delete(threadId);
-        }
-      }
-      return next ?? current;
-    });
-  }, [pendingTurns.size, session.state]);
-
   const submitPrompt = React.useCallback(
     async (prompt: string) => {
-      if (!interactionReady || !selectedThreadId || !openedThread) return false;
+      if (
+        !interactionReady ||
+        modelSelection.saving ||
+        !selectedCanExecute ||
+        !selectedThreadId ||
+        !openedThread
+      ) {
+        return false;
+      }
       const runtimeGeneration = session.state.runtimeGeneration;
       if (runtimeGeneration === null) return false;
+      let turnStartPending = effectiveTurnId === null;
       setActionError(null);
       try {
         const turn = effectiveTurnId
@@ -441,9 +687,10 @@ export function CodeWorkspaceScreen({
               scope,
               threadId: selectedThreadId,
               prompt,
-              model: null,
-              effort: null,
+              model: modelSelection.turnSelection?.model ?? null,
+              effort: modelSelection.turnSelection?.reasoningEffort ?? null,
             });
+        turnStartPending = false;
         if (
           !mountedRef.current ||
           runtimeGenerationRef.current !== runtimeGeneration
@@ -476,13 +723,18 @@ export function CodeWorkspaceScreen({
         return true;
       } catch (error) {
         if (mountedRef.current) setActionError(errorMessage(error));
+        if (turnStartPending) modelSelection.revalidateCatalog();
         return false;
       }
     },
     [
       effectiveTurnId,
       interactionReady,
+      modelSelection.saving,
+      modelSelection.revalidateCatalog,
+      modelSelection.turnSelection,
       openedThread,
+      selectedCanExecute,
       scope,
       selectedThreadId,
       session.state.runtimeGeneration,
@@ -490,7 +742,7 @@ export function CodeWorkspaceScreen({
   );
 
   const interrupt = React.useCallback(async () => {
-    if (!selectedThreadId) return;
+    if (!selectedThreadId || !selectedCanExecute) return;
     setActionError(null);
     try {
       if (!(await session.interruptThread(selectedThreadId))) {
@@ -499,7 +751,7 @@ export function CodeWorkspaceScreen({
     } catch (error) {
       if (mountedRef.current) setActionError(errorMessage(error));
     }
-  }, [selectedThreadId, session.interruptThread]);
+  }, [selectedCanExecute, selectedThreadId, session.interruptThread]);
 
   const selectedLabel = selectedRow
     ? codeThreadLabel(selectedRow)
@@ -507,7 +759,20 @@ export function CodeWorkspaceScreen({
   const selectionLoading =
     selectedThreadId !== null && resumingThreadId === selectedThreadId;
   const composerDisabled =
-    !interactionReady || !selectedThreadId || !openedThread || selectionLoading;
+    !interactionReady ||
+    !selectedCanExecute ||
+    !selectedThreadId ||
+    !openedThread ||
+    selectionLoading ||
+    modelSelection.saving ||
+    gitHandoff.gitBlockerReason !== null;
+  const modelSelectionDisabled =
+    !interactionReady ||
+    creating ||
+    actionPendingId !== null ||
+    selectionLoading ||
+    effectiveTurnId !== null ||
+    (selectedThreadId !== null && !selectedCanExecute);
   const scopedListError = preparationsQuery.error ?? threadsQuery.error;
   const visibleError =
     actionError ?? (scopedListError ? errorMessage(scopedListError) : null);
@@ -528,74 +793,66 @@ export function CodeWorkspaceScreen({
         status={session.state.runtimeStatus}
         subscriptionError={session.subscriptionError}
       />
-      <div className="flex min-h-0 flex-1 overflow-hidden">
+      <div className="relative flex min-h-0 flex-1 overflow-hidden">
         {sidebarOpen ? (
           <CodeThreadSidebar
             actionPendingId={actionPendingId}
-            canCreate={interactionReady && actionPendingId === null}
+            actionsReady={interactionReady && !modelSelection.saving}
+            canCreate={
+              interactionReady &&
+              actionPendingId === null &&
+              !modelSelection.saving
+            }
             creating={creating}
+            isForkBlocked={threadMutations.isForkLocallyBlocked}
+            isLifecycleBlocked={threadMutations.isLifecycleLocallyBlocked}
             loading={preparationsQuery.isFetching || threadsQuery.isFetching}
+            onArchiveThread={threadMutations.archiveThread}
             onCreate={() => void createTask()}
+            onForkThread={forkThread}
             onOpenPreparation={(preparation) =>
               void openPreparation(preparation)
             }
             onRefresh={() => {
               void refreshLists();
             }}
+            onRenameThread={threadMutations.renameThread}
             onSelectThread={(threadId) => {
               onSelectedThreadIdChange(threadId);
             }}
+            onUnarchiveThread={threadMutations.unarchiveThread}
             preparations={preparationsQuery.data ?? []}
+            scope={scope}
             selectedThreadId={selectedThreadId}
             threads={threads}
           />
         ) : null}
         <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <header className="flex h-11 shrink-0 items-center gap-2 border-border/60 border-b px-3">
-            <Button
-              aria-label={
-                sidebarOpen ? "Hide task sidebar" : "Show task sidebar"
-              }
-              className="h-7 w-7 shrink-0"
-              onClick={() => setSidebarOpen((open) => !open)}
-              size="icon-xs"
-              title={sidebarOpen ? "Hide task sidebar" : "Show task sidebar"}
-              variant="ghost"
-            >
-              {sidebarOpen ? <PanelLeftClose /> : <PanelLeftOpen />}
-            </Button>
-            <div className="min-w-0 flex-1">
-              <h2 className="truncate text-sm font-semibold">
-                {selectedThreadId ? selectedLabel : "Choose or create a task"}
-              </h2>
-              {selectedRow ? (
-                <p className="flex min-w-0 items-center gap-1 text-2xs text-muted-foreground">
-                  <GitBranch className="h-3 w-3 shrink-0" />
-                  <span className="truncate">
-                    {selectedRow.binding.executionMode === "worktree"
-                      ? "Managed worktree"
-                      : "Local checkout"}
-                    {` · ${selectedRow.binding.baseRef.slice(0, 8)}`}
-                  </span>
-                </p>
-              ) : null}
-            </div>
-            {selectionLoading ? (
-              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                <LoaderCircle className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" />
-                Resuming…
-              </span>
-            ) : null}
-            {selectedThreadId && actionError && !openedThread ? (
-              <Button
-                onClick={() => void resumeThread(selectedThreadId, true)}
-                size="xs"
-                variant="outline"
-              >
-                Retry task
-              </Button>
-            ) : null}
-          </header>
+          <CodeWorkspaceHeader
+            canReadChanges={selectedCapabilities?.canReadChanges === true}
+            inspectorOpen={inspectorOpen}
+            modelSelection={modelSelection}
+            modelSelectionDisabled={modelSelectionDisabled}
+            onInspectorOpenChange={setInspectorOpen}
+            onRetry={() => {
+              if (selectedThreadId) void resumeThread(selectedThreadId, true);
+            }}
+            onSidebarOpenChange={setSidebarOpen}
+            onTerminalToggle={terminal.toggle}
+            selectedLabel={selectedLabel}
+            selectedRow={selectedRow}
+            selectedThreadId={selectedThreadId}
+            selectionLoading={selectionLoading}
+            showRetry={
+              selectedCanExecute &&
+              selectedThreadId !== null &&
+              actionError !== null &&
+              openedThread === null
+            }
+            sidebarOpen={sidebarOpen}
+            terminalOpen={terminal.open}
+            terminalVisible={terminalThreadId !== null}
+          />
           {visibleError ? (
             <div
               className="border-destructive/30 border-b bg-destructive/10 px-3 py-2 text-xs text-destructive"
@@ -609,6 +866,7 @@ export function CodeWorkspaceScreen({
               <CodeTimeline
                 approvals={pendingApprovals}
                 canRespond={(approval) =>
+                  selectedCanExecute &&
                   interactionReady &&
                   selectCanRespondToCodeApproval(session.state, approval)
                 }
@@ -622,13 +880,31 @@ export function CodeWorkspaceScreen({
                 }}
                 rows={timelineRows}
               />
-              <CodeComposer
-                active={effectiveTurnId !== null}
-                canInterrupt={interactionReady && activeTurn !== null}
-                disabled={composerDisabled}
-                onInterrupt={interrupt}
-                onSubmit={submitPrompt}
-              />
+              {selectedRow?.lifecycle === "active" ? (
+                <CodeComposer
+                  active={effectiveTurnId !== null}
+                  canInterrupt={
+                    selectedCanExecute &&
+                    interactionReady &&
+                    activeTurn !== null
+                  }
+                  disabled={composerDisabled}
+                  disabledReason={gitHandoff.gitBlockerReason}
+                  onInterrupt={interrupt}
+                  onSubmit={submitPrompt}
+                />
+              ) : selectedRow ? (
+                <CodeThreadLifecycleNotice
+                  blocked={selectedLifecycleBlocked}
+                  lifecycle={selectedRow.lifecycle}
+                  onRefresh={refreshLists}
+                  onUnarchive={() =>
+                    threadMutations.unarchiveThread(
+                      selectedRow.binding.codexThreadId,
+                    )
+                  }
+                />
+              ) : null}
             </>
           ) : selectedRow?.unavailable ? (
             <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-muted-foreground">
@@ -643,7 +919,30 @@ export function CodeWorkspaceScreen({
             </div>
           )}
         </section>
+        {inspectorOpen &&
+        selectedRow &&
+        selectedCapabilities?.canReadChanges &&
+        changesRuntimeGeneration !== null ? (
+          <CodeChangesPanel
+            binding={selectedRow.binding}
+            className="absolute inset-y-0 right-0 z-20 w-[min(34rem,calc(100%-3rem))] shadow-xl xl:static xl:z-auto xl:w-[34rem] xl:max-w-[42vw] xl:shadow-none"
+            controller={gitHandoff}
+            enabled={changesEnabled}
+            onClose={() => setInspectorOpen(false)}
+            runtimeGeneration={changesRuntimeGeneration}
+            scope={scope}
+          />
+        ) : null}
       </div>
+      {terminalThreadId ? (
+        <CodeTerminalDrawer
+          key={`${scope.communityId}:${scope.projectDtag}:${scope.repositoryIdentity}:${terminalThreadId}`}
+          onOpenChange={terminal.setOpen}
+          open={terminal.open}
+          scope={scope}
+          threadId={terminalThreadId}
+        />
+      ) : null}
     </div>
   );
 }

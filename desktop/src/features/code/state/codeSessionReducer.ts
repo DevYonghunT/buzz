@@ -55,6 +55,8 @@ export type CodePendingApproval = {
   approvalKind: CodeApprovalKind;
   request: JsonObject;
   sequence: number;
+  /** False while native has reserved the response for an in-flight write. */
+  respondable: boolean;
 };
 
 /** Pure, scope-owned live state for one SchoolX Code workspace. */
@@ -209,6 +211,7 @@ function approvalKindForEvent(
 
 function pendingApprovalFromEvent(
   event: CodeWorkspaceEvent,
+  respondable = true,
 ): CodePendingApproval | null {
   const expectedKind = approvalKindForEvent(event);
   if (
@@ -241,6 +244,7 @@ function pendingApprovalFromEvent(
     approvalKind: expectedKind,
     request,
     sequence: event.sequence,
+    respondable,
   };
 }
 
@@ -474,6 +478,49 @@ function replayBatchIsValid(
     seenBacklogSequences.add(event.sequence);
   }
 
+  const checkpoint = batch.backlog.checkpoint;
+  if (checkpoint !== null) {
+    if (
+      checkpoint.runtimeGeneration !== batch.backlog.runtimeGeneration ||
+      checkpoint.sequenceWatermark !== batch.backlog.latestSequence
+    ) {
+      return false;
+    }
+    const activeTurnKeys = new Set<string>();
+    for (const turn of checkpoint.activeTurns) {
+      const key = activeTurnKey(turn.threadId, turn.turnId);
+      if (
+        turn.threadId.length === 0 ||
+        turn.turnId.length === 0 ||
+        turn.status.length === 0 ||
+        !isSafeUnsignedInteger(turn.startedSequence) ||
+        turn.startedSequence > checkpoint.sequenceWatermark ||
+        activeTurnKeys.has(key)
+      ) {
+        return false;
+      }
+      activeTurnKeys.add(key);
+    }
+    const approvalKeys = new Set<string>();
+    for (const approval of checkpoint.pendingApprovals) {
+      const pending = pendingApprovalFromEvent(
+        approval.event,
+        approval.respondable,
+      );
+      if (
+        pending === null ||
+        !codeScopesEqual(state.scope, approval.event.scope) ||
+        approval.event.runtimeGeneration !== checkpoint.runtimeGeneration ||
+        approval.event.sequence !== checkpoint.sequenceWatermark
+      ) {
+        return false;
+      }
+      const key = codeApprovalIdentityKey(pending);
+      if (approvalKeys.has(key)) return false;
+      approvalKeys.add(key);
+    }
+  }
+
   return batch.bufferedEvents.every(
     (event) =>
       codeScopesEqual(state.scope, event.scope) &&
@@ -482,6 +529,41 @@ function replayBatchIsValid(
       isSafeUnsignedInteger(event.sequence) &&
       (afterSequence === null || event.sequence > afterSequence),
   );
+}
+
+function applyCheckpoint(
+  state: CodeSessionState,
+  checkpoint: NonNullable<CodeWorkspaceReplayBatch["backlog"]["checkpoint"]>,
+): CodeSessionState {
+  const activeTurns = new Map<string, CodeActiveTurn>();
+  for (const turn of checkpoint.activeTurns) {
+    activeTurns.set(activeTurnKey(turn.threadId, turn.turnId), {
+      runtimeGeneration: checkpoint.runtimeGeneration,
+      threadId: turn.threadId,
+      turnId: turn.turnId,
+      status: turn.status,
+      startedSequence: turn.startedSequence,
+    });
+  }
+  const pendingApprovals = new Map<string, CodePendingApproval>();
+  for (const approval of checkpoint.pendingApprovals) {
+    const pending = pendingApprovalFromEvent(
+      approval.event,
+      approval.respondable,
+    );
+    if (pending !== null) {
+      pendingApprovals.set(codeApprovalIdentityKey(pending), pending);
+    }
+  }
+  return {
+    ...state,
+    latestSequence: Math.max(
+      state.latestSequence,
+      checkpoint.sequenceWatermark,
+    ),
+    activeTurns,
+    pendingApprovals,
+  };
 }
 
 function markReplayInvalid(state: CodeSessionState): CodeSessionState {
@@ -527,17 +609,24 @@ function applyReplay(
 
   const isFullReplay =
     batch.request.afterSequence === null || batch.request.afterSequence === 0;
+  const hasAuthoritativeTransientState =
+    backlog.checkpoint !== null || (isFullReplay && !backlog.truncated);
   const healsIncompleteReplay =
-    isFullReplay &&
-    !backlog.truncated &&
+    hasAuthoritativeTransientState &&
     !batch.bufferTruncated &&
     state.replay.approvalStateIncomplete;
   const alreadyIncomplete =
     !generationChanged &&
     state.replay.approvalStateIncomplete &&
     !healsIncompleteReplay;
-  const newlyIncomplete = backlog.truncated || batch.bufferTruncated;
-  if (newlyIncomplete || healsIncompleteReplay || isFullReplay) {
+  const newlyIncomplete =
+    batch.bufferTruncated || (backlog.truncated && backlog.checkpoint === null);
+  if (
+    backlog.truncated ||
+    newlyIncomplete ||
+    healsIncompleteReplay ||
+    isFullReplay
+  ) {
     next = {
       ...next,
       latestSequence: 0,
@@ -551,12 +640,19 @@ function applyReplay(
   for (const event of batch.backlog.events) {
     replayEvents.set(event.sequence, event);
   }
+  for (const event of [...replayEvents.values()].sort(compareEvents)) {
+    next = applyEvent(next, event, batch.subscriptionEpoch);
+  }
+  if (backlog.checkpoint !== null) {
+    next = applyCheckpoint(next, backlog.checkpoint);
+  }
+  const bufferedEvents = new Map<number, CodeWorkspaceEvent>();
   for (const event of batch.bufferedEvents) {
     if (event.runtimeGeneration === backlog.runtimeGeneration) {
-      replayEvents.set(event.sequence, event);
+      bufferedEvents.set(event.sequence, event);
     }
   }
-  for (const event of [...replayEvents.values()].sort(compareEvents)) {
+  for (const event of [...bufferedEvents.values()].sort(compareEvents)) {
     next = applyEvent(next, event, batch.subscriptionEpoch);
   }
 
@@ -574,7 +670,7 @@ function applyReplay(
             status: newlyIncomplete ? "truncated" : previousIncompleteStatus,
             subscriptionEpoch: batch.subscriptionEpoch,
             request: batch.request,
-            needsAuthoritativeRefresh: newlyIncomplete
+            needsAuthoritativeRefresh: backlog.truncated
               ? true
               : generationChanged
                 ? false
@@ -585,7 +681,7 @@ function applyReplay(
             status: "synchronized",
             subscriptionEpoch: batch.subscriptionEpoch,
             request: batch.request,
-            needsAuthoritativeRefresh: false,
+            needsAuthoritativeRefresh: backlog.truncated,
             approvalStateIncomplete: false,
           },
     };
@@ -822,6 +918,7 @@ export function selectCanRespondToCodeApproval(
     state.runtimeStatus.generation === approval.runtimeGeneration &&
     currentApproval?.sequence === approval.sequence &&
     currentApproval.itemId === approval.itemId &&
-    currentApproval.approvalKind === approval.approvalKind
+    currentApproval.approvalKind === approval.approvalKind &&
+    currentApproval.respondable
   );
 }

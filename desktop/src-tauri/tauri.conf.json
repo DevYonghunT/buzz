@@ -11,6 +11,10 @@
     },
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "pnpm build",
+    "beforeBundleCommand": {
+      "script": "node scripts/stage-code-git-xpc.mjs",
+      "cwd": ".."
+    },
     "frontendDist": "../dist"
   },
   "app": {
@@ -67,6 +71,9 @@
       "icons/icon.ico"
     ],
     "macOS": {
+      "files": {
+        "XPCServices/io.github.schoolx520.app.schoolx-code-git.xpc": "generated/code-git-xpc/io.github.schoolx520.app.schoolx-code-git.xpc"
+      },
       "infoPlist": "Info.plist",
       "entitlements": "Entitlements.plist",
       "dmg": {

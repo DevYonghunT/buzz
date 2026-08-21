@@ -1,6 +1,7 @@
 import type {
   CodeBoundThreadSummary,
   CodeRuntimePhase,
+  CodeThreadLifecycleState,
   CodeThreadPreparation,
 } from "../api/types";
 
@@ -9,6 +10,72 @@ export type CodeRuntimePresentation = {
   description: string;
   tone: "neutral" | "pending" | "ready" | "error";
 };
+
+export type CodeThreadLifecycleCapabilities = {
+  canArchive: boolean;
+  canExecute: boolean;
+  canFork: boolean;
+  canReadChanges: boolean;
+  canRename: boolean;
+  canUnarchive: boolean;
+  stable: boolean;
+};
+
+/** UI affordances projected from native lifecycle authority. */
+export function codeThreadLifecycleCapabilities(
+  lifecycle: CodeThreadLifecycleState,
+): CodeThreadLifecycleCapabilities {
+  switch (lifecycle) {
+    case "active":
+      return {
+        canArchive: true,
+        canExecute: true,
+        canFork: true,
+        canReadChanges: true,
+        canRename: true,
+        canUnarchive: false,
+        stable: true,
+      };
+    case "archived":
+      return {
+        canArchive: false,
+        canExecute: false,
+        canFork: false,
+        canReadChanges: true,
+        canRename: true,
+        canUnarchive: true,
+        stable: true,
+      };
+    default:
+      return {
+        canArchive: false,
+        canExecute: false,
+        canFork: false,
+        canReadChanges: false,
+        canRename: false,
+        canUnarchive: false,
+        stable: false,
+      };
+  }
+}
+
+/** Concise row/header label for one authoritative lifecycle state. */
+export function codeThreadLifecycleLabel(
+  lifecycle: CodeThreadLifecycleState,
+): string {
+  switch (lifecycle) {
+    case "active":
+      return "Active";
+    case "archiving":
+      return "Archiving…";
+    case "archived":
+      return "Archived";
+    case "unarchiving":
+      return "Restoring…";
+    case "unknown":
+      return "Status unknown";
+  }
+}
 
 /** Human-facing copy for native-owned runtime phases. */
 export function codeRuntimePresentation(
@@ -73,6 +140,37 @@ export function codeThreadLabel(thread: CodeBoundThreadSummary): string {
     thread.thread?.preview?.trim() ||
     `Task ${thread.binding.codexThreadId.slice(0, 8)}`
   );
+}
+
+/** Stable action copy for every durable start/fork preparation state. */
+export function codeThreadPreparationLabels(
+  preparation: Pick<CodeThreadPreparation, "operation" | "state">,
+): { action: string; title: string } {
+  if (preparation.operation === "fork") {
+    return preparation.state === "starting"
+      ? { action: "Recover fork", title: "Fork needs recovery" }
+      : { action: "Continue fork", title: "Prepared fork" };
+  }
+  return preparation.state === "starting"
+    ? { action: "Recover task", title: "Needs recovery" }
+    : { action: "Start task", title: "Prepared task" };
+}
+
+/** Match a local task search without changing the native scoped thread list. */
+export function codeThreadMatchesSearch(
+  thread: CodeBoundThreadSummary,
+  query: string,
+): boolean {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (normalizedQuery.length === 0) return true;
+
+  const threadId = thread.binding.codexThreadId;
+  return [
+    thread.thread?.name,
+    thread.thread?.preview,
+    threadId,
+    threadId.slice(0, 8),
+  ].some((candidate) => candidate?.toLowerCase().includes(normalizedQuery));
 }
 
 /** Preserve a routed selection when valid, otherwise choose the newest row. */

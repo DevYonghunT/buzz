@@ -21,8 +21,20 @@ pub struct AppState {
     pub keys: Mutex<Keys>,
     /// One local Codex app-server process shared by all SchoolX Code threads.
     pub code_runtime: crate::code_workspace::CodeRuntime,
+    /// Native owner of user-shell PTYs, independent from the Codex app-server.
+    pub code_terminal_manager: crate::code_workspace::CodeTerminalManager,
     /// Serializes binding precheck, app-server thread creation, and atomic commit.
     pub code_thread_bindings_lock: Arc<Mutex<()>>,
+    /// Serializes installation-global SchoolX Code model preference reads/writes.
+    pub code_model_selection_lock: Arc<Mutex<()>>,
+    /// Native-only snapshot, journal, and serialization owner for exact-bound
+    /// SchoolX Code Git writes.
+    pub code_git_write: crate::code_workspace::CodeGitWriteState,
+    /// Fail-closed proof that every persisted SchoolX Code lifecycle has been
+    /// reconciled against one authoritative Codex generation. Cleared before
+    /// reconciliation and retained as false after any evidence or persistence
+    /// failure so stale stable records cannot authorize execution.
+    pub code_lifecycle_authority_ready: Arc<AtomicBool>,
     /// Durable backend holding `keys`. Updated after the key write and before
     /// recovery flags are cleared so `get_identity` reports a consistent state.
     pub(crate) identity_storage: AtomicU8,
@@ -199,7 +211,11 @@ pub fn build_app_state() -> AppState {
     AppState {
         keys: Mutex::new(keys),
         code_runtime: crate::code_workspace::CodeRuntime::new(),
+        code_terminal_manager: crate::code_workspace::CodeTerminalManager::new(),
         code_thread_bindings_lock: Arc::new(Mutex::new(())),
+        code_model_selection_lock: Arc::new(Mutex::new(())),
+        code_git_write: crate::code_workspace::CodeGitWriteState::default(),
+        code_lifecycle_authority_ready: Arc::new(AtomicBool::new(false)),
         identity_storage: AtomicU8::new(identity_storage as u8),
         http_client: reqwest::Client::builder()
             .resolve("localhost", std::net::SocketAddr::from(([127, 0, 0, 1], 0)))

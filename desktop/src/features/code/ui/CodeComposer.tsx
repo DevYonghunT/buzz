@@ -8,12 +8,14 @@ export function CodeComposer({
   active,
   canInterrupt,
   disabled,
+  disabledReason,
   onInterrupt,
   onSubmit,
 }: {
   active: boolean;
   canInterrupt: boolean;
   disabled: boolean;
+  disabledReason: string | null;
   onInterrupt: () => Promise<void>;
   onSubmit: (prompt: string) => Promise<boolean>;
 }) {
@@ -36,6 +38,9 @@ export function CodeComposer({
     <div className="border-border/60 border-t bg-background/95 p-3 backdrop-blur">
       <div className="mx-auto max-w-3xl rounded-xl border border-input/50 bg-background p-2 shadow-xs focus-within:ring-1 focus-within:ring-ring">
         <Textarea
+          aria-describedby={
+            disabledReason ? "code-composer-disabled-reason" : undefined
+          }
           aria-label={active ? "Steer active Code task" : "Message Code task"}
           className="min-h-16 resize-none border-0 bg-transparent p-2 shadow-none focus-visible:ring-0 md:text-base"
           disabled={disabled}
@@ -58,6 +63,15 @@ export function CodeComposer({
           }
           value={prompt}
         />
+        {disabledReason ? (
+          <p
+            className="px-2 pb-1 text-pretty text-2xs text-destructive"
+            id="code-composer-disabled-reason"
+            role="status"
+          >
+            {disabledReason}
+          </p>
+        ) : null}
         <div className="flex items-center justify-between gap-2 px-1 pb-1">
           <span className="text-2xs text-muted-foreground">
             ⌘↵ to {active ? "steer" : "send"} · Esc to clear

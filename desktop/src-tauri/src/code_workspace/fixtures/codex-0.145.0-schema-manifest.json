@@ -8,9 +8,9 @@
     "canonicalization": "jq -S -c output including final LF",
     "aggregateFormat": "relative paths sorted bytewise, then <canonical-file-sha256><two spaces><relative-path><LF>",
     "fullGeneratedSetSha256": "757aa191b6d452c6e6d05f6c1f1cb093b9f673da2d185a29ee8d5d96feae67a8",
-    "selectedLeafSchemasSha256": "ecc06394aee332dc3fa827434095ff26f7c8e33b31a315697bd87f6c3da78512",
-    "selectedSchemaCount": 54,
-    "selectedSchemasSha256": "df00b0eff4563354d1a6ab799f1d1f446dcf439745bfb1e04742ae566ffedcd5",
+    "selectedLeafSchemasSha256": "b8d695b56e3ea5255857e2eb2dc9685d5ad65b735f276a5c743363d792677c73",
+    "selectedSchemaCount": 66,
+    "selectedSchemasSha256": "1ce5af96175ce83bb1d91db7939e8dcc243984255cf44777f19e58e0afe6549a",
     "selectedSchemaArtifact": "codex-0.145.0-selected-schemas.tar.gz.base64",
     "selectedSchemaArtifactEncoding": "base64(gzip(tar(canonical jq -S -c files)))",
     "executableSha256": "1da3f4e0e96028b8a771814293c3033dafd1971f943f6c7e79b0897fe705f590",
@@ -20,6 +20,12 @@
   "provenSnapshotVersion": "codex-cli 0.145.0",
   "methods": {
     "initialize": ["v1/InitializeParams.json", "v1/InitializeResponse.json"],
+    "model/list": ["v2/ModelListParams.json", "v2/ModelListResponse.json"],
+    "thread/archive": [
+      "v2/ThreadArchiveParams.json",
+      "v2/ThreadArchiveResponse.json"
+    ],
+    "thread/fork": ["v2/ThreadForkParams.json", "v2/ThreadForkResponse.json"],
     "thread/start": [
       "v2/ThreadStartParams.json",
       "v2/ThreadStartResponse.json"
@@ -29,10 +35,18 @@
       "v2/ThreadResumeResponse.json"
     ],
     "thread/read": ["v2/ThreadReadParams.json", "v2/ThreadReadResponse.json"],
+    "thread/name/set": [
+      "v2/ThreadSetNameParams.json",
+      "v2/ThreadSetNameResponse.json"
+    ],
     "thread/list": ["v2/ThreadListParams.json", "v2/ThreadListResponse.json"],
     "thread/loaded/list": [
       "v2/ThreadLoadedListParams.json",
       "v2/ThreadLoadedListResponse.json"
+    ],
+    "thread/unarchive": [
+      "v2/ThreadUnarchiveParams.json",
+      "v2/ThreadUnarchiveResponse.json"
     ],
     "turn/start": ["v2/TurnStartParams.json", "v2/TurnStartResponse.json"],
     "turn/steer": ["v2/TurnSteerParams.json", "v2/TurnSteerResponse.json"],
@@ -51,6 +65,8 @@
     "thread/started": "v2/ThreadStartedNotification.json",
     "thread/status/changed": "v2/ThreadStatusChangedNotification.json",
     "thread/closed": "v2/ThreadClosedNotification.json",
+    "thread/archived": "v2/ThreadArchivedNotification.json",
+    "thread/unarchived": "v2/ThreadUnarchivedNotification.json",
     "turn/started": "v2/TurnStartedNotification.json",
     "turn/completed": "v2/TurnCompletedNotification.json",
     "turn/diff/updated": "v2/TurnDiffUpdatedNotification.json",
@@ -185,6 +201,14 @@
       "v2/ItemStartedNotification.json"
     ],
     [
+      "35720f7fea38aedaa83f2d0ec4dd2dfd64385f1a30204927712a1a187471a2b3",
+      "v2/ModelListParams.json"
+    ],
+    [
+      "7d82fdd93beae12e546213628244a0b7123f94dc391b241e1bc790fdf400849d",
+      "v2/ModelListResponse.json"
+    ],
+    [
       "f628b790867842bbaa1012bdb47a92f0cbd6dbd14b746fb7e9c5049fe180c858",
       "v2/PlanDeltaNotification.json"
     ],
@@ -209,8 +233,28 @@
       "v2/TerminalInteractionNotification.json"
     ],
     [
+      "beeae660df633cfa84816757bcfcf3bc03885f337bc998a392340a466ee02f15",
+      "v2/ThreadArchiveParams.json"
+    ],
+    [
+      "d9ab724af6dbe4f07527d62f352e344977026b63e428fd84b438cd92dea28ec1",
+      "v2/ThreadArchiveResponse.json"
+    ],
+    [
+      "4f3071dd98980e844be7d23b26edbe433d586b2d7da0bf251b855d604e386adc",
+      "v2/ThreadArchivedNotification.json"
+    ],
+    [
       "bce0eb4697915482eadea5d556977bf59eca8eaf3941e5fe179d241d74fd2a99",
       "v2/ThreadClosedNotification.json"
+    ],
+    [
+      "c7378b60b22d5ecd7b1cf421b36bb631751864dbe036e677a96f50f9f8751489",
+      "v2/ThreadForkParams.json"
+    ],
+    [
+      "c1abf6ed41cf4f1304ea514b9f636611a475d9eecafb68ca8e1eab9592a3c30f",
+      "v2/ThreadForkResponse.json"
     ],
     [
       "12d4afe547ed300cb84fce1697f3e9b5b8ab0847e42b3e146c39bf0b006ec137",
@@ -245,6 +289,14 @@
       "v2/ThreadResumeResponse.json"
     ],
     [
+      "8ecea2f78f33415c30860778a8e3982ab45bfee109a1a70f565b7adb3dbfc1bb",
+      "v2/ThreadSetNameParams.json"
+    ],
+    [
+      "b1d75155ca8b5c1211b1b1c2562c3ec387976b432c0546cace3eff996c49f029",
+      "v2/ThreadSetNameResponse.json"
+    ],
+    [
       "9adda186c98152f872f0c528f1d20acc8f9cb061b3677fa7677c2040f7c30ff7",
       "v2/ThreadStartParams.json"
     ],
@@ -259,6 +311,18 @@
     [
       "89fb196f9ba882dd00226dfa8d23678e2df489b555d4ef1798ecb99ac9427723",
       "v2/ThreadStatusChangedNotification.json"
+    ],
+    [
+      "bbb6a77784b9299b0b6e4338d0a5aaf711a85a2a19bb77099789ec2388382215",
+      "v2/ThreadUnarchiveParams.json"
+    ],
+    [
+      "de41ce09213f6ee5a03c858f6b1f76e92599911447c1546e53070ddb03c8b393",
+      "v2/ThreadUnarchiveResponse.json"
+    ],
+    [
+      "593dbbeb15e35ff54c724dff73ebcf25b6e9475b0eeb48d24710af71794dfb38",
+      "v2/ThreadUnarchivedNotification.json"
     ],
     [
       "5d2b2400c9cd1d9f983d9b329e7bb927c44faf1e447766eed5035cc26196b279",
@@ -403,6 +467,14 @@
       "required": ["item", "startedAtMs", "threadId", "turnId"],
       "properties": ["item", "startedAtMs", "threadId", "turnId"]
     },
+    "v2/ModelListParams.json": {
+      "required": [],
+      "properties": ["cursor", "includeHidden", "limit"]
+    },
+    "v2/ModelListResponse.json": {
+      "required": ["data"],
+      "properties": ["data", "nextCursor"]
+    },
     "v2/PlanDeltaNotification.json": {
       "required": ["delta", "itemId", "threadId", "turnId"],
       "properties": ["delta", "itemId", "threadId", "turnId"]
@@ -427,9 +499,63 @@
       "required": ["itemId", "processId", "stdin", "threadId", "turnId"],
       "properties": ["itemId", "processId", "stdin", "threadId", "turnId"]
     },
+    "v2/ThreadArchiveParams.json": {
+      "required": ["threadId"],
+      "properties": ["threadId"]
+    },
+    "v2/ThreadArchiveResponse.json": {
+      "required": [],
+      "properties": []
+    },
+    "v2/ThreadArchivedNotification.json": {
+      "required": ["threadId"],
+      "properties": ["threadId"]
+    },
     "v2/ThreadClosedNotification.json": {
       "required": ["threadId"],
       "properties": ["threadId"]
+    },
+    "v2/ThreadForkParams.json": {
+      "required": ["threadId"],
+      "properties": [
+        "approvalPolicy",
+        "approvalsReviewer",
+        "baseInstructions",
+        "config",
+        "cwd",
+        "developerInstructions",
+        "ephemeral",
+        "lastTurnId",
+        "model",
+        "modelProvider",
+        "sandbox",
+        "serviceTier",
+        "threadId",
+        "threadSource"
+      ]
+    },
+    "v2/ThreadForkResponse.json": {
+      "required": [
+        "approvalPolicy",
+        "approvalsReviewer",
+        "cwd",
+        "model",
+        "modelProvider",
+        "sandbox",
+        "thread"
+      ],
+      "properties": [
+        "approvalPolicy",
+        "approvalsReviewer",
+        "cwd",
+        "instructionSources",
+        "model",
+        "modelProvider",
+        "reasoningEffort",
+        "sandbox",
+        "serviceTier",
+        "thread"
+      ]
     },
     "v2/ThreadListParams.json": {
       "required": [],
@@ -465,6 +591,14 @@
     "v2/ThreadReadResponse.json": {
       "required": ["thread"],
       "properties": ["thread"]
+    },
+    "v2/ThreadSetNameParams.json": {
+      "required": ["name", "threadId"],
+      "properties": ["name", "threadId"]
+    },
+    "v2/ThreadSetNameResponse.json": {
+      "required": [],
+      "properties": []
     },
     "v2/ThreadResumeParams.json": {
       "required": ["threadId"],
@@ -556,6 +690,18 @@
     "v2/ThreadStatusChangedNotification.json": {
       "required": ["status", "threadId"],
       "properties": ["status", "threadId"]
+    },
+    "v2/ThreadUnarchiveParams.json": {
+      "required": ["threadId"],
+      "properties": ["threadId"]
+    },
+    "v2/ThreadUnarchiveResponse.json": {
+      "required": ["thread"],
+      "properties": ["thread"]
+    },
+    "v2/ThreadUnarchivedNotification.json": {
+      "required": ["threadId"],
+      "properties": ["threadId"]
     },
     "v2/TurnCompletedNotification.json": {
       "required": ["threadId", "turn"],
@@ -651,6 +797,18 @@
     "turnStatuses": ["completed", "interrupted", "failed", "inProgress"],
     "sandboxModes": ["read-only", "workspace-write", "danger-full-access"],
     "sessionSources": ["cli", "vscode", "exec", "appServer", "unknown"],
+    "threadListSourceKinds": [
+      "cli",
+      "vscode",
+      "exec",
+      "appServer",
+      "subAgent",
+      "subAgentReview",
+      "subAgentCompact",
+      "subAgentThreadSpawn",
+      "subAgentOther",
+      "unknown"
+    ],
     "stableApprovalDecisions": [
       "accept",
       "acceptForSession",

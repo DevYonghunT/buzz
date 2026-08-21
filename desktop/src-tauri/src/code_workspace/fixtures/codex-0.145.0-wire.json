@@ -27,6 +27,37 @@
     },
     "initializedNotification": { "method": "initialized" }
   },
+  "modelList": {
+    "method": "model/list",
+    "params": {
+      "limit": 100,
+      "includeHidden": false
+    },
+    "result": {
+      "data": [
+        {
+          "id": "gpt-5.2-codex",
+          "model": "gpt-5.2-codex",
+          "displayName": "GPT-5.2 Codex",
+          "description": "Coding model for agentic workflows",
+          "hidden": false,
+          "supportedReasoningEfforts": [
+            {
+              "reasoningEffort": "medium",
+              "description": "Balanced reasoning for everyday tasks"
+            },
+            {
+              "reasoningEffort": "high",
+              "description": "Deeper reasoning for complex tasks"
+            }
+          ],
+          "defaultReasoningEffort": "medium",
+          "isDefault": true
+        }
+      ],
+      "nextCursor": null
+    }
+  },
   "threadStart": {
     "method": "thread/start",
     "params": {
@@ -57,6 +88,7 @@
       "instructionSources": ["AGENTS.md"],
       "model": "gpt-5.2-codex",
       "modelProvider": "openai",
+      "reasoningEffort": "medium",
       "cwd": "/native/stored-root",
       "approvalPolicy": "on-request",
       "approvalsReviewer": "user",
@@ -129,6 +161,96 @@
       }
     }
   },
+  "threadArchive": {
+    "method": "thread/archive",
+    "params": { "threadId": "thread-1" },
+    "result": {}
+  },
+  "threadFork": {
+    "method": "thread/fork",
+    "params": {
+      "threadId": "thread-1",
+      "cwd": "/native/fork-root",
+      "approvalPolicy": "on-request",
+      "sandbox": "workspace-write",
+      "threadSource": "schoolx-code/89c210f4-7a5b-4bd5-a98c-322386a8a2e9"
+    },
+    "result": {
+      "thread": {
+        "id": "thread-2",
+        "sessionId": "thread-2",
+        "forkedFromId": "thread-1",
+        "parentThreadId": null,
+        "cliVersion": "0.145.0",
+        "preview": "Run the focused tests",
+        "ephemeral": false,
+        "modelProvider": "openai",
+        "createdAt": 1723600020,
+        "updatedAt": 1723600021,
+        "cwd": "/native/fork-root",
+        "name": "Native contract",
+        "source": "appServer",
+        "status": { "type": "idle" },
+        "threadSource": "schoolx-code/89c210f4-7a5b-4bd5-a98c-322386a8a2e9",
+        "turns": [
+          {
+            "id": "past-turn",
+            "status": "completed",
+            "items": [
+              {
+                "id": "item-restored",
+                "type": "agentMessage",
+                "text": "restored"
+              }
+            ],
+            "error": null
+          }
+        ]
+      },
+      "instructionSources": ["AGENTS.md"],
+      "model": "gpt-5.2-codex",
+      "modelProvider": "openai",
+      "cwd": "/native/fork-root",
+      "approvalPolicy": "on-request",
+      "approvalsReviewer": "user",
+      "sandbox": {
+        "type": "workspaceWrite",
+        "writableRoots": ["/native/fork-root"],
+        "networkAccess": false,
+        "excludeTmpdirEnvVar": true,
+        "excludeSlashTmp": true
+      }
+    }
+  },
+  "threadNameSet": {
+    "method": "thread/name/set",
+    "params": {
+      "threadId": "thread-1",
+      "name": "Renamed native contract"
+    },
+    "result": {}
+  },
+  "threadUnarchive": {
+    "method": "thread/unarchive",
+    "params": { "threadId": "thread-1" },
+    "result": {
+      "thread": {
+        "id": "thread-1",
+        "sessionId": "session-1",
+        "cliVersion": "0.145.0",
+        "preview": "Run the focused tests",
+        "ephemeral": false,
+        "modelProvider": "openai",
+        "createdAt": 1723600000,
+        "updatedAt": 1723600011,
+        "cwd": "/native/stored-root",
+        "source": "appServer",
+        "status": { "type": "idle" },
+        "threadSource": "schoolx-code/67f11a1d-0274-4d40-9b0c-e406e51c64fb",
+        "turns": []
+      }
+    }
+  },
   "threadResume": {
     "method": "thread/resume",
     "params": {
@@ -169,6 +291,7 @@
       "instructionSources": ["AGENTS.md"],
       "model": "gpt-5.2-codex",
       "modelProvider": "openai",
+      "reasoningEffort": "medium",
       "cwd": "/native/stored-root",
       "approvalPolicy": "on-request",
       "approvalsReviewer": "user",
@@ -197,6 +320,7 @@
         "excludeTmpdirEnvVar": true,
         "excludeSlashTmp": true
       },
+      "model": "gpt-5.2-codex",
       "effort": "medium"
     },
     "result": {
@@ -302,15 +426,94 @@
         "turnId": "turn-1",
         "response": {
           "type": "permissions",
-          "permissions": { "network": { "enabled": true } },
-          "scope": "turn",
-          "strictAutoReview": true
+          "intent": "grant",
+          "scope": "turn"
         }
       },
       "wireResult": {
-        "permissions": { "network": { "enabled": true } },
+        "permissions": {
+          "network": { "enabled": true },
+          "fileSystem": { "read": ["/native/stored-root"] }
+        },
         "scope": "turn",
         "strictAutoReview": true
+      }
+    },
+    {
+      "request": {
+        "id": "permission-session",
+        "method": "item/permissions/requestApproval",
+        "params": {
+          "threadId": "thread-1",
+          "turnId": "turn-1",
+          "itemId": "item-permissions-session",
+          "startedAtMs": 1723600013500,
+          "cwd": "/native/stored-root",
+          "permissions": {
+            "fileSystem": { "write": ["/native/stored-root"] }
+          }
+        }
+      },
+      "responseInput": {
+        "runtimeGeneration": 7,
+        "requestId": "permission-session",
+        "scope": {
+          "communityId": "community-1",
+          "projectDtag": "project-1",
+          "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "threadId": "thread-1",
+        "turnId": "turn-1",
+        "response": {
+          "type": "permissions",
+          "intent": "grant",
+          "scope": "session"
+        }
+      },
+      "wireResult": {
+        "permissions": {
+          "fileSystem": { "write": ["/native/stored-root"] }
+        },
+        "scope": "session",
+        "strictAutoReview": false
+      }
+    },
+    {
+      "request": {
+        "id": 10,
+        "method": "item/permissions/requestApproval",
+        "params": {
+          "threadId": "thread-1",
+          "turnId": "turn-1",
+          "itemId": "item-permissions-decline",
+          "startedAtMs": 1723600014000,
+          "cwd": "/native/stored-root",
+          "permissions": {
+            "network": { "enabled": true },
+            "fileSystem": { "write": ["/native/stored-root"] }
+          }
+        }
+      },
+      "responseInput": {
+        "runtimeGeneration": 7,
+        "requestId": 10,
+        "scope": {
+          "communityId": "community-1",
+          "projectDtag": "project-1",
+          "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "threadId": "thread-1",
+        "turnId": "turn-1",
+        "response": {
+          "type": "permissions",
+          "intent": "decline",
+          "scope": "turn"
+        }
+      },
+      "wireResult": {
+        "permissions": {},
+        "scope": "turn",
+        "strictAutoReview": false
       }
     }
   ],
@@ -336,18 +539,21 @@
       "method": "thread/started",
       "params": {
         "thread": {
-          "id": "thread-1",
-          "sessionId": "session-1",
+          "id": "thread-2",
+          "sessionId": "thread-2",
+          "forkedFromId": "thread-1",
+          "parentThreadId": null,
           "cliVersion": "0.145.0",
           "preview": "Run the focused tests",
           "ephemeral": false,
           "modelProvider": "openai",
-          "createdAt": 1723600000,
-          "updatedAt": 1723600001,
-          "cwd": "/native/stored-root",
+          "createdAt": 1723600020,
+          "updatedAt": 1723600021,
+          "cwd": "/native/fork-root",
+          "name": "Native contract",
           "source": "appServer",
           "status": { "type": "idle" },
-          "threadSource": "schoolx-code/67f11a1d-0274-4d40-9b0c-e406e51c64fb",
+          "threadSource": "schoolx-code/89c210f4-7a5b-4bd5-a98c-322386a8a2e9",
           "turns": []
         }
       }
@@ -361,6 +567,14 @@
     },
     {
       "method": "thread/closed",
+      "params": { "threadId": "thread-1" }
+    },
+    {
+      "method": "thread/archived",
+      "params": { "threadId": "thread-1" }
+    },
+    {
+      "method": "thread/unarchived",
       "params": { "threadId": "thread-1" }
     },
     {

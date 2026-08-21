@@ -27,6 +27,20 @@ impl CodeRuntimeProbe {
             error: Some(error.into()),
         }
     }
+
+    /// Clone this probe for Tauri/status egress without altering spawn authority.
+    pub(crate) fn redacted_for_egress(&self) -> Self {
+        self.redacted_for_egress_with(super::protocol::redact_protocol_text)
+    }
+
+    fn redacted_for_egress_with(&self, redact: impl Fn(&str) -> String) -> Self {
+        Self {
+            available: self.available,
+            executable: self.executable.as_deref().map(&redact),
+            version: self.version.as_deref().map(&redact),
+            error: self.error.as_deref().map(redact),
+        }
+    }
 }
 
 pub(crate) fn probe_codex(explicit: Option<&Path>) -> CodeRuntimeProbe {
@@ -189,6 +203,21 @@ fn first_nonempty_line(bytes: &[u8]) -> Option<&str> {
 mod tests {
     use super::*;
 
+    #[cfg(unix)]
+    fn fake_codex(script: &str) -> Result<(tempfile::TempDir, PathBuf), String> {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
+        let path = directory.path().join("codex");
+        std::fs::write(&path, script).map_err(|error| error.to_string())?;
+        let mut permissions = std::fs::metadata(&path)
+            .map_err(|error| error.to_string())?
+            .permissions();
+        permissions.set_mode(0o755);
+        std::fs::set_permissions(&path, permissions).map_err(|error| error.to_string())?;
+        Ok((directory, path))
+    }
+
     #[test]
     fn explicit_paths_must_be_absolute() {
         let result = resolve_codex(Some(Path::new("codex")));
@@ -201,6 +230,80 @@ mod tests {
             first_nonempty_line(b"\n codex-cli 0.145.0 \nwarning\n"),
             Some("codex-cli 0.145.0")
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn redacts_child_supplied_probe_error_and_version_text() -> Result<(), String> {
+        let failure_canary = "sk-probe-failure-canary";
+        let (_failure_directory, failure_executable) = fake_codex(
+            "#!/bin/sh\nprintf '%s\\n' 'version failed: sk-probe-failure-canary' >&2\nexit 1\n",
+        )?;
+        let raw_failed = probe_codex(Some(&failure_executable));
+        assert!(raw_failed
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains(failure_canary)));
+        let failed = raw_failed.redacted_for_egress();
+        let error = failed
+            .error
+            .as_deref()
+            .ok_or_else(|| "failed probe returned no diagnostic".to_string())?;
+        assert!(!failed.available);
+        assert!(!error.contains(failure_canary));
+        assert!(error.contains("[REDACTED]"));
+
+        let version_canary = "sk-probe-version-canary";
+        let (_version_directory, version_executable) = fake_codex(
+            "#!/bin/sh\nprintf '%s\\n' 'codex-cli 0.145.0 sk-probe-version-canary'\nexit 0\n",
+        )?;
+        let raw_succeeded = probe_codex(Some(&version_executable));
+        assert!(raw_succeeded
+            .version
+            .as_deref()
+            .is_some_and(|version| version.contains(version_canary)));
+        assert!(ensure_supported_codex_version(&raw_succeeded).is_err());
+        let succeeded = raw_succeeded.redacted_for_egress();
+        let version = succeeded
+            .version
+            .as_deref()
+            .ok_or_else(|| "successful probe returned no version".to_string())?;
+        assert!(succeeded.available);
+        assert!(!version.contains(version_canary));
+        assert!(version.contains("[REDACTED]"));
+        Ok(())
+    }
+
+    #[test]
+    fn egress_redaction_does_not_change_raw_version_compatibility() -> Result<(), String> {
+        let raw = CodeRuntimeProbe {
+            available: true,
+            executable: Some("/canonical/schoolx-executable-canary/codex".to_string()),
+            version: Some("codex-cli 0.145.0".to_string()),
+            error: None,
+        };
+        ensure_supported_codex_version(&raw)?;
+
+        let redacted = raw.redacted_for_egress_with(|text| {
+            super::super::protocol::redact_protocol_text_with_sensitive_values(
+                text,
+                &["0.145.0", "schoolx-executable-canary"],
+            )
+        });
+        assert_eq!(raw.version.as_deref(), Some("codex-cli 0.145.0"));
+        assert_eq!(redacted.version.as_deref(), Some("codex-cli [REDACTED]"));
+        assert_eq!(
+            raw.executable.as_deref(),
+            Some("/canonical/schoolx-executable-canary/codex")
+        );
+        assert!(redacted
+            .executable
+            .as_deref()
+            .is_some_and(
+                |executable| !executable.contains("schoolx-executable-canary")
+                    && executable.contains("[REDACTED]")
+            ));
+        Ok(())
     }
 
     #[test]

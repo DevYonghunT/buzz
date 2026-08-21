@@ -90,6 +90,48 @@ type ChangedFileIconVisual = {
   containerClassName: string;
 };
 
+type ChangedFileStatusVisual = {
+  badge: string;
+  className: string;
+  label: string;
+};
+
+const CHANGED_FILE_STATUS_VISUALS: Record<
+  NonNullable<ProjectRepoDiffFile["status"]>,
+  ChangedFileStatusVisual
+> = {
+  added: {
+    badge: "A",
+    className: "border-green-500/30 bg-green-500/10 text-green-600",
+    label: "Added",
+  },
+  modified: {
+    badge: "M",
+    className: "border-amber-500/30 bg-amber-500/10 text-amber-600",
+    label: "Modified",
+  },
+  deleted: {
+    badge: "D",
+    className: "border-destructive/30 bg-destructive/10 text-destructive",
+    label: "Deleted",
+  },
+  typeChanged: {
+    badge: "T",
+    className: "border-sky-500/30 bg-sky-500/10 text-sky-600",
+    label: "Type changed",
+  },
+  unmerged: {
+    badge: "U",
+    className: "border-purple-500/30 bg-purple-500/10 text-purple-600",
+    label: "Unmerged",
+  },
+  untracked: {
+    badge: "?",
+    className: "border-cyan-500/30 bg-cyan-500/10 text-cyan-600",
+    label: "Untracked",
+  },
+};
+
 const CODE_EXTENSIONS = new Set([
   "c",
   "cc",
@@ -430,6 +472,10 @@ function changedFileStats(diff: ProjectRepoDiff | null | undefined) {
   };
 }
 
+function changedFileStatusVisual(file: ProjectRepoDiffFile) {
+  return file.status ? CHANGED_FILE_STATUS_VISUALS[file.status] : null;
+}
+
 function errorMessage(error: unknown) {
   const message =
     error instanceof Error
@@ -488,6 +534,14 @@ function DiffPreview({
       }
     };
   }, [file.path, focusedAnchor]);
+
+  if (file.binary) {
+    return (
+      <div className="bg-muted/20 px-4 py-4 text-sm text-muted-foreground">
+        Binary file preview is not available.
+      </div>
+    );
+  }
 
   if (rows.length === 0) {
     return (
@@ -615,6 +669,7 @@ function FileTreeItems({
 }) {
   return sortedFileTreeChildren(node).map((child) => {
     if (child.file) {
+      const statusVisual = changedFileStatusVisual(child.file);
       return (
         <button
           className={cn(
@@ -628,6 +683,19 @@ function FileTreeItems({
         >
           <ChangedFileTreeIcon path={child.file.path} />
           <span className="min-w-0 flex-1 truncate">{child.name}</span>
+          {statusVisual ? (
+            <span
+              aria-label={`${statusVisual.label} file status`}
+              className={cn(
+                "inline-flex min-w-5 shrink-0 items-center justify-center border px-1 py-0.5 font-medium text-3xs",
+                statusVisual.className,
+              )}
+              role="img"
+              title={statusVisual.label}
+            >
+              {statusVisual.badge}
+            </span>
+          ) : null}
         </button>
       );
     }
@@ -793,6 +861,9 @@ export function ProjectDiffFilesPanel({
     filteredFiles.find((file) => file.path === selectedPath) ??
     filteredFiles[0] ??
     null;
+  const selectedStatusVisual = selectedFile
+    ? changedFileStatusVisual(selectedFile)
+    : null;
 
   React.useEffect(() => {
     if (!focusedAnchor) return;
@@ -918,18 +989,34 @@ export function ProjectDiffFilesPanel({
                       {directoryName(selectedFile.path)}
                     </span>
                   ) : null}
+                  {selectedStatusVisual ? (
+                    <span
+                      className={cn(
+                        "inline-flex shrink-0 items-center border px-1.5 py-0.5 font-medium text-3xs",
+                        selectedStatusVisual.className,
+                      )}
+                    >
+                      {selectedStatusVisual.label}
+                    </span>
+                  ) : null}
                 </div>
                 <div className="flex shrink-0 items-center gap-2 text-muted-foreground">
-                  <span
-                    className={cn(
-                      fileAdditions(selectedFile) > 0 && "text-green-500",
-                    )}
-                  >
-                    +{fileAdditions(selectedFile)}
-                  </span>
-                  <span className="text-destructive">
-                    -{selectedFile.deletions}
-                  </span>
+                  {selectedFile.binary ? (
+                    <span>Binary</span>
+                  ) : (
+                    <>
+                      <span
+                        className={cn(
+                          fileAdditions(selectedFile) > 0 && "text-green-500",
+                        )}
+                      >
+                        +{fileAdditions(selectedFile)}
+                      </span>
+                      <span className="text-destructive">
+                        -{selectedFile.deletions}
+                      </span>
+                    </>
+                  )}
                 </div>
               </header>
               <DiffPreview

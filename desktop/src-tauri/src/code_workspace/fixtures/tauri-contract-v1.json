@@ -9,15 +9,31 @@
       "name": "code_runtime_events",
       "topLevelArgs": ["afterSequence", "runtimeGeneration", "scope"]
     },
+    { "name": "code_models_list", "topLevelArgs": [] },
+    { "name": "code_model_selection_set", "topLevelArgs": ["input"] },
+    {
+      "name": "code_terminal_open",
+      "topLevelArgs": ["input", "onEvent"]
+    },
+    { "name": "code_terminal_resize", "topLevelArgs": ["input"] },
+    { "name": "code_terminal_stdin", "topLevelArgs": ["input"] },
+    { "name": "code_terminal_terminate", "topLevelArgs": ["input"] },
     { "name": "code_repository_inspect", "topLevelArgs": ["input"] },
     { "name": "code_worktree_prepare", "topLevelArgs": ["input"] },
     { "name": "code_worktree_status", "topLevelArgs": ["descriptor"] },
+    { "name": "code_worktrees_list", "topLevelArgs": ["input"] },
+    { "name": "code_worktree_remove", "topLevelArgs": ["input"] },
     {
       "name": "code_thread_preparations_list",
       "topLevelArgs": ["input"]
     },
     { "name": "code_threads_list", "topLevelArgs": ["input"] },
+    { "name": "code_thread_archive", "topLevelArgs": ["input"] },
+    { "name": "code_thread_unarchive", "topLevelArgs": ["input"] },
+    { "name": "code_thread_rename", "topLevelArgs": ["input"] },
+    { "name": "code_thread_changes", "topLevelArgs": ["input"] },
     { "name": "code_thread_start", "topLevelArgs": ["input"] },
+    { "name": "code_thread_fork", "topLevelArgs": ["input"] },
     {
       "name": "code_thread_binding_recover",
       "topLevelArgs": ["input"]
@@ -26,12 +42,27 @@
     { "name": "code_turn_start", "topLevelArgs": ["input"] },
     { "name": "code_turn_steer", "topLevelArgs": ["input"] },
     { "name": "code_turn_interrupt", "topLevelArgs": ["input"] },
-    { "name": "code_approval_respond", "topLevelArgs": ["input"] }
+    { "name": "code_approval_respond", "topLevelArgs": ["input"] },
+    { "name": "code_thread_git_status", "topLevelArgs": ["input"] },
+    { "name": "code_thread_git_stage", "topLevelArgs": ["input"] },
+    { "name": "code_thread_git_unstage", "topLevelArgs": ["input"] },
+    { "name": "code_thread_git_commit", "topLevelArgs": ["input"] },
+    { "name": "code_thread_git_reconcile", "topLevelArgs": ["input"] },
+    { "name": "code_thread_git_acknowledge", "topLevelArgs": ["input"] }
   ],
   "eventName": "schoolx-code-workspace-event",
   "enums": {
     "executionMode": ["worktree", "local"],
+    "threadChangeStatus": [
+      "added",
+      "modified",
+      "deleted",
+      "typeChanged",
+      "unmerged",
+      "untracked"
+    ],
     "preparationState": ["prepared", "starting"],
+    "preparationOperation": ["start", "fork"],
     "runtimePhase": [
       "notInstalled",
       "stopped",
@@ -43,9 +74,68 @@
     ],
     "approvalDecision": ["accept", "acceptForSession", "decline", "cancel"],
     "permissionScope": ["turn", "session"],
-    "approvalResponseType": ["decision", "permissions"]
+    "permissionIntent": ["grant", "decline"],
+    "approvalResponseType": ["decision", "permissions"],
+    "threadLifecycle": [
+      "active",
+      "archiving",
+      "archived",
+      "unarchiving",
+      "unknown"
+    ],
+    "worktreeInventoryBlocker": [
+      "activeBinding",
+      "lifecycleUnsettled",
+      "unfinishedPreparation",
+      "localCheckout",
+      "unavailableRoot",
+      "dirtyRoot",
+      "branchAttached",
+      "headDrift",
+      "mergeProofUnavailable"
+    ]
   },
   "strictInputs": {
+    "terminalOpen": {
+      "scope": {
+        "communityId": "community-1",
+        "projectDtag": "project-1",
+        "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "threadId": "thread-1",
+      "cols": 120,
+      "rows": 32
+    },
+    "terminalResize": {
+      "scope": {
+        "communityId": "community-1",
+        "projectDtag": "project-1",
+        "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "threadId": "thread-1",
+      "sessionId": "d9b41c7a-0e12-4df2-8c19-7e5a6b3c2901",
+      "cols": 132,
+      "rows": 40
+    },
+    "terminalStdin": {
+      "scope": {
+        "communityId": "community-1",
+        "projectDtag": "project-1",
+        "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "threadId": "thread-1",
+      "sessionId": "d9b41c7a-0e12-4df2-8c19-7e5a6b3c2901",
+      "data": [112, 119, 100, 10]
+    },
+    "terminalTerminate": {
+      "scope": {
+        "communityId": "community-1",
+        "projectDtag": "project-1",
+        "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "threadId": "thread-1",
+      "sessionId": "d9b41c7a-0e12-4df2-8c19-7e5a6b3c2901"
+    },
     "repositoryInspect": {
       "repositoryRoot": "/native/repository",
       "baseRef": "main"
@@ -67,6 +157,21 @@
         "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       }
     },
+    "worktreesList": {
+      "scope": {
+        "communityId": "community-1",
+        "projectDtag": "project-1",
+        "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    "worktreeRemove": {
+      "scope": {
+        "communityId": "community-1",
+        "projectDtag": "project-1",
+        "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "threadId": "thread-archived"
+    },
     "threadStart": {
       "scope": {
         "communityId": "community-1",
@@ -75,6 +180,14 @@
       },
       "preparationId": "67f11a1d-0274-4d40-9b0c-e406e51c64fb",
       "model": "gpt-5.2-codex"
+    },
+    "threadFork": {
+      "scope": {
+        "communityId": "community-1",
+        "projectDtag": "project-1",
+        "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "threadId": "thread-1"
     },
     "threadBindingRecover": {
       "scope": {
@@ -92,6 +205,39 @@
         "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       }
     },
+    "threadArchive": {
+      "scope": {
+        "communityId": "community-1",
+        "projectDtag": "project-1",
+        "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "threadId": "thread-1"
+    },
+    "threadUnarchive": {
+      "scope": {
+        "communityId": "community-1",
+        "projectDtag": "project-1",
+        "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "threadId": "thread-1"
+    },
+    "threadRename": {
+      "scope": {
+        "communityId": "community-1",
+        "projectDtag": "project-1",
+        "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "threadId": "thread-1",
+      "name": "Renamed native contract"
+    },
+    "threadChanges": {
+      "scope": {
+        "communityId": "community-1",
+        "projectDtag": "project-1",
+        "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "threadId": "thread-1"
+    },
     "threadResume": {
       "scope": {
         "communityId": "community-1",
@@ -101,6 +247,10 @@
       "threadId": "thread-1",
       "model": null
     },
+    "modelSelection": {
+      "model": "gpt-5.2-codex",
+      "reasoningEffort": "high"
+    },
     "turnStart": {
       "scope": {
         "communityId": "community-1",
@@ -109,7 +259,7 @@
       },
       "threadId": "thread-1",
       "prompt": "Run the focused tests",
-      "model": null,
+      "model": "gpt-5.2-codex",
       "effort": "medium"
     },
     "turnSteer": {
@@ -155,12 +305,50 @@
       "turnId": "turn-1",
       "response": {
         "type": "permissions",
-        "permissions": {
-          "network": { "enabled": true }
-        },
-        "scope": "turn",
-        "strictAutoReview": true
+        "intent": "grant",
+        "scope": "turn"
       }
+    },
+    "gitStatus": {
+      "scope": {
+        "communityId": "community-1",
+        "projectDtag": "project-1",
+        "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "threadId": "thread-1"
+    },
+    "gitStage": {
+      "scope": {
+        "communityId": "community-1",
+        "projectDtag": "project-1",
+        "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "threadId": "thread-1",
+      "writeGeneration": 3,
+      "snapshotId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "fileId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    },
+    "gitCommit": {
+      "scope": {
+        "communityId": "community-1",
+        "projectDtag": "project-1",
+        "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "threadId": "thread-1",
+      "writeGeneration": 3,
+      "snapshotId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "message": "Implement exact Git handoff"
+    },
+    "gitAcknowledge": {
+      "scope": {
+        "communityId": "community-1",
+        "projectDtag": "project-1",
+        "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "threadId": "thread-1",
+      "operationId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "writeGeneration": 4,
+      "snapshotId": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
     }
   },
   "invocations": {
@@ -184,6 +372,42 @@
     }
   },
   "outputs": {
+    "terminalSession": {
+      "scope": {
+        "communityId": "community-1",
+        "projectDtag": "project-1",
+        "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "threadId": "thread-1",
+      "sessionId": "d9b41c7a-0e12-4df2-8c19-7e5a6b3c2901",
+      "cols": 120,
+      "rows": 32
+    },
+    "terminalOutputEvent": {
+      "type": "output",
+      "scope": {
+        "communityId": "community-1",
+        "projectDtag": "project-1",
+        "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "threadId": "thread-1",
+      "sessionId": "d9b41c7a-0e12-4df2-8c19-7e5a6b3c2901",
+      "sequence": 1,
+      "data": [36, 32]
+    },
+    "terminalExitEvent": {
+      "type": "exit",
+      "scope": {
+        "communityId": "community-1",
+        "projectDtag": "project-1",
+        "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "threadId": "thread-1",
+      "sessionId": "d9b41c7a-0e12-4df2-8c19-7e5a6b3c2901",
+      "sequence": 2,
+      "exitCode": 0,
+      "signal": null
+    },
     "runtimeProbe": {
       "available": true,
       "executable": "/usr/local/bin/codex",
@@ -202,6 +426,55 @@
       "platformOs": "macos",
       "queuedNotifications": 2,
       "lastError": null
+    },
+    "modelCatalog": {
+      "runtimeGeneration": 7,
+      "models": [
+        {
+          "id": "gpt-5.2-codex",
+          "model": "gpt-5.2-codex",
+          "displayName": "GPT-5.2 Codex",
+          "description": "Coding model for agentic workflows",
+          "isDefault": true,
+          "defaultReasoningEffort": "medium",
+          "supportedReasoningEfforts": [
+            {
+              "reasoningEffort": "medium",
+              "description": "Balanced reasoning for everyday tasks"
+            },
+            {
+              "reasoningEffort": "high",
+              "description": "Deeper reasoning for complex tasks"
+            }
+          ]
+        },
+        {
+          "id": "codex-mini",
+          "model": "codex-mini-latest",
+          "displayName": "Codex Mini",
+          "description": "Fast coding model for focused tasks",
+          "isDefault": false,
+          "defaultReasoningEffort": "low",
+          "supportedReasoningEfforts": [
+            {
+              "reasoningEffort": "low",
+              "description": "Fast responses for straightforward tasks"
+            },
+            {
+              "reasoningEffort": "medium",
+              "description": "Balanced reasoning for everyday tasks"
+            }
+          ]
+        }
+      ],
+      "recentSelection": {
+        "model": "gpt-5.2-codex",
+        "reasoningEffort": "medium"
+      }
+    },
+    "modelSelection": {
+      "model": "gpt-5.2-codex",
+      "reasoningEffort": "high"
     },
     "repositoryDescriptor": {
       "repositoryRoot": "/native/repository",
@@ -227,6 +500,8 @@
       "executionRoot": "/native/stored-root",
       "baseRef": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
       "worktreeId": null,
+      "operation": "start",
+      "sourceThreadId": null,
       "state": "starting"
     },
     "preparedWorktree": {
@@ -276,9 +551,112 @@
         "executionRoot": "/native/stored-root",
         "baseRef": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         "worktreeId": null,
+        "operation": "start",
+        "sourceThreadId": null,
         "state": "starting"
       }
     ],
+    "worktreeInventory": [
+      {
+        "scope": {
+          "communityId": "community-1",
+          "projectDtag": "project-1",
+          "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "authority": {
+          "type": "binding",
+          "threadId": "thread-1",
+          "lifecycle": "active"
+        },
+        "descriptor": {
+          "executionMode": "worktree",
+          "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "executionRoot": "/native/managed-active",
+          "baseRef": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "worktreeId": "11111111-1111-4111-8111-111111111111"
+        },
+        "inspection": {
+          "status": "unavailable",
+          "error": "Managed worktree is unavailable"
+        },
+        "preserved": true,
+        "canRemove": false,
+        "blockers": ["activeBinding", "unavailableRoot"]
+      },
+      {
+        "scope": {
+          "communityId": "community-1",
+          "projectDtag": "project-1",
+          "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "authority": {
+          "type": "binding",
+          "threadId": "thread-archived",
+          "lifecycle": "archived"
+        },
+        "descriptor": {
+          "executionMode": "worktree",
+          "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "executionRoot": "/native/managed-archived",
+          "baseRef": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "worktreeId": "22222222-2222-4222-8222-222222222222"
+        },
+        "inspection": {
+          "status": "available",
+          "headCommit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "branch": null,
+          "dirty": false
+        },
+        "preserved": true,
+        "canRemove": true,
+        "blockers": []
+      },
+      {
+        "scope": {
+          "communityId": "community-1",
+          "projectDtag": "project-1",
+          "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "authority": {
+          "type": "preparation",
+          "preparationId": "67f11a1d-0274-4d40-9b0c-e406e51c64fb",
+          "operation": "fork",
+          "state": "starting",
+          "sourceThreadId": "thread-1"
+        },
+        "descriptor": {
+          "executionMode": "worktree",
+          "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "executionRoot": "/native/managed-fork",
+          "baseRef": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "worktreeId": "33333333-3333-4333-8333-333333333333"
+        },
+        "inspection": {
+          "status": "available",
+          "headCommit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "branch": null,
+          "dirty": false
+        },
+        "preserved": true,
+        "canRemove": false,
+        "blockers": ["unfinishedPreparation"]
+      }
+    ],
+    "worktreeRemovalReceipt": {
+      "removalId": "67f11a1d-0274-4d40-9b0c-e406e51c64fb",
+      "scope": {
+        "communityId": "community-1",
+        "projectDtag": "project-1",
+        "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "threadId": "thread-archived",
+      "worktreeId": "22222222-2222-4222-8222-222222222222",
+      "headCommit": "cccccccccccccccccccccccccccccccccccccccc",
+      "mergedIntoRef": "refs/heads/main",
+      "mergedIntoCommit": "dddddddddddddddddddddddddddddddddddddddd",
+      "transcriptDisposition": "preserved",
+      "executionDisposition": "removed"
+    },
     "threadSummary": {
       "id": "thread-1",
       "sessionId": "session-1",
@@ -320,12 +698,45 @@
             "baseRef": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
             "worktreeId": null
           },
+          "lifecycle": "active",
           "thread": null,
           "unavailable": "Codex app-server is not ready"
         }
       ],
       "nextCursor": null,
       "backwardsCursor": null
+    },
+    "threadLifecycleMutation": {
+      "binding": {
+        "communityId": "community-1",
+        "projectDtag": "project-1",
+        "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "codexThreadId": "thread-1",
+        "executionMode": "local",
+        "executionRoot": "/native/stored-root",
+        "baseRef": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "worktreeId": null
+      },
+      "lifecycle": "archived",
+      "thread": null
+    },
+    "threadChanges": {
+      "files": [
+        {
+          "path": "desktop/src/features/code/ui/CodeChangesPanel.tsx",
+          "status": "modified",
+          "binary": false,
+          "additions": 12,
+          "deletions": 2,
+          "patch": "@@ -1,2 +1,3 @@\n-old\n+new\n+line",
+          "truncated": false
+        }
+      ],
+      "totalFiles": 1,
+      "filesTruncated": false,
+      "additions": 12,
+      "deletions": 2,
+      "commitBody": null
     },
     "boundThreadOpen": {
       "binding": {
@@ -366,7 +777,9 @@
           }
         ]
       },
-      "instructionSources": ["AGENTS.md"]
+      "instructionSources": ["AGENTS.md"],
+      "model": "gpt-5.2-codex",
+      "reasoningEffort": "medium"
     },
     "event": {
       "scope": {
@@ -405,6 +818,12 @@
       "runtimeGeneration": 7,
       "latestSequence": 11,
       "truncated": false,
+      "checkpoint": {
+        "runtimeGeneration": 7,
+        "sequenceWatermark": 11,
+        "activeTurns": [],
+        "pendingApprovals": []
+      },
       "events": [
         {
           "scope": {
@@ -426,6 +845,138 @@
           }
         }
       ]
+    },
+    "gitStatus": {
+      "state": "ready",
+      "runtimeGeneration": 7,
+      "statusRevision": 9,
+      "writeGeneration": 3,
+      "snapshotSequence": 4,
+      "scope": {
+        "communityId": "community-1",
+        "projectDtag": "project-1",
+        "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "threadId": "thread-1",
+      "snapshotId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "headCommit": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "task": {
+        "files": [
+          {
+            "fileId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "path": "src/main.ts",
+            "status": "modified",
+            "binary": false,
+            "additions": 1,
+            "deletions": 1,
+            "patch": "@@ -1 +1 @@\n-old\n+new",
+            "truncated": false
+          }
+        ],
+        "totalFiles": 1,
+        "filesTruncated": false,
+        "additions": 1,
+        "deletions": 1
+      },
+      "staged": {
+        "files": [],
+        "totalFiles": 0,
+        "filesTruncated": false,
+        "additions": 0,
+        "deletions": 0
+      },
+      "unstaged": {
+        "files": [
+          {
+            "fileId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "path": "src/main.ts",
+            "status": "modified",
+            "binary": false,
+            "additions": 1,
+            "deletions": 1,
+            "patch": "@@ -1 +1 @@\n-old\n+new",
+            "truncated": false
+          }
+        ],
+        "totalFiles": 1,
+        "filesTruncated": false,
+        "additions": 1,
+        "deletions": 1
+      },
+      "hasConflicts": false,
+      "commitIdentity": { "name": "Human Name", "email": "human@example.com" },
+      "capabilities": {
+        "stage": { "enabled": true, "reason": null },
+        "unstage": { "enabled": false, "reason": "There are no staged files." },
+        "commit": {
+          "enabled": false,
+          "reason": "There are no staged files to commit."
+        }
+      },
+      "blockingReceipt": null
+    },
+    "gitStageReceipt": {
+      "operationId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "operation": "stage",
+      "scope": {
+        "communityId": "community-1",
+        "projectDtag": "project-1",
+        "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "threadId": "thread-1",
+      "requestGeneration": 3,
+      "beforeSnapshotId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "fileId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "disposition": "staged"
+    },
+    "gitUnstageReceipt": {
+      "operationId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "operation": "unstage",
+      "scope": {
+        "communityId": "community-1",
+        "projectDtag": "project-1",
+        "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "threadId": "thread-1",
+      "requestGeneration": 3,
+      "beforeSnapshotId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "fileId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "disposition": "unstaged"
+    },
+    "gitCommitReceipt": {
+      "operationId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "operation": "commit",
+      "scope": {
+        "communityId": "community-1",
+        "projectDtag": "project-1",
+        "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "threadId": "thread-1",
+      "requestGeneration": 3,
+      "beforeSnapshotId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "previousHead": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "commit": "1111111111111111111111111111111111111111",
+      "tree": "2222222222222222222222222222222222222222",
+      "disposition": "committed"
+    },
+    "gitReconcile": {
+      "state": "none",
+      "scope": {
+        "communityId": "community-1",
+        "projectDtag": "project-1",
+        "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "threadId": "thread-1"
+    },
+    "gitAcknowledge": {
+      "scope": {
+        "communityId": "community-1",
+        "projectDtag": "project-1",
+        "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      },
+      "threadId": "thread-1",
+      "operationId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "disposition": "acknowledged"
     },
     "turnSummary": { "id": "turn-1", "status": "inProgress" },
     "threadStartError": {

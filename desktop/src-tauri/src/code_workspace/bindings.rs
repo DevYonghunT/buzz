@@ -15,14 +15,21 @@ use serde::{Deserialize, Serialize};
 
 use super::worktrees::CodeWorktreeDescriptor;
 
+mod lifecycle;
+pub(crate) mod removal;
+
+pub use lifecycle::CodeThreadLifecycleStatus;
+pub(crate) use lifecycle::{CodeThreadBindingLifecycle, CodeThreadLifecycleClaim};
+
 /// Schema version written to every SchoolX Code binding index.
-pub const CODE_THREAD_BINDING_SCHEMA_VERSION: u32 = 1;
+pub const CODE_THREAD_BINDING_SCHEMA_VERSION: u32 = 4;
 
 const CODE_STORE_DIRECTORY: &str = "code";
 const CODE_BINDING_STORE_FILE: &str = "thread-bindings.json";
 const MAX_BINDING_STORE_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_BINDINGS: usize = 4_096;
 const MAX_PREPARATIONS: usize = 4_096;
+const MAX_MERGE_TARGETS: usize = 4_096;
 const MAX_RECOVERY_BASELINE_THREADS: usize = 4_096;
 const MAX_IDENTIFIER_BYTES: usize = 512;
 const MAX_EXECUTION_ROOT_BYTES: usize = 32 * 1024;
@@ -60,7 +67,7 @@ impl CodeThreadBindingScope {
 }
 
 /// Exact lookup coordinate for one persisted Codex thread binding.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CodeThreadBindingLookupInput {
     /// Community/project/repository scope that must own the thread.
@@ -138,6 +145,16 @@ pub enum CodeThreadPreparationState {
     Starting,
 }
 
+/// Native operation that owns one durable execution preparation.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CodeThreadPreparationOperation {
+    /// A new root thread will be created with `thread/start`.
+    Start,
+    /// A bound source thread will be copied with `thread/fork`.
+    Fork,
+}
+
 /// Native-issued execution descriptor retained until a Codex thread binding
 /// is committed atomically.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -159,6 +176,10 @@ pub struct CodeThreadPreparation {
     pub base_ref: String,
     /// Managed worktree UUID, absent for an explicit local checkout.
     pub worktree_id: Option<String>,
+    /// Exact operation allowed to consume this reservation.
+    pub operation: CodeThreadPreparationOperation,
+    /// Bound source thread for `fork`; absent for a root `start`.
+    pub source_thread_id: Option<String>,
     /// Whether starting the Codex thread is still safe or requires recovery.
     pub state: CodeThreadPreparationState,
     /// Exact-root Codex thread IDs observed before `thread/start` was sent.
@@ -168,6 +189,11 @@ pub struct CodeThreadPreparation {
     /// native-only recovery detail is scrubbed from preparation-list results.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) recovery_thread_baseline: Option<Vec<String>>,
+    /// Optional native-owned direct local branch used only for a future
+    /// managed-worktree ancestry proof. This value is never accepted from or
+    /// returned to the webview.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) merge_target_ref: Option<String>,
 }
 
 impl CodeThreadPreparation {
@@ -203,6 +229,27 @@ impl CodeThreadPreparation {
         self.scope().validate()?;
         validate_execution_root(&self.execution_root)?;
         validate_commit_id(&self.base_ref)?;
+        match (self.operation, self.source_thread_id.as_deref()) {
+            (CodeThreadPreparationOperation::Start, None) => {}
+            (CodeThreadPreparationOperation::Start, Some(_)) => {
+                return Err(
+                    "SchoolX Code start preparation cannot carry a source thread".to_string(),
+                );
+            }
+            (CodeThreadPreparationOperation::Fork, Some(source_thread_id)) => {
+                validate_identifier("fork source thread", source_thread_id)?;
+                if self.execution_mode != CodeExecutionMode::Worktree {
+                    return Err(
+                        "SchoolX Code fork preparation must reserve a managed worktree".to_string(),
+                    );
+                }
+            }
+            (CodeThreadPreparationOperation::Fork, None) => {
+                return Err(
+                    "SchoolX Code fork preparation is missing its source thread".to_string()
+                );
+            }
+        }
         match (self.state, self.recovery_thread_baseline.as_ref()) {
             (CodeThreadPreparationState::Prepared, Some(_)) => {
                 return Err(
@@ -214,16 +261,85 @@ impl CodeThreadPreparation {
             }
             _ => {}
         }
+        if self.operation == CodeThreadPreparationOperation::Fork
+            && self.state == CodeThreadPreparationState::Starting
+            && self.recovery_thread_baseline.is_none()
+        {
+            return Err(
+                "SchoolX Code starting fork preparation requires a recovery baseline".to_string(),
+            );
+        }
         match (self.execution_mode, self.worktree_id.as_deref()) {
-            (CodeExecutionMode::Worktree, Some(worktree_id)) => validate_worktree_id(worktree_id),
+            (CodeExecutionMode::Worktree, Some(worktree_id)) => {
+                validate_worktree_id(worktree_id)?;
+                if let Some(target_ref) = self.merge_target_ref.as_deref() {
+                    validate_direct_local_branch_ref(target_ref)?;
+                }
+                Ok(())
+            }
             (CodeExecutionMode::Worktree, None) => {
                 Err("SchoolX Code worktree preparation requires a worktree id".to_string())
             }
-            (CodeExecutionMode::Local, None) => Ok(()),
+            (CodeExecutionMode::Local, None) if self.merge_target_ref.is_none() => Ok(()),
+            (CodeExecutionMode::Local, None) => Err(
+                "SchoolX Code local preparation cannot carry merge-target authority".to_string(),
+            ),
             (CodeExecutionMode::Local, Some(_)) => {
                 Err("SchoolX Code local preparation cannot carry a worktree id".to_string())
             }
         }
+    }
+}
+
+/// Native-only direct-local-branch authority joined to one committed managed
+/// binding. The public eight-field binding deliberately remains unchanged.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct CodeWorktreeMergeTarget {
+    community_id: String,
+    project_dtag: String,
+    repository_identity: String,
+    codex_thread_id: String,
+    worktree_id: String,
+    target_ref: String,
+}
+
+impl CodeWorktreeMergeTarget {
+    fn scope(&self) -> CodeThreadBindingScope {
+        CodeThreadBindingScope {
+            community_id: self.community_id.clone(),
+            project_dtag: self.project_dtag.clone(),
+            repository_identity: self.repository_identity.clone(),
+        }
+    }
+
+    fn lookup(&self) -> CodeThreadBindingLookupInput {
+        CodeThreadBindingLookupInput {
+            scope: self.scope(),
+            codex_thread_id: self.codex_thread_id.clone(),
+        }
+    }
+
+    fn for_binding(binding: &CodeThreadBinding, target_ref: String) -> Result<Self, String> {
+        let worktree_id = binding.worktree_id.clone().ok_or_else(|| {
+            "SchoolX Code merge-target authority requires a managed worktree".to_string()
+        })?;
+        let authority = Self {
+            community_id: binding.community_id.clone(),
+            project_dtag: binding.project_dtag.clone(),
+            repository_identity: binding.repository_identity.clone(),
+            codex_thread_id: binding.codex_thread_id.clone(),
+            worktree_id,
+            target_ref,
+        };
+        authority.validate()?;
+        Ok(authority)
+    }
+
+    fn validate(&self) -> Result<(), String> {
+        self.lookup().validate()?;
+        validate_worktree_id(&self.worktree_id)?;
+        validate_direct_local_branch_ref(&self.target_ref)
     }
 }
 
@@ -270,9 +386,15 @@ pub struct CodeThreadBindingIndex {
     pub version: u32,
     /// All persisted bindings, stored in deterministic coordinate order.
     pub bindings: Vec<CodeThreadBinding>,
+    /// Native-only lifecycle projections atomically joined one-to-one with bindings.
+    pub(crate) lifecycles: Vec<lifecycle::CodeThreadLifecycleRecord>,
     /// Native-issued execution reservations not yet committed as bindings.
     #[serde(default)]
     pub preparations: Vec<CodeThreadPreparation>,
+    /// Optional native merge target for committed managed bindings.
+    pub(crate) merge_targets: Vec<CodeWorktreeMergeTarget>,
+    /// Native-only removal claims and permanent transcript tombstones.
+    pub(crate) removals: Vec<removal::CodeWorktreeRemovalRecord>,
 }
 
 impl Default for CodeThreadBindingIndex {
@@ -280,7 +402,10 @@ impl Default for CodeThreadBindingIndex {
         Self {
             version: CODE_THREAD_BINDING_SCHEMA_VERSION,
             bindings: Vec::new(),
+            lifecycles: Vec::new(),
             preparations: Vec::new(),
+            merge_targets: Vec::new(),
+            removals: Vec::new(),
         }
     }
 }
@@ -301,6 +426,11 @@ impl CodeThreadBindingIndex {
         if self.preparations.len() > MAX_PREPARATIONS {
             return Err(format!(
                 "SchoolX Code binding index exceeds the {MAX_PREPARATIONS}-preparation limit"
+            ));
+        }
+        if self.merge_targets.len() > MAX_MERGE_TARGETS {
+            return Err(format!(
+                "SchoolX Code binding index exceeds the {MAX_MERGE_TARGETS}-merge-target limit"
             ));
         }
 
@@ -332,7 +462,9 @@ impl CodeThreadBindingIndex {
                 }
             }
         }
+        lifecycle::validate_lifecycle_join(&self.bindings, &self.lifecycles)?;
         let mut preparation_ids = HashSet::with_capacity(self.preparations.len());
+        let mut unfinished_fork_sources = HashSet::new();
         for preparation in &self.preparations {
             preparation.validate()?;
             if !preparation_ids.insert(preparation.preparation_id.as_str()) {
@@ -357,7 +489,103 @@ impl CodeThreadBindingIndex {
                     ));
                 }
             }
+            if preparation.operation == CodeThreadPreparationOperation::Fork {
+                let source_thread_id =
+                    preparation.source_thread_id.as_deref().ok_or_else(|| {
+                        "SchoolX Code fork preparation is missing its source thread".to_string()
+                    })?;
+                let source_key = (
+                    preparation.community_id.as_str(),
+                    preparation.project_dtag.as_str(),
+                    preparation.repository_identity.as_str(),
+                    source_thread_id,
+                );
+                if !unfinished_fork_sources.insert(source_key) {
+                    return Err(
+                        "SchoolX Code binding index contains duplicate unfinished forks for one source"
+                            .to_string(),
+                    );
+                }
+                let source = self
+                    .bindings
+                    .iter()
+                    .find(|binding| {
+                        binding.community_id == preparation.community_id
+                            && binding.project_dtag == preparation.project_dtag
+                            && binding.repository_identity == preparation.repository_identity
+                            && binding.codex_thread_id == source_thread_id
+                    })
+                    .ok_or_else(|| {
+                        "SchoolX Code fork preparation references a missing source binding"
+                            .to_string()
+                    })?;
+                if source.execution_mode != CodeExecutionMode::Worktree
+                    || source.worktree_id.is_none()
+                {
+                    return Err(
+                        "SchoolX Code fork preparation source is not a managed worktree"
+                            .to_string(),
+                    );
+                }
+                if source.execution_root == preparation.execution_root
+                    || source.worktree_id == preparation.worktree_id
+                {
+                    return Err(
+                        "SchoolX Code fork source and destination share a managed worktree"
+                            .to_string(),
+                    );
+                }
+                let source_target = self
+                    .merge_targets
+                    .iter()
+                    .find(|authority| {
+                        authority.codex_thread_id == source_thread_id
+                            && authority.community_id == preparation.community_id
+                            && authority.project_dtag == preparation.project_dtag
+                            && authority.repository_identity == preparation.repository_identity
+                    })
+                    .map(|authority| authority.target_ref.as_str());
+                if preparation.merge_target_ref.as_deref() != source_target {
+                    return Err(
+                        "SchoolX Code fork preparation did not copy its source merge-target authority"
+                            .to_string(),
+                    );
+                }
+            }
         }
+        let mut merge_target_owners = HashSet::with_capacity(self.merge_targets.len());
+        for authority in &self.merge_targets {
+            authority.validate()?;
+            let lookup = authority.lookup();
+            if !merge_target_owners.insert(lookup.clone()) {
+                return Err(format!(
+                    "SchoolX Code binding index contains duplicate merge-target authority for {}",
+                    lookup.codex_thread_id
+                ));
+            }
+            let binding = self
+                .bindings
+                .iter()
+                .find(|binding| {
+                    binding.codex_thread_id == lookup.codex_thread_id
+                        && binding.is_in_scope(&lookup.scope)
+                })
+                .ok_or_else(|| {
+                    format!(
+                        "SchoolX Code binding index contains orphan merge-target authority for {}",
+                        lookup.codex_thread_id
+                    )
+                })?;
+            if binding.execution_mode != CodeExecutionMode::Worktree
+                || binding.worktree_id.as_deref() != Some(authority.worktree_id.as_str())
+            {
+                return Err(format!(
+                    "SchoolX Code merge-target authority does not match managed binding {}",
+                    lookup.codex_thread_id
+                ));
+            }
+        }
+        removal::validate_removal_join(self)?;
         Ok(())
     }
 
@@ -369,6 +597,7 @@ impl CodeThreadBindingIndex {
                 .then_with(|| left.repository_identity.cmp(&right.repository_identity))
                 .then_with(|| left.codex_thread_id.cmp(&right.codex_thread_id))
         });
+        lifecycle::sort_lifecycle_records(&mut self.lifecycles);
         self.preparations.sort_by(|left, right| {
             left.community_id
                 .cmp(&right.community_id)
@@ -376,6 +605,26 @@ impl CodeThreadBindingIndex {
                 .then_with(|| left.repository_identity.cmp(&right.repository_identity))
                 .then_with(|| left.preparation_id.cmp(&right.preparation_id))
         });
+        self.merge_targets.sort_by(|left, right| {
+            left.community_id
+                .cmp(&right.community_id)
+                .then_with(|| left.project_dtag.cmp(&right.project_dtag))
+                .then_with(|| left.repository_identity.cmp(&right.repository_identity))
+                .then_with(|| left.codex_thread_id.cmp(&right.codex_thread_id))
+        });
+        removal::sort_removal_records(&mut self.removals);
+    }
+
+    /// Return every Codex thread identity that cannot be adopted by recovery.
+    /// Removed tombstones remain reserved even though they are not live bindings.
+    pub(crate) fn reserved_thread_ids(&self) -> HashSet<String> {
+        let mut reserved = self
+            .bindings
+            .iter()
+            .map(|binding| binding.codex_thread_id.clone())
+            .collect::<HashSet<_>>();
+        reserved.extend(removal::reserved_thread_ids(self));
+        reserved
     }
 }
 
@@ -389,6 +638,7 @@ pub struct CodeThreadBindingStore {
     app_data_dir: PathBuf,
     code_dir: PathBuf,
     store_path: PathBuf,
+    read_only: bool,
 }
 
 impl CodeThreadBindingStore {
@@ -430,9 +680,76 @@ impl CodeThreadBindingStore {
             store_path: code_dir.join(CODE_BINDING_STORE_FILE),
             app_data_dir,
             code_dir,
+            read_only: false,
         };
         store.validate_store_paths()?;
         Ok(store)
+    }
+
+    /// Open an existing binding store without creating directories or changing
+    /// permissions. An absent private `code` directory represents an empty
+    /// inventory and is returned as `None`.
+    ///
+    /// Read-only projections use this constructor so a list call cannot turn a
+    /// previously untouched app-data directory into durable SchoolX state.
+    pub(crate) fn for_app_data_read_only(app_data_dir: &Path) -> Result<Option<Self>, String> {
+        if !app_data_dir.is_absolute() {
+            return Err("SchoolX Code app-data directory must be absolute".to_string());
+        }
+        let app_metadata = fs::symlink_metadata(app_data_dir).map_err(|error| {
+            format!(
+                "failed to inspect SchoolX Code app-data directory {}: {error}",
+                app_data_dir.display()
+            )
+        })?;
+        if app_metadata.file_type().is_symlink() {
+            return Err("SchoolX Code app-data directory cannot be a symlink".to_string());
+        }
+        if !app_metadata.is_dir() {
+            return Err("SchoolX Code app-data path is not a directory".to_string());
+        }
+
+        let app_data_dir = app_data_dir.canonicalize().map_err(|error| {
+            format!("failed to resolve SchoolX Code app-data directory: {error}")
+        })?;
+        let expected_code_dir = app_data_dir.join(CODE_STORE_DIRECTORY);
+        let code_metadata = match fs::symlink_metadata(&expected_code_dir) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => {
+                return Err(format!(
+                    "failed to inspect SchoolX Code data directory {}: {error}",
+                    expected_code_dir.display()
+                ));
+            }
+        };
+        if code_metadata.file_type().is_symlink() {
+            return Err(format!(
+                "SchoolX Code data directory {} cannot be a symlink",
+                expected_code_dir.display()
+            ));
+        }
+        if !code_metadata.is_dir() {
+            return Err(format!(
+                "SchoolX Code data path {} is not a directory",
+                expected_code_dir.display()
+            ));
+        }
+        let code_dir = expected_code_dir
+            .canonicalize()
+            .map_err(|error| format!("failed to resolve SchoolX Code data directory: {error}"))?;
+        if code_dir != expected_code_dir {
+            return Err("SchoolX Code data directory escaped the app-data root".to_string());
+        }
+
+        let store = Self {
+            store_path: code_dir.join(CODE_BINDING_STORE_FILE),
+            app_data_dir,
+            code_dir,
+            read_only: true,
+        };
+        store.validate_store_paths()?;
+        Ok(Some(store))
     }
 
     /// Return the canonical path of the binding index for focused persistence tests.
@@ -443,7 +760,7 @@ impl CodeThreadBindingStore {
 
     /// Load and validate the complete binding index.
     ///
-    /// An absent file is a new empty version-1 index. Invalid JSON, a missing
+    /// An absent file is a new empty current-version index. Invalid JSON, a missing
     /// version, unsupported schema versions, and invalid or duplicate records
     /// are errors; the original file is never rewritten during load.
     pub fn load(&self) -> Result<CodeThreadBindingIndex, String> {
@@ -464,6 +781,9 @@ impl CodeThreadBindingStore {
             .map_err(|error| format!("failed to inspect SchoolX Code binding index: {error}"))?;
         if !metadata.is_file() {
             return Err("SchoolX Code binding index path is not a regular file".to_string());
+        }
+        if self.read_only {
+            validate_read_only_binding_file(&self.app_data_dir, &metadata)?;
         }
         if metadata.len() > MAX_BINDING_STORE_BYTES {
             return Err(format!(
@@ -486,26 +806,12 @@ impl CodeThreadBindingStore {
         }
         let value: serde_json::Value = serde_json::from_slice(&bytes)
             .map_err(|error| format!("SchoolX Code binding index is invalid JSON: {error}"))?;
-        let version = value
-            .as_object()
-            .and_then(|object| object.get("version"))
-            .and_then(serde_json::Value::as_u64)
-            .ok_or_else(|| {
-                "SchoolX Code binding index is missing a valid schema version".to_string()
-            })?;
-        if version > u64::from(CODE_THREAD_BINDING_SCHEMA_VERSION) {
-            return Err(format!(
-                "SchoolX Code binding schema version {version} is newer than this build supports"
-            ));
+        if value.get("version").and_then(serde_json::Value::as_u64)
+            == Some(u64::from(CODE_THREAD_BINDING_SCHEMA_VERSION))
+        {
+            removal::validate_v4_removal_wire(&bytes)?;
         }
-        if version != u64::from(CODE_THREAD_BINDING_SCHEMA_VERSION) {
-            return Err(format!(
-                "unsupported SchoolX Code binding schema version {version}"
-            ));
-        }
-
-        let mut index: CodeThreadBindingIndex = serde_json::from_value(value)
-            .map_err(|error| format!("SchoolX Code binding index is invalid: {error}"))?;
+        let mut index = lifecycle::decode_binding_index(value)?;
         index.validate()?;
         index.sort();
         Ok(index)
@@ -547,6 +853,33 @@ impl CodeThreadBindingStore {
         Ok(())
     }
 
+    /// Fail before Git mutation when one source already owns unfinished fork work.
+    pub(crate) fn ensure_fork_source_available(
+        &self,
+        scope: &CodeThreadBindingScope,
+        source_thread_id: &str,
+    ) -> Result<(), String> {
+        scope.validate()?;
+        validate_identifier("fork source thread", source_thread_id)?;
+        let index = self.load()?;
+        if removal::reserves_thread_id(&index, source_thread_id) {
+            return Err(
+                "SchoolX Code source thread is reserved by removal state and cannot be forked"
+                    .to_string(),
+            );
+        }
+        if index.preparations.iter().any(|preparation| {
+            preparation.is_in_scope(scope)
+                && preparation.operation == CodeThreadPreparationOperation::Fork
+                && preparation.source_thread_id.as_deref() == Some(source_thread_id)
+        }) {
+            return Err(
+                "SchoolX Code source thread already has an unfinished fork preparation".to_string(),
+            );
+        }
+        Ok(())
+    }
+
     /// Resolve the globally unique owner of one Codex thread for native event
     /// scope enrichment. User-facing commands must continue to use
     /// [`Self::lookup`] with an explicit complete scope.
@@ -565,11 +898,12 @@ impl CodeThreadBindingStore {
     /// Fail closed when a recovery candidate is already owned by any scope.
     pub(crate) fn ensure_thread_unbound(&self, codex_thread_id: &str) -> Result<(), String> {
         validate_identifier("Codex thread", codex_thread_id)?;
-        if self
-            .load()?
+        let index = self.load()?;
+        if index
             .bindings
             .iter()
             .any(|binding| binding.codex_thread_id == codex_thread_id)
+            || removal::reserves_thread_id(&index, codex_thread_id)
         {
             return Err(format!(
                 "Codex thread {codex_thread_id} is already bound to SchoolX Code"
@@ -580,11 +914,24 @@ impl CodeThreadBindingStore {
 
     /// Persist a native-issued execution preparation before it may cross the
     /// Codex `thread/start` boundary.
+    #[cfg(test)]
     pub(crate) fn create_preparation(
         &self,
         preparation_id: String,
         scope: CodeThreadBindingScope,
         descriptor: &CodeWorktreeDescriptor,
+    ) -> Result<CodeThreadPreparation, String> {
+        self.create_preparation_with_merge_target(preparation_id, scope, descriptor, None)
+    }
+
+    /// Persist a preparation together with native-captured merge authority.
+    /// The target is never reconstructed from a caller-supplied descriptor.
+    pub(crate) fn create_preparation_with_merge_target(
+        &self,
+        preparation_id: String,
+        scope: CodeThreadBindingScope,
+        descriptor: &CodeWorktreeDescriptor,
+        merge_target_ref: Option<String>,
     ) -> Result<CodeThreadPreparation, String> {
         scope.validate()?;
         if scope.repository_identity != descriptor.repository_identity {
@@ -603,8 +950,11 @@ impl CodeThreadBindingStore {
             execution_root: descriptor.execution_root.clone(),
             base_ref: descriptor.base_ref.clone(),
             worktree_id: descriptor.worktree_id.clone(),
+            operation: CodeThreadPreparationOperation::Start,
+            source_thread_id: None,
             state: CodeThreadPreparationState::Prepared,
             recovery_thread_baseline: None,
+            merge_target_ref,
         };
         preparation.validate()?;
 
@@ -629,6 +979,87 @@ impl CodeThreadBindingStore {
         Ok(preparation)
     }
 
+    /// Persist a fresh managed destination before it may cross `thread/fork`.
+    pub(crate) fn create_fork_preparation(
+        &self,
+        preparation_id: String,
+        scope: CodeThreadBindingScope,
+        source_thread_id: String,
+        descriptor: &CodeWorktreeDescriptor,
+    ) -> Result<CodeThreadPreparation, String> {
+        scope.validate()?;
+        validate_identifier("fork source thread", &source_thread_id)?;
+        if descriptor.execution_mode != CodeExecutionMode::Worktree {
+            return Err("SchoolX Code fork destination must be a managed worktree".to_string());
+        }
+        if scope.repository_identity != descriptor.repository_identity {
+            return Err(
+                "SchoolX Code fork preparation scope does not match the native repository"
+                    .to_string(),
+            );
+        }
+        validate_execution_root(&descriptor.execution_root)?;
+        validate_live_execution_root(&descriptor.execution_root)?;
+        let mut index = self.load()?;
+        if removal::reserves_thread_id(&index, &source_thread_id) {
+            return Err("SchoolX Code fork source is reserved by removal state".to_string());
+        }
+        let merge_target_ref = index
+            .merge_targets
+            .iter()
+            .find(|authority| {
+                authority.community_id == scope.community_id
+                    && authority.project_dtag == scope.project_dtag
+                    && authority.repository_identity == scope.repository_identity
+                    && authority.codex_thread_id == source_thread_id
+            })
+            .map(|authority| authority.target_ref.clone());
+        let preparation = CodeThreadPreparation {
+            preparation_id,
+            community_id: scope.community_id,
+            project_dtag: scope.project_dtag,
+            repository_identity: scope.repository_identity,
+            execution_mode: descriptor.execution_mode,
+            execution_root: descriptor.execution_root.clone(),
+            base_ref: descriptor.base_ref.clone(),
+            worktree_id: descriptor.worktree_id.clone(),
+            operation: CodeThreadPreparationOperation::Fork,
+            source_thread_id: Some(source_thread_id.clone()),
+            state: CodeThreadPreparationState::Prepared,
+            recovery_thread_baseline: None,
+            merge_target_ref,
+        };
+        preparation.validate()?;
+
+        if index.preparations.len() >= MAX_PREPARATIONS {
+            return Err(format!(
+                "SchoolX Code binding index reached the {MAX_PREPARATIONS}-preparation limit"
+            ));
+        }
+        if index
+            .preparations
+            .iter()
+            .any(|existing| existing.preparation_id == preparation.preparation_id)
+        {
+            return Err("SchoolX Code preparation id is already reserved".to_string());
+        }
+        if index.preparations.iter().any(|existing| {
+            existing.is_in_scope(&preparation.scope())
+                && existing.operation == CodeThreadPreparationOperation::Fork
+                && existing.source_thread_id.as_deref() == Some(source_thread_id.as_str())
+        }) {
+            return Err(
+                "SchoolX Code source thread already has an unfinished fork preparation".to_string(),
+            );
+        }
+        ensure_managed_execution_unreserved(&index, &preparation)?;
+        index.preparations.push(preparation.clone());
+        index.sort();
+        index.validate()?;
+        self.save(&index)?;
+        Ok(preparation)
+    }
+
     /// List native execution preparations in one exact project scope.
     pub fn list_preparations(
         &self,
@@ -642,6 +1073,7 @@ impl CodeThreadBindingStore {
             .filter(|preparation| preparation.is_in_scope(scope))
             .map(|mut preparation| {
                 preparation.recovery_thread_baseline = None;
+                preparation.merge_target_ref = None;
                 preparation
             })
             .collect())
@@ -672,9 +1104,59 @@ impl CodeThreadBindingStore {
             .ok_or_else(|| {
                 "SchoolX Code preparation was not found in the requested scope".to_string()
             })?;
+        if preparation.operation != CodeThreadPreparationOperation::Start {
+            return Err(
+                "SchoolX Code fork preparation cannot be consumed by thread/start".to_string(),
+            );
+        }
         if preparation.state == CodeThreadPreparationState::Starting {
             return Err(
                 "SchoolX Code preparation already crossed thread/start and requires recovery"
+                    .to_string(),
+            );
+        }
+        preparation.state = CodeThreadPreparationState::Starting;
+        preparation.recovery_thread_baseline = Some(recovery_thread_baseline);
+        let claimed = preparation.clone();
+        index.sort();
+        index.validate()?;
+        self.save(&index)?;
+        Ok(claimed)
+    }
+
+    /// Atomically mark an exact fork preparation as submitted.
+    pub(crate) fn claim_preparation_for_fork(
+        &self,
+        scope: &CodeThreadBindingScope,
+        preparation_id: &str,
+        source_thread_id: &str,
+        mut recovery_thread_baseline: Vec<String>,
+    ) -> Result<CodeThreadPreparation, String> {
+        scope.validate()?;
+        validate_preparation_id(preparation_id)?;
+        validate_identifier("fork source thread", source_thread_id)?;
+        recovery_thread_baseline.sort();
+        validate_recovery_baseline(&recovery_thread_baseline)?;
+        let mut index = self.load()?;
+        let preparation = index
+            .preparations
+            .iter_mut()
+            .find(|preparation| {
+                preparation.preparation_id == preparation_id && preparation.is_in_scope(scope)
+            })
+            .ok_or_else(|| {
+                "SchoolX Code preparation was not found in the requested scope".to_string()
+            })?;
+        if preparation.operation != CodeThreadPreparationOperation::Fork
+            || preparation.source_thread_id.as_deref() != Some(source_thread_id)
+        {
+            return Err(
+                "SchoolX Code fork preparation does not match its exact source thread".to_string(),
+            );
+        }
+        if preparation.state == CodeThreadPreparationState::Starting {
+            return Err(
+                "SchoolX Code preparation already crossed thread/fork and requires recovery"
                     .to_string(),
             );
         }
@@ -723,6 +1205,50 @@ impl CodeThreadBindingStore {
         Ok(restored)
     }
 
+    /// Restore the exact fork claim only when no request bytes were admitted.
+    pub(crate) fn restore_preparation_after_unsent_fork(
+        &self,
+        claimed: &CodeThreadPreparation,
+    ) -> Result<CodeThreadPreparation, String> {
+        if claimed.operation != CodeThreadPreparationOperation::Fork {
+            return Err("SchoolX Code unsent-fork rollback requires a fork claim".to_string());
+        }
+        self.restore_claimed_preparation(claimed, "fork")
+    }
+
+    fn restore_claimed_preparation(
+        &self,
+        claimed: &CodeThreadPreparation,
+        operation: &str,
+    ) -> Result<CodeThreadPreparation, String> {
+        claimed.validate()?;
+        if claimed.state != CodeThreadPreparationState::Starting {
+            return Err(format!(
+                "SchoolX Code unsent-{operation} rollback requires the exact claimed preparation"
+            ));
+        }
+        let mut index = self.load()?;
+        let preparation = index
+            .preparations
+            .iter_mut()
+            .find(|preparation| preparation.preparation_id == claimed.preparation_id)
+            .ok_or_else(|| {
+                format!("SchoolX Code preparation was not found for unsent-{operation} rollback")
+            })?;
+        if preparation != claimed {
+            return Err(format!(
+                "SchoolX Code preparation changed after claim; unsent-{operation} rollback was refused"
+            ));
+        }
+        preparation.state = CodeThreadPreparationState::Prepared;
+        preparation.recovery_thread_baseline = None;
+        let restored = preparation.clone();
+        index.sort();
+        index.validate()?;
+        self.save(&index)?;
+        Ok(restored)
+    }
+
     /// Read one still-safe native preparation before filesystem revalidation.
     pub(crate) fn prepared_preparation(
         &self,
@@ -748,6 +1274,25 @@ impl CodeThreadBindingStore {
             );
         }
         Ok(preparation)
+    }
+
+    /// Read one exact preparation without weakening its persisted operation state.
+    pub(crate) fn preparation(
+        &self,
+        scope: &CodeThreadBindingScope,
+        preparation_id: &str,
+    ) -> Result<CodeThreadPreparation, String> {
+        scope.validate()?;
+        validate_preparation_id(preparation_id)?;
+        self.load()?
+            .preparations
+            .into_iter()
+            .find(|preparation| {
+                preparation.preparation_id == preparation_id && preparation.is_in_scope(scope)
+            })
+            .ok_or_else(|| {
+                "SchoolX Code preparation was not found in the requested scope".to_string()
+            })
     }
 
     /// Read a `starting` preparation for explicit orphan reconciliation.
@@ -812,7 +1357,46 @@ impl CodeThreadBindingStore {
                 "Codex thread {codex_thread_id} is already bound to a SchoolX Code execution root"
             ));
         }
+        if removal::reserves_thread_id(&index, codex_thread_id) {
+            return Err(format!(
+                "Codex thread {codex_thread_id} is permanently reserved by SchoolX Code removal state"
+            ));
+        }
+        if preparation.operation == CodeThreadPreparationOperation::Fork {
+            let source_thread_id = preparation.source_thread_id.as_deref().ok_or_else(|| {
+                "SchoolX Code fork preparation is missing its source thread".to_string()
+            })?;
+            if source_thread_id == codex_thread_id {
+                return Err(
+                    "Codex fork returned the source thread instead of a new thread".to_string(),
+                );
+            }
+            let source = index
+                .bindings
+                .iter()
+                .find(|binding| {
+                    binding.codex_thread_id == source_thread_id && binding.is_in_scope(scope)
+                })
+                .ok_or_else(|| {
+                    "SchoolX Code fork source binding disappeared before destination commit"
+                        .to_string()
+                })?;
+            if source.execution_mode != CodeExecutionMode::Worktree {
+                return Err(
+                    "SchoolX Code fork source is not a managed worktree binding".to_string()
+                );
+            }
+            if source.execution_root == preparation.execution_root
+                || source.worktree_id == preparation.worktree_id
+            {
+                return Err(
+                    "SchoolX Code fork source and destination cannot share a managed worktree"
+                        .to_string(),
+                );
+            }
+        }
 
+        let merge_target_ref = preparation.merge_target_ref.clone();
         let binding = CodeThreadBinding {
             community_id: preparation.community_id,
             project_dtag: preparation.project_dtag,
@@ -826,10 +1410,39 @@ impl CodeThreadBindingStore {
         binding.validate()?;
         index.preparations.remove(preparation_index);
         index.bindings.push(binding.clone());
+        lifecycle::insert_active_lifecycle(&mut index.lifecycles, &binding)?;
+        if let Some(target_ref) = merge_target_ref {
+            index
+                .merge_targets
+                .push(CodeWorktreeMergeTarget::for_binding(&binding, target_ref)?);
+        }
         index.sort();
         index.validate()?;
         self.save(&index)?;
         Ok(binding)
+    }
+
+    /// Load the optional native merge target joined to one exact binding.
+    /// Callers still need mandatory descriptor and Git revalidation before
+    /// treating the ref as graph evidence.
+    #[allow(dead_code)]
+    pub(crate) fn binding_merge_authority(
+        &self,
+        input: &CodeThreadBindingLookupInput,
+    ) -> Result<Option<(CodeThreadBinding, Option<String>)>, String> {
+        input.validate()?;
+        let index = self.load()?;
+        let Some(binding) = index.bindings.iter().find(|binding| {
+            binding.codex_thread_id == input.codex_thread_id && binding.is_in_scope(&input.scope)
+        }) else {
+            return Ok(None);
+        };
+        let target_ref = index
+            .merge_targets
+            .iter()
+            .find(|authority| authority.lookup() == *input)
+            .map(|authority| authority.target_ref.clone());
+        Ok(Some((binding.clone(), target_ref)))
     }
 
     /// Fail when a prepared managed worktree is already owned by any persisted
@@ -845,13 +1458,20 @@ impl CodeThreadBindingStore {
         input: &CodeExecutionAvailabilityInput,
     ) -> Result<(), String> {
         input.validate()?;
+        let index = self.load()?;
+        if removal::reserves_execution(&index, input.worktree_id.as_deref(), &input.execution_root)
+        {
+            return Err(
+                "SchoolX Code execution identity is permanently reserved by removal state"
+                    .to_string(),
+            );
+        }
         if input.execution_mode == CodeExecutionMode::Local {
             return Ok(());
         }
         let worktree_id = input.worktree_id.as_deref().ok_or_else(|| {
             "SchoolX Code worktree execution is missing its worktree id".to_string()
         })?;
-        let index = self.load()?;
         let bound = index.bindings.iter().any(|existing| {
             existing.execution_mode == CodeExecutionMode::Worktree
                 && (existing.worktree_id.as_deref() == Some(worktree_id)
@@ -880,6 +1500,23 @@ impl CodeThreadBindingStore {
         binding.validate()?;
         validate_live_execution_root(&binding.execution_root)?;
         let mut index = self.load()?;
+
+        if removal::reserves_thread_id(&index, &binding.codex_thread_id) {
+            return Err(format!(
+                "Codex thread {} is permanently reserved by SchoolX Code removal state",
+                binding.codex_thread_id
+            ));
+        }
+        if removal::reserves_execution(
+            &index,
+            binding.worktree_id.as_deref(),
+            &binding.execution_root,
+        ) {
+            return Err(
+                "SchoolX Code binding reuses an execution identity reserved by removal state"
+                    .to_string(),
+            );
+        }
 
         if let Some(existing) = index
             .bindings
@@ -917,6 +1554,7 @@ impl CodeThreadBindingStore {
         }
 
         index.bindings.push(binding.clone());
+        lifecycle::insert_active_lifecycle(&mut index.lifecycles, &binding)?;
         index.sort();
         index.validate()?;
         self.save(&index)?;
@@ -924,6 +1562,9 @@ impl CodeThreadBindingStore {
     }
 
     fn save(&self, index: &CodeThreadBindingIndex) -> Result<(), String> {
+        if self.read_only {
+            return Err("read-only SchoolX Code binding store cannot be changed".to_string());
+        }
         self.validate_store_paths()?;
         let mut index = index.clone();
         index.sort();
@@ -954,8 +1595,23 @@ impl CodeThreadBindingStore {
         }
         file.write_all(&payload)
             .map_err(|error| format!("failed to write SchoolX Code binding index: {error}"))?;
+        #[cfg(unix)]
+        let directory = {
+            use std::os::fd::AsFd as _;
+            file.directory()
+                .ok_or_else(|| {
+                    "SchoolX Code binding index has no pinned parent directory".to_string()
+                })?
+                .as_fd()
+                .try_clone_to_owned()
+                .map_err(|error| format!("failed to pin SchoolX Code binding directory: {error}"))?
+        };
         file.commit()
-            .map_err(|error| format!("failed to commit SchoolX Code binding index: {error}"))
+            .map_err(|error| format!("failed to commit SchoolX Code binding index: {error}"))?;
+        #[cfg(unix)]
+        rustix::fs::fsync(&directory)
+            .map_err(|error| format!("failed to sync SchoolX Code binding directory: {error}"))?;
+        Ok(())
     }
 
     fn validate_store_paths(&self) -> Result<(), String> {
@@ -979,6 +1635,13 @@ impl CodeThreadBindingStore {
         }
         if self.store_path.parent() != Some(current_code.as_path()) {
             return Err("SchoolX Code binding index escaped its data directory".to_string());
+        }
+        if self.read_only {
+            validate_read_only_store_permissions(
+                &self.app_data_dir,
+                &self.code_dir,
+                &self.store_path,
+            )?;
         }
 
         match fs::symlink_metadata(&self.store_path) {
@@ -1139,6 +1802,74 @@ fn validate_real_directory(path: &Path, label: &str) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(unix)]
+fn validate_read_only_store_permissions(
+    app_data_dir: &Path,
+    code_dir: &Path,
+    store_path: &Path,
+) -> Result<(), String> {
+    use std::os::unix::fs::MetadataExt as _;
+
+    let app_metadata = fs::symlink_metadata(app_data_dir)
+        .map_err(|error| format!("failed to inspect SchoolX Code app-data ownership: {error}"))?;
+    let code_metadata = fs::symlink_metadata(code_dir)
+        .map_err(|error| format!("failed to inspect SchoolX Code data permissions: {error}"))?;
+    if code_metadata.uid() != app_metadata.uid() {
+        return Err("SchoolX Code data directory has an unexpected owner".to_string());
+    }
+    if code_metadata.mode() & 0o7777 != 0o700 {
+        return Err(
+            "SchoolX Code data directory is not private; read-only inventory refused it"
+                .to_string(),
+        );
+    }
+
+    match fs::symlink_metadata(store_path) {
+        Ok(metadata) => validate_read_only_binding_file(app_data_dir, &metadata),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!(
+            "failed to inspect SchoolX Code binding index permissions: {error}"
+        )),
+    }
+}
+
+#[cfg(not(unix))]
+fn validate_read_only_store_permissions(
+    _app_data_dir: &Path,
+    _code_dir: &Path,
+    _store_path: &Path,
+) -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(unix)]
+fn validate_read_only_binding_file(
+    app_data_dir: &Path,
+    metadata: &fs::Metadata,
+) -> Result<(), String> {
+    use std::os::unix::fs::MetadataExt as _;
+
+    let app_metadata = fs::symlink_metadata(app_data_dir)
+        .map_err(|error| format!("failed to inspect SchoolX Code app-data ownership: {error}"))?;
+    if metadata.uid() != app_metadata.uid() {
+        return Err("SchoolX Code binding index has an unexpected owner".to_string());
+    }
+    if metadata.mode() & 0o7777 != 0o600 {
+        return Err(
+            "SchoolX Code binding index is not private; read-only inventory refused it".to_string(),
+        );
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn validate_read_only_binding_file(
+    _app_data_dir: &Path,
+    _metadata: &fs::Metadata,
+) -> Result<(), String> {
+    Ok(())
+}
+
 fn validate_identifier(label: &str, value: &str) -> Result<(), String> {
     if value.is_empty()
         || value.len() > MAX_IDENTIFIER_BYTES
@@ -1196,6 +1927,40 @@ fn validate_commit_id(value: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Validate the only ref namespace that may become native merge authority.
+/// This is intentionally narrower than a general Git revision parser.
+pub(crate) fn validate_direct_local_branch_ref(value: &str) -> Result<(), String> {
+    let Some(branch) = value.strip_prefix("refs/heads/") else {
+        return Err(
+            "SchoolX Code merge target must be a fully qualified local branch ref".to_string(),
+        );
+    };
+    if branch.is_empty()
+        || value.len() > MAX_IDENTIFIER_BYTES
+        || value.ends_with('/')
+        || value.ends_with('.')
+        || value.contains("..")
+        || value.contains("@{")
+        || value.contains("//")
+        || value.chars().any(|character| {
+            character.is_control()
+                || character.is_whitespace()
+                || matches!(character, '~' | '^' | ':' | '?' | '*' | '[' | '\\')
+        })
+        || branch.split('/').any(|component| {
+            component.is_empty()
+                || component == "."
+                || component == ".."
+                || component == "@"
+                || component.starts_with('.')
+                || component.ends_with(".lock")
+        })
+    {
+        return Err("SchoolX Code merge target is not a safe direct local branch ref".to_string());
+    }
+    Ok(())
+}
+
 fn validate_preparation_id(value: &str) -> Result<(), String> {
     let parsed = uuid::Uuid::parse_str(value)
         .map_err(|error| format!("SchoolX Code preparation id is not a UUID: {error}"))?;
@@ -1226,6 +1991,15 @@ fn ensure_managed_execution_unreserved(
     index: &CodeThreadBindingIndex,
     preparation: &CodeThreadPreparation,
 ) -> Result<(), String> {
+    if removal::reserves_execution(
+        index,
+        preparation.worktree_id.as_deref(),
+        &preparation.execution_root,
+    ) {
+        return Err(
+            "SchoolX Code execution identity is permanently reserved by removal state".to_string(),
+        );
+    }
     if preparation.execution_mode == CodeExecutionMode::Local {
         return Ok(());
     }
@@ -1305,6 +2079,7 @@ fn validate_live_execution_root(value: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeSet;
 
     fn repository_identity(marker: char) -> String {
         marker.to_string().repeat(64)
@@ -1354,7 +2129,7 @@ mod tests {
     }
 
     #[test]
-    fn missing_store_loads_as_empty_version_one() {
+    fn missing_store_loads_as_empty_current_version() {
         let (_directory, store) = store();
         let index = store.load().expect("empty index");
 
@@ -1558,6 +2333,281 @@ mod tests {
                 Some("11111111-1111-4111-8111-111111111111"),
             ))
             .is_err());
+    }
+
+    #[test]
+    fn fork_preparation_binds_one_managed_source_and_rolls_back_exactly() {
+        let (directory, store) = store();
+        let owner = scope("community", "project", 'a');
+        let source_root = directory.path().join("source-worktree");
+        let destination_root = directory.path().join("destination-worktree");
+        fs::create_dir(&source_root).expect("source root");
+        fs::create_dir(&destination_root).expect("destination root");
+        let source_root = source_root.canonicalize().expect("canonical source root");
+        let destination_root = destination_root
+            .canonicalize()
+            .expect("canonical destination root");
+        store
+            .upsert(binding(
+                &source_root,
+                owner.clone(),
+                "thread-source",
+                CodeExecutionMode::Worktree,
+                Some("11111111-1111-4111-8111-111111111111"),
+            ))
+            .expect("source binding");
+        let descriptor = CodeWorktreeDescriptor {
+            execution_mode: CodeExecutionMode::Worktree,
+            repository_identity: owner.repository_identity.clone(),
+            execution_root: destination_root.to_string_lossy().into_owned(),
+            base_ref: "0123456789abcdef0123456789abcdef01234567".to_string(),
+            worktree_id: Some("22222222-2222-4222-8222-222222222222".to_string()),
+        };
+        let preparation_id = "67f11a1d-0274-4d40-9b0c-e406e51c64fb";
+        let prepared = store
+            .create_fork_preparation(
+                preparation_id.to_string(),
+                owner.clone(),
+                "thread-source".to_string(),
+                &descriptor,
+            )
+            .expect("fork preparation");
+        assert_eq!(prepared.operation, CodeThreadPreparationOperation::Fork);
+        assert_eq!(prepared.source_thread_id.as_deref(), Some("thread-source"));
+        assert!(prepared.merge_target_ref.is_none());
+        assert!(store
+            .ensure_fork_source_available(&owner, "thread-source")
+            .is_err());
+        assert!(store
+            .create_fork_preparation(
+                "77f11a1d-0274-4d40-9b0c-e406e51c64fb".to_string(),
+                owner.clone(),
+                "thread-source".to_string(),
+                &CodeWorktreeDescriptor {
+                    worktree_id: Some("33333333-3333-4333-8333-333333333333".to_string()),
+                    ..descriptor.clone()
+                },
+            )
+            .is_err());
+
+        let claimed = store
+            .claim_preparation_for_fork(
+                &owner,
+                preparation_id,
+                "thread-source",
+                vec!["thread-z".to_string(), "thread-a".to_string()],
+            )
+            .expect("claim fork");
+        assert_eq!(
+            claimed.recovery_thread_baseline,
+            Some(vec!["thread-a".to_string(), "thread-z".to_string()])
+        );
+        let restored = store
+            .restore_preparation_after_unsent_fork(&claimed)
+            .expect("restore exact fork claim");
+        assert_eq!(restored.state, CodeThreadPreparationState::Prepared);
+        assert!(restored.recovery_thread_baseline.is_none());
+
+        let claimed = store
+            .claim_preparation_for_fork(&owner, preparation_id, "thread-source", Vec::new())
+            .expect("reclaim fork");
+        assert_eq!(claimed.state, CodeThreadPreparationState::Starting);
+        let child = store
+            .commit_preparation_binding(&owner, preparation_id, "thread-child")
+            .expect("commit fork child");
+        assert_eq!(child.codex_thread_id, "thread-child");
+        assert_eq!(child.execution_root, descriptor.execution_root);
+        let final_index = store.load().expect("final fork index");
+        assert!(final_index.preparations.is_empty());
+        assert_eq!(final_index.bindings.len(), 2);
+
+        let mut malformed = final_index;
+        malformed.preparations.push(CodeThreadPreparation {
+            preparation_id: "87f11a1d-0274-4d40-9b0c-e406e51c64fb".to_string(),
+            community_id: owner.community_id,
+            project_dtag: owner.project_dtag,
+            repository_identity: owner.repository_identity,
+            execution_mode: CodeExecutionMode::Worktree,
+            execution_root: destination_root.to_string_lossy().into_owned(),
+            base_ref: descriptor.base_ref,
+            worktree_id: Some("44444444-4444-4444-8444-444444444444".to_string()),
+            operation: CodeThreadPreparationOperation::Fork,
+            source_thread_id: Some("thread-missing".to_string()),
+            state: CodeThreadPreparationState::Prepared,
+            recovery_thread_baseline: None,
+            merge_target_ref: None,
+        });
+        assert!(malformed.validate().is_err());
+    }
+
+    #[test]
+    fn merge_target_authority_is_native_only_and_moves_or_copies_atomically() {
+        let (directory, store) = store();
+        let owner = scope("community", "project", 'a');
+        let source_root = directory.path().join("authority-source");
+        let fork_root = directory.path().join("authority-fork");
+        fs::create_dir(&source_root).expect("source root");
+        fs::create_dir(&fork_root).expect("fork root");
+        let source_root = source_root.canonicalize().expect("canonical source root");
+        let fork_root = fork_root.canonicalize().expect("canonical fork root");
+        let source_descriptor = CodeWorktreeDescriptor {
+            execution_mode: CodeExecutionMode::Worktree,
+            repository_identity: owner.repository_identity.clone(),
+            execution_root: source_root.to_string_lossy().into_owned(),
+            base_ref: "0123456789abcdef0123456789abcdef01234567".to_string(),
+            worktree_id: Some("11111111-1111-4111-8111-111111111111".to_string()),
+        };
+        let source_preparation = "11111111-1111-4111-8111-111111111112";
+        let prepared = store
+            .create_preparation_with_merge_target(
+                source_preparation.to_string(),
+                owner.clone(),
+                &source_descriptor,
+                Some("refs/heads/main".to_string()),
+            )
+            .expect("native-authorized preparation");
+        assert_eq!(
+            prepared.merge_target_ref.as_deref(),
+            Some("refs/heads/main")
+        );
+        let public = store
+            .list_preparations(&owner)
+            .expect("public preparations");
+        assert!(public[0].merge_target_ref.is_none());
+        assert!(!serde_json::to_value(&public[0])
+            .expect("serialize public preparation")
+            .as_object()
+            .expect("preparation object")
+            .contains_key("mergeTargetRef"));
+
+        let claimed = store
+            .claim_preparation_for_start(&owner, source_preparation, Vec::new())
+            .expect("claim source");
+        assert_eq!(claimed.merge_target_ref.as_deref(), Some("refs/heads/main"));
+        let restored = store
+            .restore_preparation_after_unsent_start(&claimed)
+            .expect("restore source");
+        assert_eq!(
+            restored.merge_target_ref.as_deref(),
+            Some("refs/heads/main")
+        );
+        store
+            .claim_preparation_for_start(&owner, source_preparation, Vec::new())
+            .expect("reclaim source");
+        let source_binding = store
+            .commit_preparation_binding(&owner, source_preparation, "thread-source")
+            .expect("commit source");
+        assert_eq!(
+            serde_json::to_value(&source_binding)
+                .expect("serialize binding")
+                .as_object()
+                .map(|object| object.len()),
+            Some(8)
+        );
+        let source_lookup = CodeThreadBindingLookupInput {
+            scope: owner.clone(),
+            codex_thread_id: "thread-source".to_string(),
+        };
+        let (_, target_ref) = store
+            .binding_merge_authority(&source_lookup)
+            .expect("binding authority")
+            .expect("source binding");
+        assert_eq!(target_ref.as_deref(), Some("refs/heads/main"));
+        let valid_index = store.load().expect("authority index");
+        assert_eq!(valid_index.merge_targets.len(), 1);
+        let persisted = fs::read(store.store_path()).expect("read authority index");
+        let persisted: serde_json::Value =
+            serde_json::from_slice(&persisted).expect("parse authority index");
+        assert_eq!(persisted["version"], serde_json::json!(4));
+        assert_eq!(persisted["removals"], serde_json::json!([]));
+        let top_level_keys = persisted
+            .as_object()
+            .expect("binding index object")
+            .keys()
+            .map(String::as_str)
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            top_level_keys,
+            [
+                "bindings",
+                "lifecycles",
+                "mergeTargets",
+                "preparations",
+                "removals",
+                "version",
+            ]
+            .into_iter()
+            .collect::<BTreeSet<_>>()
+        );
+        let target_keys = persisted["mergeTargets"][0]
+            .as_object()
+            .expect("merge-target object")
+            .keys()
+            .map(String::as_str)
+            .collect::<BTreeSet<_>>();
+        assert_eq!(
+            target_keys,
+            [
+                "codexThreadId",
+                "communityId",
+                "projectDtag",
+                "repositoryIdentity",
+                "targetRef",
+                "worktreeId",
+            ]
+            .into_iter()
+            .collect::<BTreeSet<_>>()
+        );
+        let mut duplicate = valid_index.clone();
+        let duplicate_authority = duplicate.merge_targets[0].clone();
+        duplicate.merge_targets.push(duplicate_authority);
+        assert!(duplicate.validate().is_err());
+        let mut orphan = valid_index.clone();
+        orphan.merge_targets[0].codex_thread_id = "thread-orphan".to_string();
+        assert!(orphan.validate().is_err());
+        let mut wrong_worktree = valid_index;
+        wrong_worktree.merge_targets[0].worktree_id =
+            "33333333-3333-4333-8333-333333333333".to_string();
+        assert!(wrong_worktree.validate().is_err());
+
+        let fork_descriptor = CodeWorktreeDescriptor {
+            execution_mode: CodeExecutionMode::Worktree,
+            repository_identity: owner.repository_identity.clone(),
+            execution_root: fork_root.to_string_lossy().into_owned(),
+            base_ref: source_descriptor.base_ref,
+            worktree_id: Some("22222222-2222-4222-8222-222222222222".to_string()),
+        };
+        let fork = store
+            .create_fork_preparation(
+                "22222222-2222-4222-8222-222222222223".to_string(),
+                owner,
+                "thread-source".to_string(),
+                &fork_descriptor,
+            )
+            .expect("fork preparation");
+        assert_eq!(fork.merge_target_ref.as_deref(), Some("refs/heads/main"));
+    }
+
+    #[test]
+    fn merge_target_ref_validator_rejects_non_local_and_revision_syntax() {
+        assert!(validate_direct_local_branch_ref("refs/heads/main").is_ok());
+        assert!(validate_direct_local_branch_ref("refs/heads/team/topic").is_ok());
+        for invalid in [
+            "HEAD",
+            "main",
+            "refs/tags/main",
+            "refs/remotes/origin/main",
+            "refs/heads/main~1",
+            "refs/heads/main@{1}",
+            "refs/heads/.hidden",
+            "refs/heads/main.lock",
+            "refs/heads/team//topic",
+        ] {
+            assert!(
+                validate_direct_local_branch_ref(invalid).is_err(),
+                "unexpected valid merge target: {invalid}"
+            );
+        }
     }
 
     #[test]

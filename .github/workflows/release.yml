@@ -148,6 +148,7 @@ jobs:
           LLAMA_STAGE_BUILD_DIR: ${{ github.workspace }}/.cache/mesh-llama/build-stage-abi-metal
           SKIPPY_LLAMA_AUTO_BUILD: "0"
           TAURI_BUNDLER_DMG_IGNORE_CI: "true"
+          SCHOOLX_CODE_GIT_CARGO_LAYOUT: native
 
       - name: Locate unsigned DMG
         id: unsigned
@@ -198,30 +199,32 @@ jobs:
           EXTRACT_DIR="${RUNNER_TEMP}/signed-app-extract"
           rm -rf "$EXTRACT_DIR" && mkdir -p "$EXTRACT_DIR"
           ditto -x -k "$SIGNED_APP_ZIP" "$EXTRACT_DIR"
-          rm -rf "${APP_DIR}/Buzz.app"
-          cp -R "${EXTRACT_DIR}/Buzz.app" "${APP_DIR}/Buzz.app"
+          rm -rf "${APP_DIR}/SchoolX.app"
+          cp -R "${EXTRACT_DIR}/SchoolX.app" "${APP_DIR}/SchoolX.app"
 
           # Rebuild the updater archive from the signed .app and re-sign it with the Tauri updater key.
-          rm -f "${APP_DIR}/Buzz.app.tar.gz" "${APP_DIR}/Buzz.app.tar.gz.sig"
-          (cd "$APP_DIR" && tar -czf Buzz.app.tar.gz Buzz.app)
-          TARBALL_ABS="$(pwd)/${APP_DIR}/Buzz.app.tar.gz"
+          rm -f "${APP_DIR}/SchoolX.app.tar.gz" "${APP_DIR}/SchoolX.app.tar.gz.sig"
+          (cd "$APP_DIR" && tar -czf SchoolX.app.tar.gz SchoolX.app)
+          TARBALL_ABS="$(pwd)/${APP_DIR}/SchoolX.app.tar.gz"
           (cd desktop && pnpm tauri signer sign "$TARBALL_ABS")
 
       - name: Verify code signature
         run: |
           codesign --verify --deep --strict --verbose=2 \
-            desktop/src-tauri/target/release/bundle/macos/Buzz.app
+            desktop/src-tauri/target/release/bundle/macos/SchoolX.app
           spctl --assess --type execute --verbose=4 \
-            desktop/src-tauri/target/release/bundle/macos/Buzz.app
+            desktop/src-tauri/target/release/bundle/macos/SchoolX.app
           desktop/scripts/verify-macos-entitlements.sh \
-            desktop/src-tauri/target/release/bundle/macos/Buzz.app
+            desktop/src-tauri/target/release/bundle/macos/SchoolX.app
+          desktop/scripts/verify-code-git-xpc-signature.sh \
+            desktop/src-tauri/target/release/bundle/macos/SchoolX.app
 
       - name: Locate build artifacts
         id: artifacts
         run: |
           BUNDLE_DIR="desktop/src-tauri/target/release/bundle"
 
-          # Find the DMG (Tauri names it Buzz_<version>_<arch>.dmg)
+          # Find the DMG produced by Tauri.
           DMG=$(find "$BUNDLE_DIR/dmg" -name '*.dmg' -type f | head -1)
           if [[ -z "$DMG" ]]; then
             echo "::error::No DMG found in $BUNDLE_DIR/dmg"
@@ -322,6 +325,7 @@ jobs:
           MACOSX_DEPLOYMENT_TARGET: "10.15"
           CMAKE_OSX_DEPLOYMENT_TARGET: "10.15"
           TAURI_BUNDLER_DMG_IGNORE_CI: "true"
+          SCHOOLX_CODE_GIT_CARGO_LAYOUT: target-triple
 
       - name: Locate unsigned DMG
         id: unsigned
@@ -371,21 +375,22 @@ jobs:
           EXTRACT_DIR="${RUNNER_TEMP}/signed-app-extract-x64"
           rm -rf "$EXTRACT_DIR" && mkdir -p "$EXTRACT_DIR"
           ditto -x -k "$SIGNED_APP_ZIP" "$EXTRACT_DIR"
-          rm -rf "${APP_DIR}/Buzz.app"
-          cp -R "${EXTRACT_DIR}/Buzz.app" "${APP_DIR}/Buzz.app"
+          rm -rf "${APP_DIR}/SchoolX.app"
+          cp -R "${EXTRACT_DIR}/SchoolX.app" "${APP_DIR}/SchoolX.app"
 
           # Rebuild the updater archive from the signed .app and re-sign with the Tauri updater key.
-          rm -f "${APP_DIR}/Buzz.app.tar.gz" "${APP_DIR}/Buzz.app.tar.gz.sig"
-          (cd "$APP_DIR" && tar -czf Buzz.app.tar.gz Buzz.app)
-          TARBALL_ABS="$(pwd)/${APP_DIR}/Buzz.app.tar.gz"
+          rm -f "${APP_DIR}/SchoolX.app.tar.gz" "${APP_DIR}/SchoolX.app.tar.gz.sig"
+          (cd "$APP_DIR" && tar -czf SchoolX.app.tar.gz SchoolX.app)
+          TARBALL_ABS="$(pwd)/${APP_DIR}/SchoolX.app.tar.gz"
           (cd desktop && pnpm tauri signer sign "$TARBALL_ABS")
 
       - name: Verify code signature
         run: |
-          APP_DIR="desktop/src-tauri/target/${TARGET}/release/bundle/macos/Buzz.app"
+          APP_DIR="desktop/src-tauri/target/${TARGET}/release/bundle/macos/SchoolX.app"
           codesign --verify --deep --strict --verbose=2 "$APP_DIR"
           spctl --assess --type execute --verbose=4 "$APP_DIR"
           desktop/scripts/verify-macos-entitlements.sh "$APP_DIR"
+          desktop/scripts/verify-code-git-xpc-signature.sh "$APP_DIR"
 
       - name: Locate updater archive
         id: artifacts

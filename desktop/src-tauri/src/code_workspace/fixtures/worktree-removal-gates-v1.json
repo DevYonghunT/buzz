@@ -1,0 +1,262 @@
+{
+  "version": 1,
+  "status": "authorityProofJournalPhysicalRemovalImplementedPublicSurfaceOpen",
+  "designDocument": "docs/schoolx-2/SCHOOLX_CODE_WORKTREE_REMOVAL_GATES.md",
+  "currentStoreVersion": 4,
+  "futureStoreVersion": 4,
+  "futureSurface": {
+    "commandName": "code_worktree_remove",
+    "topLevelArgs": ["input"],
+    "inputFields": ["scope", "threadId"],
+    "operationId": "nativeCanonicalUuid",
+    "registered": true,
+    "frontendMethodExposed": true,
+    "buttonRendered": true
+  },
+  "futureReceipt": {
+    "fields": [
+      "removalId",
+      "scope",
+      "threadId",
+      "worktreeId",
+      "headCommit",
+      "mergedIntoRef",
+      "mergedIntoCommit",
+      "transcriptDisposition",
+      "executionDisposition"
+    ],
+    "transcriptDisposition": "preserved",
+    "executionDisposition": "removed"
+  },
+  "gateOrder": [
+    "mergedAuthority",
+    "durableRemovalJournal",
+    "bindingTranscriptSemantics",
+    "pinnedDeletionBoundary"
+  ],
+  "gates": {
+    "mergedAuthority": {
+      "state": "implementedClosed",
+      "storeCollection": "mergeTargets",
+      "captureImplemented": true,
+      "proofImplemented": true,
+      "publicProofSurface": false,
+      "authoritySource": "persistedDirectLocalBaseBranch",
+      "targetRefNamespace": "refs/heads/",
+      "legacyBindings": "authorityAbsent",
+      "forkPolicy": "copySourceAuthorityOnly",
+      "proof": "mergeBaseIsAncestor",
+      "proofSuccessExitCode": 0,
+      "proofSnapshotFields": [
+        "repositoryIdentity",
+        "worktreeId",
+        "headCommit",
+        "targetRef",
+        "targetCommit"
+      ],
+      "rejectedEvidence": [
+        "headEqualsBaseRef",
+        "inventoryInspection",
+        "callerRefOrCommit",
+        "tagOrRawObjectId",
+        "remoteTrackingRef",
+        "otherContainingRef",
+        "squashOrCherryPickEquivalence",
+        "networkOrPullRequestClaim",
+        "replacementOrGraftAncestry"
+      ]
+    },
+    "durableRemovalJournal": {
+      "state": "implementedClosed",
+      "storage": "bindingIndexV4SeparateRemovals",
+      "retryKey": ["scope", "threadId"],
+      "states": ["claimed", "removing", "removed"],
+      "recordRepresentation": "strictFlatTaggedAuthority",
+      "recordFields": [
+        "state",
+        "removalId",
+        "binding",
+        "threadLifecycleAtClaim",
+        "mergeProof",
+        "physicalManifestDigest",
+        "physical",
+        "transcriptDisposition",
+        "executionDisposition"
+      ],
+      "mergeProofFields": [
+        "repositoryIdentity",
+        "worktreeId",
+        "headCommit",
+        "targetRef",
+        "targetCommit"
+      ],
+      "physicalFields": [
+        "managedRootParent",
+        "managedRoot",
+        "quarantineName",
+        "gitAdminParent",
+        "gitAdminEntry"
+      ],
+      "capacity": 4096,
+      "casImplemented": true,
+      "syncBeforeMutation": true,
+      "removingIsSticky": true,
+      "physicalMutationImplemented": true,
+      "archiveLifecycleReuse": false,
+      "preparationJournalReuse": false
+    },
+    "bindingTranscriptSemantics": {
+      "state": "implementedClosed",
+      "liveBindingUntil": "verifiedPhysicalRemoval",
+      "finalBindingDisposition": "retiredIntoPermanentRemovalTombstone",
+      "transcriptDisposition": "preserved",
+      "codexThreadMutation": "none",
+      "executionDisposition": "removed",
+      "identityReuse": "forbidden",
+      "atomicStoreRetirementImplemented": true,
+      "tombstoneExecutable": false
+    },
+    "pinnedDeletionBoundary": {
+      "state": "implementedClosed",
+      "authoritySource": "sealedNativeClaimFromPinnedInspection",
+      "physicalMutationImplemented": true,
+      "publicRemovalEntrypoint": true,
+      "manifestStorage": "digestAddressedStrictV1Sidecar",
+      "manifestIdentityPolicy": "deviceInodeBirthTimeAndSupportedGeneration",
+      "manifestPathPolicy": "sameMountHandleRelativeNamedDirectoryAndFileIdentity",
+      "manifestCleanupMarker": "durableSidecarAbsenceAfterDurableProofRefAbsence",
+      "removedCleanupOfflinePolicy": "preserveSidecarAndDefer",
+      "gitAdminLockPolicy": "lockedMarkerOrLockfileReject",
+      "objectStoragePolicy": "primarySameMountNoFollowNoAlternates",
+      "refStoragePolicy": "filesBackendWithLooseProofRef",
+      "mountBoundaryPolicy": "sameMountIdentityNoNestedMounts",
+      "verifiedAbsenceCapability": "opaqueSingleUse",
+      "currentPinnedGitHelperReusable": false,
+      "separateRemovalGitHelper": true,
+      "requiredPinnedCoordinates": [
+        "managedRootParent",
+        "managedRoot",
+        "quarantineName",
+        "gitAdminParent",
+        "gitAdminEntry"
+      ],
+      "physicalManifestPolicy": "dotGitAndTrackedEntriesOnly",
+      "unexpectedEntryPolicy": "reject",
+      "quarantinePolicy": "atomicNoReplaceParentRelativeRename",
+      "recursiveDeletionPolicy": "noFollowHandleRelativeManifestOnly",
+      "proofRefNamespace": "refs/schoolx/removal-claims/",
+      "proofRefTarget": "targetCommit",
+      "proofRefRepresentation": "directLooseRegularNoFollow",
+      "proofRefDurability": "referenceFileAndDirectoryFsync",
+      "proofRefCleanup": "durableExactCompareAndDelete",
+      "partialDeletionPolicy": "knownPrefixOnly",
+      "startupRecoveryBefore": [
+        "runtimeEmitterStart",
+        "lifecycleReconciliation",
+        "startRecovery",
+        "forkRecovery"
+      ],
+      "pendingRemovalConflictGates": ["archivedRename", "turnInterrupt"],
+      "implementedPlatforms": ["linux", "macos"],
+      "platformFallback": "unsupportedFailClosed",
+      "replacementPolicy": "neverDeleteReplacement"
+    }
+  },
+  "journalStates": [
+    {
+      "state": "claimed",
+      "meaning": "durableProofWithZeroDeletionMutation",
+      "rollback": "definitelyNotStartedOnly"
+    },
+    {
+      "state": "removing",
+      "meaning": "firstMutationMayHaveOccurred",
+      "rollback": "never"
+    },
+    {
+      "state": "removed",
+      "meaning": "verifiedAbsenceAndPermanentTranscriptTombstone",
+      "rollback": "never"
+    }
+  ],
+  "physicalRemovalOrder": [
+    "loadArchivedAuthority",
+    "proveQuiescenceAndCaptureManifest",
+    "persistDigestAddressedManifestSidecar",
+    "persistClaimed",
+    "revalidateAuthorityAndPersistRemoving",
+    "pinExactProofRefAndRevalidate",
+    "renameRootToQuarantine",
+    "deleteManifestFromQuarantine",
+    "deleteExactGitAdminEntry",
+    "verifyAbsenceAndSiblings",
+    "atomicallyRetireBindingIntoTombstone",
+    "compareDeleteExactProofRef",
+    "durablyRetireManifestSidecar"
+  ],
+  "forbiddenOperations": [
+    "force",
+    "gitClean",
+    "gitReset",
+    "gitWorktreeRemove",
+    "gitWorktreePrune",
+    "broadRemoveDirAll",
+    "implicitArchiveCleanup",
+    "implicitForkCleanup",
+    "inventoryReceiptReuse",
+    "frontendPathOrProofClaim",
+    "fetchOrNetworkProof",
+    "threadOrTranscriptDelete"
+  ],
+  "currentInventory": {
+    "preserved": true,
+    "canRemove": "eligibleOnly",
+    "archivedBlocker": "mergeProofUnavailableUnlessProven"
+  },
+  "acceptanceCases": {
+    "mergedAuthority": [
+      "headEqualsTarget",
+      "headAncestorViaMergeCommit",
+      "unmergedHead",
+      "squashOrCherryPickOnly",
+      "legacyAuthorityAbsent",
+      "headOrTargetDrift",
+      "replacementOrGraftOnly",
+      "timeoutOrMissingObject",
+      "zeroMutation"
+    ],
+    "journal": [
+      "claimAdmissionFailureZeroMutation",
+      "claimedDefinitelyNotStartedCancellation",
+      "removingNeverRollsBack",
+      "crashAtEveryMutationBoundary",
+      "responseLossReturnsSameRemoval",
+      "finalStoreFailureRetriesFinalization",
+      "startupRecoveryPrecedesOtherReconciliation",
+      "pendingRemovalGatesRenameAndInterrupt"
+    ],
+    "semantics": [
+      "liveBindingRetainedBeforeVerifiedAbsence",
+      "removedTombstonePreservesTranscriptCoordinate",
+      "removedIdentityCannotBeReused",
+      "removedTaskCannotExecuteOrUnarchive",
+      "noCodexThreadMutation"
+    ],
+    "deletionBoundary": [
+      "ignoredFileRejects",
+      "untrackedOrEmptyDirectoryRejects",
+      "specialOrCrossDeviceEntryRejects",
+      "missingOrAlternateObjectRejects",
+      "nonPrefixPartialDeletionRejects",
+      "manifestSidecarReplacementFailsClosed",
+      "offlineCommonDirCleanupDefers",
+      "lockedGitAdminRejects",
+      "symlinkIsUnlinkedNotFollowed",
+      "originalNameReplacementSurvives",
+      "quarantineOrAdminReplacementFailsClosed",
+      "proofRefReplacementSurvivesCleanup",
+      "siblingRootsRemainUnchanged",
+      "unsupportedPlatformZeroMutation"
+    ]
+  }
+}

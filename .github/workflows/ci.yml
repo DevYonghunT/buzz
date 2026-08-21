@@ -202,6 +202,14 @@ jobs:
         run: just desktop-tauri-test
         env:
           CMAKE_POLICY_VERSION_MINIMUM: "3.5"
+      - name: Privileged Linux worktree-removal mount fixtures
+        env:
+          CMAKE_POLICY_VERSION_MINIMUM: "3.5"
+          SCHOOLX_CODE_REMOVAL_TEST_MOUNT_MODE: sudo
+        run: |
+          cargo test --manifest-path desktop/src-tauri/Cargo.toml --lib \
+            linux_privileged_same_filesystem_bind_ -- \
+            --ignored --test-threads=1
       - name: Desktop Tauri compiled-flag verification
         run: just desktop-tauri-test-compiled-flags
         env:
@@ -1094,3 +1102,4 @@ jobs:
           LLAMA_STAGE_BACKEND: metal
           LLAMA_STAGE_BUILD_DIR: ${{ github.workspace }}/.cache/mesh-llama/build-stage-abi-metal
           SKIPPY_LLAMA_AUTO_BUILD: "0"
+          SCHOOLX_CODE_GIT_CARGO_LAYOUT: native

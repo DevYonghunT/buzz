@@ -2,8 +2,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    #[cfg(unix)]
-    match buzz_lib::run_code_pinned_git_helper_if_requested() {
+    #[cfg(target_os = "macos")]
+    match buzz_lib::run_code_git_xpc_service_if_requested() {
         Ok(false) => {}
         Ok(true) => return,
         Err(error) => {
