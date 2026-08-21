@@ -392,9 +392,9 @@ just ci까지 통과할 때까지 이어서 진행해줘.
 - Linux는 pinned release tuple에서 runtime-probed `/proc/self/fd/<N>` direct spawn을 사용한다. 이는 Rust
   public std backend guarantee가 아니다. aarch64 독립 launcher runtime 3/3과 isolated Clippy는 통과했지만
   전체 Linux desktop build는 CI 대기다.
-- XPC staging과 nested signature/identifier/same-Team verifier를 release/canary packaging에 연결했다. Local
-  unsigned bundle 구조 검사와 exact `TAURI_ENV_DEBUG="false"` release staging 계약은 통과했지만 실제 Developer ID
-  signed artifact 검증은 CI가 맡는다.
+- XPC staging과 nested signature/identifier/same-Team verifier를 release/canary packaging에 연결했다. Pinned
+  Tauri CLI 2.11.2의 실제 release hook 계약(`TAURI_ENV_DEBUG` 생략, 명시적 `"false"`도 허용)과 local unsigned
+  bundle 구조 검사는 통과했다. 실제 Developer ID signed release/canary artifact 검증은 CI가 맡는다.
 
 전체 Git-write/worktree/removal target, Tauri library (**2454 passed**), frontend (**4037 passed**)와 fresh-build
 SchoolX Code E2E (**26 passed**)까지 통과했다. Source contract는 9/9, XPC Rust session은 10/10이며 Swift

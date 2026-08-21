@@ -32,9 +32,12 @@ function requiredEnvironment(env, name) {
 }
 
 function profileFromEnvironment(env) {
-  const debug = requiredEnvironment(env, "TAURI_ENV_DEBUG");
+  // Tauri CLI 2.11 only defines TAURI_ENV_DEBUG for debug builds. Release
+  // hooks omit it, despite the config schema documentation describing a
+  // literal "false" value. Keep accepting "false" for normalized callers.
+  const debug = env.TAURI_ENV_DEBUG;
+  if (debug === undefined || debug === "false") return "release";
   if (debug === "true") return "debug";
-  if (debug === "false") return "release";
   throw new Error(`unexpected TAURI_ENV_DEBUG=${JSON.stringify(debug)}`);
 }
 

@@ -265,8 +265,9 @@ strict recovery/fail-closed 순서를 유지한다.
   Release/canary verifier는 nested executable의 존재/type/실행 bit, strict signature, fixed app/helper identifier와
   동일한 non-empty Team ID를 검사한다. 실제 Developer ID 서명 artifact 검증은 signing secret이 있는 CI에서
   수행해야 하며, local unsigned bundle 구조 검사를 signed artifact 검증으로 과장하지 않는다.
-- Tauri hook의 exact `TAURI_ENV_DEBUG="true"|"false"` 계약을 staging test로 고정했다. `"false"`를 release로
-  처리하므로 release/canary/team bundle이 staging 전에 잘못 중단되지 않고, missing/다른 값은 fail closed한다.
+- Pinned Tauri CLI 2.11.2의 실제 hook 계약을 staging test로 고정했다. Debug는
+  `TAURI_ENV_DEBUG="true"`, release는 변수가 생략되며 normalized caller의 명시적 `"false"`도 release로
+  허용한다. 그 밖의 값은 fail closed한다.
 
 ## 7. 남은 residual과 검증 상태
 

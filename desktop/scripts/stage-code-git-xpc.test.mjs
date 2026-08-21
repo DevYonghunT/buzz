@@ -22,7 +22,6 @@ import {
 function macEnvironment(overrides = {}) {
   return {
     TAURI_ENV_ARCH: "aarch64",
-    TAURI_ENV_DEBUG: "false",
     TAURI_ENV_FAMILY: "unix",
     TAURI_ENV_PLATFORM: "darwin",
     TAURI_ENV_TARGET_TRIPLE: "aarch64-apple-darwin",
@@ -45,7 +44,7 @@ function withTemporaryDirectory(run) {
   }
 }
 
-test("resolves the native arm64 release binary from Tauri hook variables", () =>
+test("resolves an omitted debug flag as the native arm64 release binary", () =>
   withTemporaryDirectory((tauriDir) => {
     const native = join(tauriDir, "target", "release", "buzz-desktop");
     const staleIntel = join(
@@ -109,6 +108,7 @@ test("resolves an explicit Intel release target directory", () =>
       env: macEnvironment({
         SCHOOLX_CODE_GIT_CARGO_LAYOUT: "target-triple",
         TAURI_ENV_ARCH: "x86_64",
+        TAURI_ENV_DEBUG: "false",
         TAURI_ENV_TARGET_TRIPLE: "x86_64-apple-darwin",
       }),
       tauriDir,
@@ -153,14 +153,14 @@ test("rejects inconsistent target and hook architecture", () => {
   );
 });
 
-test("requires Tauri's exact debug boolean string", () => {
+test("rejects invalid Tauri debug flag values", () => {
   assert.throws(
     () =>
       resolveBuildContext({
-        env: macEnvironment({ TAURI_ENV_DEBUG: undefined }),
+        env: macEnvironment({ TAURI_ENV_DEBUG: "" }),
         tauriDir: "/unused",
       }),
-    /required hook environment TAURI_ENV_DEBUG/,
+    /unexpected TAURI_ENV_DEBUG=""/,
   );
   assert.throws(
     () =>
