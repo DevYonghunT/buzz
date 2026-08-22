@@ -1,4 +1,4 @@
-//! Pinned Codex 0.145 thread lifecycle and authoritative graph contracts.
+//! Audited Codex 0.145/0.149 thread lifecycle and authoritative graph contracts.
 //!
 //! Lifecycle commands deliberately use a global, cwd-free thread inventory.
 //! The inventory is stricter than the user-facing thread projection because it
@@ -18,9 +18,9 @@ pub(crate) const CODE_AUTHORITATIVE_THREAD_PAGE_LIMIT: u32 = 100;
 pub(crate) const MAX_AUTHORITATIVE_THREADS: usize = 4_096;
 pub(crate) const MAX_AUTHORITATIVE_PAGES: usize = 64;
 
-/// Exact pinned Codex 0.145 `ThreadSourceKind` filter, including both the
-/// sub-agent umbrella and every specialized sub-agent classification.
-pub(crate) const CODEX_0145_THREAD_SOURCE_KINDS: [&str; 10] = [
+/// Exact audited Codex 0.145/0.149 `ThreadSourceKind` filter, including both
+/// the sub-agent umbrella and every specialized sub-agent classification.
+pub(crate) const SUPPORTED_CODEX_THREAD_SOURCE_KINDS: [&str; 10] = [
     "cli",
     "vscode",
     "exec",
@@ -328,7 +328,7 @@ pub(crate) fn authoritative_thread_list_params(
     let mut params = Map::from_iter([
         (
             "sourceKinds".to_string(),
-            json!(CODEX_0145_THREAD_SOURCE_KINDS),
+            json!(SUPPORTED_CODEX_THREAD_SOURCE_KINDS),
         ),
         (
             "archived".to_string(),
@@ -468,10 +468,11 @@ pub(crate) fn parse_authoritative_deferred_bound_thread_read(
     if thread.parent_thread_id.is_some()
         || thread.session_id != thread.id
         || thread.ephemeral
-        || !matches!(
-            &thread.source,
-            WireSessionSource::Simple(WireSimpleSessionSource::AppServer)
-        )
+        || !is_schoolx_app_server_source(&thread.source)
+        || thread
+            .thread_source
+            .as_deref()
+            .is_none_or(|source| protocol::validate_code_thread_source_marker(source).is_err())
         || !thread.status.proves_quiescent()
         || !thread.turns.is_empty()
     {
@@ -511,10 +512,7 @@ pub(crate) fn parse_authoritative_pending_fork_thread_read(
             .recovery_thread_baseline
             .binary_search(&thread.id)
             .is_ok()
-        || !matches!(
-            &thread.source,
-            WireSessionSource::Simple(WireSimpleSessionSource::AppServer)
-        )
+        || !is_schoolx_app_server_source(&thread.source)
         || !thread.status.proves_quiescent()
         || !thread.turns.is_empty()
         || canonical_workspace_root(&thread.cwd)? != expectation.execution_root
@@ -534,6 +532,18 @@ pub(crate) fn parse_authoritative_pending_fork_thread_read(
             forked_from_id: thread.forked_from_id,
         },
         CodeThreadMembership::Active,
+    )
+}
+
+/// Codex 0.149 currently labels threads created through its app-server as
+/// `vscode`; retain the 0.145/schema spelling while rejecting every unrelated
+/// source. Exact SchoolX source markers and roots are checked independently.
+fn is_schoolx_app_server_source(source: &WireSessionSource) -> bool {
+    matches!(
+        source,
+        WireSessionSource::Simple(
+            WireSimpleSessionSource::AppServer | WireSimpleSessionSource::Vscode
+        )
     )
 }
 

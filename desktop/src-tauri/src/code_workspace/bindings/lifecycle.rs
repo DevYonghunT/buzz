@@ -541,6 +541,26 @@ impl CodeThreadBindingStore {
             .transpose()
     }
 
+    /// Allow an exact loaded-thread proof for bindings that still target the
+    /// active membership. This does not promote unknown state by itself: the
+    /// app-server graph must still return matching SchoolX source/root evidence.
+    pub(crate) fn allows_deferred_active_membership_proof(
+        &self,
+        input: &CodeThreadBindingLookupInput,
+    ) -> Result<bool, String> {
+        input.validate()?;
+        let index = self.load()?;
+        let lifecycle = &exact_lifecycle(&index, input)?.lifecycle;
+        Ok(matches!(
+            lifecycle,
+            CodeThreadLifecycle::Active {}
+                | CodeThreadLifecycle::Unknown {
+                    target: CodeThreadLifecycleTarget::Active,
+                    ..
+                }
+        ))
+    }
+
     /// Return an exact binding only when it is durably stable and active.
     pub(crate) fn require_active_binding(
         &self,

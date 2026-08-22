@@ -206,8 +206,18 @@ type E2eConfig = {
     pocketVoiceImportResult?: "success" | "cancel" | "invalid";
     /** Advertised HEAD for the first mock project without adding that branch. */
     projectHeadBranch?: string;
+    /** Omit the first project's clone tag so relay URL derivation is exercised. */
+    projectOmitCloneTag?: boolean;
     /** Enable the scoped SchoolX Code native boundary fixture. */
     schoolxCodeWorkspace?: boolean;
+    /** Start SchoolX Code without a local checkout until Terminal clones it. */
+    schoolxCodeHasLocalCheckout?: boolean;
+    /** Return an unborn local checkout that still needs its first commit. */
+    schoolxCodeEmptyLocalRepository?: boolean;
+    /** Override whether opening Terminal reports that it performed the clone. */
+    schoolxCodeTerminalReportsCloned?: boolean;
+    /** Error returned by the mocked project Terminal boundary. */
+    schoolxCodeTerminalError?: string;
     /** Error returned by the native Code repository inspection boundary. */
     schoolxCodeRepositoryInspectError?: string;
     /** Successive native replay snapshots returned to the Code event adapter. */
@@ -228,6 +238,8 @@ type E2eConfig = {
     schoolxCodeForkErrors?: Array<string | null>;
     /** Delay a fork result so source-selection and pending UI remain observable. */
     schoolxCodeForkDelayMs?: number;
+    /** Delay a new thread result so task-list mutation locking can be asserted. */
+    schoolxCodeThreadStartDelayMs?: number;
     /** Sequenced managed-worktree removal failures; null allows the call through. */
     schoolxCodeRemovalErrors?: Array<string | null>;
     /** Sequenced response-loss failures after native removal has committed. */
@@ -5246,7 +5258,14 @@ function buildMockProjectEvents(): RelayEvent[] {
           ["d", seed.dtag],
           ["name", seed.name],
           ["description", seed.description],
-          ["clone", `https://relay.example.com/git/${owner}/${seed.dtag}`],
+          ...(projectIndex === 0 && getConfig()?.mock?.projectOmitCloneTag
+            ? []
+            : [
+                [
+                  "clone",
+                  `https://relay.example.com/git/${owner}/${seed.dtag}`,
+                ],
+              ]),
           ...seed.contributors.map((pubkey) => ["p", pubkey]),
         ],
         owner,
@@ -10496,6 +10515,8 @@ export function maybeInstallE2eTauriMocks() {
     : null;
   let mockCodeRuntimePhase: CodeRuntimePhase = "stopped";
   let mockCodeRuntimeError: string | null = null;
+  let mockCodeHasLocalCheckout =
+    config.mock?.schoolxCodeHasLocalCheckout ?? true;
   const mockCodeRuntimeStatus = () => ({
     phase: mockCodeRuntimePhase,
     generation: mockCodeRuntimeGeneration,
@@ -11561,12 +11582,37 @@ export function maybeInstallE2eTauriMocks() {
           ],
         };
       case "get_project_local_repo_snapshot":
-        if (!activeConfig?.mock?.schoolxCodeWorkspace) return null;
+        if (
+          !activeConfig?.mock?.schoolxCodeWorkspace ||
+          !mockCodeHasLocalCheckout
+        ) {
+          return null;
+        }
         return {
           path: "/mock/buzz",
           snapshot: {
-            latest_commit: null,
-            commits: [],
+            latest_commit: activeConfig?.mock?.schoolxCodeEmptyLocalRepository
+              ? null
+              : {
+                  hash: "0123456789abcdef0123456789abcdef01234567",
+                  short_hash: "0123456",
+                  author_name: "Brain",
+                  author_email: "brain@example.com",
+                  timestamp: Math.floor(Date.now() / 1000) - 600,
+                  subject: "Initialize SchoolX Code fixture",
+                },
+            commits: activeConfig?.mock?.schoolxCodeEmptyLocalRepository
+              ? []
+              : [
+                  {
+                    hash: "0123456789abcdef0123456789abcdef01234567",
+                    short_hash: "0123456",
+                    author_name: "Brain",
+                    author_email: "brain@example.com",
+                    timestamp: Math.floor(Date.now() / 1000) - 600,
+                    subject: "Initialize SchoolX Code fixture",
+                  },
+                ],
             files: [],
             contributors: [],
           },
@@ -12009,6 +12055,12 @@ export function maybeInstallE2eTauriMocks() {
       case "code_thread_start": {
         requireSchoolxCodeWorkspace();
         const input = (payload as { input: CodeThreadStartInput }).input;
+        const delayMs = activeConfig?.mock?.schoolxCodeThreadStartDelayMs ?? 0;
+        if (delayMs > 0) {
+          await new Promise((resolve) =>
+            globalThis.setTimeout(resolve, delayMs),
+          );
+        }
         if (
           mockCodePreparedWorktree?.preparationId === input.preparationId &&
           mockCodeScopesMatch(mockCodePreparedWorktree.scope, input.scope)
@@ -12698,11 +12750,17 @@ export function maybeInstallE2eTauriMocks() {
           targetRef: `refs/buzz/merge-recovery-target/${"f".repeat(40)}`,
         };
       }
-      case "open_project_terminal":
+      case "open_project_terminal": {
+        const terminalError = activeConfig?.mock?.schoolxCodeTerminalError;
+        if (terminalError) throw new Error(terminalError);
+        const cloned = !mockCodeHasLocalCheckout;
+        mockCodeHasLocalCheckout = true;
         return {
-          path: "/tmp/buzz/REPOS/buzz",
-          cloned: false,
+          path: "/mock/buzz",
+          cloned:
+            activeConfig?.mock?.schoolxCodeTerminalReportsCloned ?? cloned,
         };
+      }
       case "get_relay_ws_url":
         return getRelayWsUrl(activeConfig);
       case "get_default_relay_url":

@@ -233,6 +233,9 @@ desktop-release-build target="aarch64-apple-darwin":
     #!/usr/bin/env bash
     set -euo pipefail
     TARGET={{target}}
+    # This recipe always passes --target, so the XPC staging hook must select
+    # the target-triple Cargo output even when a native release binary exists.
+    export SCHOOLX_CODE_GIT_CARGO_LAYOUT=target-triple
     mkdir -p desktop/src-tauri/binaries
     touch "desktop/src-tauri/binaries/buzz-acp-$TARGET"
     touch "desktop/src-tauri/binaries/buzz-agent-$TARGET"

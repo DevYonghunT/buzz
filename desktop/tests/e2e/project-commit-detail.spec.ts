@@ -174,6 +174,12 @@ test("top-level project lists align dates and overflow actions", async ({
   const repositoryPositions = await trailingPositions(
     page.locator('[data-testid^="project-row-"]').first(),
   );
+  await expect(
+    page
+      .locator('[data-testid^="project-row-"]')
+      .first()
+      .getByRole("button", { name: /Open .+ in SchoolX Code/ }),
+  ).toBeVisible();
 
   await page
     .getByRole("button", { name: "Pull Requests", exact: true })
@@ -249,6 +255,11 @@ test("top-level project lists align dates and overflow actions", async ({
   await expect(
     responsiveRepositoryRow.getByRole("button", { name: /More options for/ }),
   ).toBeVisible();
+  await expect(
+    responsiveRepositoryRow.getByRole("button", {
+      name: /Open .+ in SchoolX Code/,
+    }),
+  ).toBeVisible();
   expect(
     await responsiveRepositoryRow.evaluate(
       (row) => row.scrollWidth <= row.clientWidth,
@@ -277,7 +288,9 @@ test("commit detail opens from the commits feed with a diff", async ({
     )
     .first();
   await expect(projectEntry).toBeVisible({ timeout: 10_000 });
-  await projectEntry.click();
+  await projectEntry
+    .getByRole("button", { name: "View buzz", exact: true })
+    .click();
 
   await page.getByRole("tab", { name: "Commits" }).click();
   const commitRows = page.getByTestId("project-activity-feed-item");
@@ -385,7 +398,9 @@ test("pull request and issue feeds share the commit row structure", async ({
     )
     .first();
   await expect(projectEntry).toBeVisible({ timeout: 10_000 });
-  await projectEntry.click();
+  await projectEntry
+    .getByRole("button", { name: "View buzz", exact: true })
+    .click();
 
   // PR rows use the shared feed row: title button + #id cluster cell.
   await page.getByRole("tab", { name: "Pull Request" }).click();

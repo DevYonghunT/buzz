@@ -178,7 +178,6 @@ impl PinnedGitLaunchAuthority {
             let _ = probe_directory;
             #[cfg(all(target_os = "macos", not(test)))]
             {
-                macos_git_xpc::require_capability()?;
                 drop(super::git_write::macos_root_trusted_git()?);
                 let session = MacGitAuthoritySession::begin()?;
                 Ok(Self { session })
@@ -276,6 +275,20 @@ fn with_pinned_git_authority<T>(
     }
     #[cfg(all(not(test), not(any(target_os = "linux", target_os = "macos"))))]
     Err("pinned Git launch is unsupported on this Unix platform".to_string())
+}
+
+/// Batch a caller's related execution-root reads under one authenticated Git
+/// authority. Nested pinned reads reuse the same same-thread macOS XPC session,
+/// while Linux and test builds preserve their existing descriptor-bound path.
+pub(crate) fn with_execution_root_authority<T>(
+    operation: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    #[cfg(unix)]
+    {
+        with_pinned_git_authority(operation)
+    }
+    #[cfg(not(unix))]
+    operation()
 }
 
 /// Native input for resolving a repository and preparing an execution root.

@@ -227,7 +227,9 @@ export function CodeThreadSidebar({
         <Button
           aria-label="Refresh Code tasks"
           className="h-6 w-6"
-          disabled={loading}
+          disabled={
+            loading || !actionsReady || creating || actionPendingId !== null
+          }
           onClick={onRefresh}
           size="icon-xs"
           title="Refresh tasks"

@@ -61,7 +61,6 @@ mod ffi {
     extern "Swift" {
         fn schoolx_git_xpc_is_service() -> bool;
         fn schoolx_git_xpc_service_main() -> i32;
-        fn schoolx_git_xpc_capability() -> String;
         fn schoolx_git_xpc_session_begin(session_id: u64) -> String;
         fn schoolx_git_xpc_session_end(session_id: u64) -> String;
         fn schoolx_git_xpc_launch(
@@ -152,7 +151,12 @@ struct LaunchResponse {
 }
 
 #[derive(Deserialize)]
-#[serde(tag = "state", rename_all = "camelCase", deny_unknown_fields)]
+#[serde(
+    tag = "state",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
 enum PollResponse {
     Pending,
     Finished {
@@ -255,9 +259,10 @@ struct ChildPermit {
 impl MacGitAuthoritySession {
     /// Admit a durable operation before its first mutation. A nested call on
     /// the same synchronous thread reuses the ambient session; every other
-    /// thread is rejected by the process-global gate.
+    /// thread is rejected by the process-global gate. Fresh admissions perform
+    /// their signed capability validation inside the Swift session-begin TCB,
+    /// immediately before reserving the fixed system Git executable.
     pub(crate) fn begin() -> Result<Self, String> {
-        require_capability()?;
         let owner_thread = std::thread::current().id();
         let ambient = THREAD_SESSION.with(|slot| slot.borrow().upgrade());
         if let Some(scope) = ambient {
@@ -569,17 +574,6 @@ impl Drop for MacGitChild {
                 &response.error,
             ));
         }
-    }
-}
-
-/// Fail closed unless this process and the embedded service can enforce mutual
-/// Team-ID plus signing-identifier requirements (macOS 12 or newer).
-pub(crate) fn require_capability() -> Result<(), String> {
-    let diagnostic = ffi::schoolx_git_xpc_capability();
-    if diagnostic.is_empty() {
-        Ok(())
-    } else {
-        Err(diagnostic)
     }
 }
 
@@ -937,43 +931,5 @@ pub(crate) fn validate_null_observation(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn process_spec_rejects_executable_replacement() {
-        let command = Command::new("/bin/echo");
-        assert!(process_spec_from_command(&command)
-            .is_err_and(|error| error.contains("non-system Git")));
-    }
-
-    #[test]
-    fn unknown_family_fails_closed() {
-        let encoded = schoolx_git_xpc_prepare(255, String::new(), 1, 2, 0, 3, 4, 0, 0);
-        assert!(encoded.contains("unknown typed Git family"));
-    }
-
-    #[test]
-    fn child_cleanup_requires_both_disposition_fields() {
-        assert!(child_cleanup_is_proven(true, false));
-        assert!(!child_cleanup_is_proven(false, false));
-        assert!(!child_cleanup_is_proven(true, true));
-    }
-
-    #[test]
-    fn identifier_exhaustion_does_not_wrap() {
-        let counter = AtomicU64::new(u64::MAX);
-        assert!(next_identifier(&counter, "test").is_err());
-        assert_eq!(counter.load(Ordering::Relaxed), u64::MAX);
-    }
-
-    #[test]
-    fn late_cleanup_callback_releases_only_the_exact_live_session() {
-        ACTIVE_SESSION_ID.store(73, Ordering::Release);
-        assert!(!schoolx_git_xpc_session_cleanup_proven(0));
-        assert!(!schoolx_git_xpc_session_cleanup_proven(72));
-        assert_eq!(ACTIVE_SESSION_ID.load(Ordering::Acquire), 73);
-        assert!(schoolx_git_xpc_session_cleanup_proven(73));
-        assert_eq!(ACTIVE_SESSION_ID.load(Ordering::Acquire), 0);
-    }
-}
+#[path = "macos_git_xpc_tests.rs"]
+mod tests;

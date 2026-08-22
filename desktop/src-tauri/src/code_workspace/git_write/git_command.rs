@@ -266,8 +266,6 @@ impl PinnedGitWriteRepository {
         let root_identity = directory_identity(root, &root_handle)?;
         let git = pin_git_executable()?;
         #[cfg(all(target_os = "macos", not(test)))]
-        macos_git_xpc::require_capability()?;
-        #[cfg(all(target_os = "macos", not(test)))]
         let session = MacGitAuthoritySession::begin()?;
         #[cfg(target_os = "linux")]
         let launch = GitLaunchAuthority::admit_with_git(

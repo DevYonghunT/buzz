@@ -29,6 +29,44 @@ fn wire_model(model: &str, is_default: bool) -> Value {
     })
 }
 
+fn wire_model_0_149(model: &str, is_default: bool) -> Value {
+    let mut model = wire_model(model, is_default);
+    model["modelSpecialty"] = Value::Null;
+    model["multiAgentVersion"] = json!("v2");
+    model["upgrade"] = json!("gpt-next");
+    model["upgradeInfo"] = json!({
+        "model": "gpt-next",
+        "migrationMarkdown": null,
+        "modelLink": null,
+        "retirementAt": 1_800_000_000,
+        "upgradeCopy": null
+    });
+    model
+}
+
+#[test]
+fn catalog_accepts_the_audited_codex_0_149_model_fields_strictly() -> Result<(), String> {
+    let catalog = collect_model_catalog(149, |_| {
+        Ok(json!({
+            "data": [wire_model_0_149("gpt-5.6-sol", true)],
+            "nextCursor": null
+        }))
+    })?;
+    assert_eq!(catalog.runtime_generation, 149);
+    assert_eq!(catalog.models.len(), 1);
+    assert_eq!(catalog.models[0].model, "gpt-5.6-sol");
+
+    let mut future = wire_model_0_149("gpt-future", true);
+    future["multiAgentVersion"] = json!("v3");
+    let error = collect_model_catalog(150, |_| {
+        Ok(json!({"data": [future.clone()], "nextCursor": null}))
+    })
+    .expect_err("future multi-agent versions must remain fail closed");
+    assert!(error.contains("v3"));
+    assert!(error.contains("unknown variant"));
+    Ok(())
+}
+
 #[test]
 fn catalog_paginates_with_native_hidden_and_limit_policy() -> Result<(), String> {
     let mut responses = VecDeque::from([

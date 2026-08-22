@@ -4129,6 +4129,30 @@ while IFS= read -r line; do :; done
 
     #[cfg(unix)]
     #[test]
+    fn starts_an_audited_codex_0_149_app_server() -> Result<(), String> {
+        let (_directory, executable) = fake_codex(
+            r#"#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "codex-cli 0.149.0"
+  exit 0
+fi
+IFS= read -r request
+printf '%s\n' '{"id":1,"result":{"userAgent":"codex-test","codexHome":"/tmp/codex-home","platformFamily":"unix","platformOs":"macos"}}'
+IFS= read -r initialized
+while IFS= read -r line; do :; done
+"#,
+        )?;
+        let runtime = CodeRuntime::with_executable(executable);
+
+        let ready = runtime.start(noop_emitter())?;
+        assert_eq!(ready.phase, CodeRuntimePhase::Ready);
+        assert_eq!(ready.version.as_deref(), Some("codex-cli 0.149.0"));
+        runtime.stop()?;
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn failed_stop_retains_process_and_blocks_restart_until_verified_teardown() -> Result<(), String>
     {
         let (_directory, executable) = fake_codex(
@@ -4441,7 +4465,9 @@ exit 1
         let error = runtime
             .start(noop_emitter())
             .expect_err("unsupported Codex must not start");
-        assert!(error.contains("requires codex-cli 0.145.<numeric patch>"));
+        assert!(error.contains(
+            "requires codex-cli 0.145.<numeric patch> or codex-cli 0.149.<numeric patch>"
+        ));
         let status = runtime.status()?;
         assert_eq!(status.phase, CodeRuntimePhase::Failed);
         assert_eq!(status.version.as_deref(), Some("codex-cli 0.146.0"));
@@ -4465,6 +4491,7 @@ exit 1
         };
         let mut list_calls = 0_usize;
         let mut loaded_calls = 0_usize;
+        let mut read_calls = 0_usize;
         let deferred_targets = HashSet::from(["thread-deferred".to_string()]);
         let graph =
             collect_authoritative_thread_graph(&deferred_targets, |method, params| match method {
@@ -4474,7 +4501,7 @@ exit 1
                     assert!(params.get("searchTerm").is_none());
                     assert_eq!(
                         params["sourceKinds"],
-                        json!(super::super::thread_lifecycle::CODEX_0145_THREAD_SOURCE_KINDS)
+                        json!(super::super::thread_lifecycle::SUPPORTED_CODEX_THREAD_SOURCE_KINDS)
                     );
                     let archived = params["archived"].as_bool().unwrap_or(false);
                     let cursor = params.get("cursor").and_then(Value::as_str);
@@ -4507,24 +4534,33 @@ exit 1
                         _ => return Err("unexpected loaded list page".to_string()),
                     })
                 }
-                "thread/read" if params["threadId"] == "thread-deferred" => Ok(json!({
-                    "thread": {
-                        "id": "thread-deferred",
-                        "sessionId": "thread-deferred",
-                        "cwd": "/tmp/schoolx-code",
-                        "source": "appServer",
-                        "status": { "type": "idle" },
-                        "ephemeral": false,
-                        "parentThreadId": null,
-                        "forkedFromId": null,
-                        "turns": []
-                    }
-                })),
+                "thread/read" if params["threadId"] == "thread-deferred" => {
+                    read_calls = read_calls.saturating_add(1);
+                    assert_eq!(
+                        params,
+                        json!({ "threadId": "thread-deferred", "includeTurns": false })
+                    );
+                    Ok(json!({
+                        "thread": {
+                            "id": "thread-deferred",
+                            "sessionId": "thread-deferred",
+                            "cwd": "/tmp/schoolx-code",
+                            "source": "vscode",
+                            "threadSource": "schoolx-code/67f11a1d-0274-4d40-9b0c-e406e51c64fb",
+                            "status": { "type": "idle" },
+                            "ephemeral": false,
+                            "parentThreadId": null,
+                            "forkedFromId": null,
+                            "turns": []
+                        }
+                    }))
+                }
                 _ => Err(format!("unexpected authoritative method {method}")),
             })?;
 
         assert_eq!(list_calls, 4);
         assert_eq!(loaded_calls, 2);
+        assert_eq!(read_calls, 1);
         for active in ["thread-root", "thread-child", "thread-deferred"] {
             assert_eq!(graph.membership(active), Some(CodeThreadMembership::Active));
         }
@@ -4583,7 +4619,7 @@ exit 1
                             "id": "thread-child",
                             "sessionId": "thread-child",
                             "cwd": destination_root,
-                            "source": "appServer",
+                            "source": "vscode",
                             "threadSource": format!("schoolx-code/{preparation_id}"),
                             "status": { "type": "idle" },
                             "ephemeral": false,

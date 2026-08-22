@@ -285,14 +285,15 @@ export function WorkspaceTabs({
         <ProjectTabsList prsActive={isPullRequestSelected} />
         {onOpenCode ? (
           <Button
+            aria-label={`Open ${project.name} in SchoolX Code`}
             className="h-8 shrink-0 gap-1.5"
             onClick={onOpenCode}
             size="sm"
             title="Open this project in SchoolX Code"
             variant="outline"
           >
-            <Code2 className="h-4 w-4" />
-            Code
+            <Code2 className="size-4" />
+            SchoolX Code
           </Button>
         ) : null}
         {onOpenTerminal ? (

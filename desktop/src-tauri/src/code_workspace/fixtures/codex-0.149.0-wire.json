@@ -1,7 +1,7 @@
 {
   "source": {
     "generator": "codex app-server generate-json-schema --out <DIR>",
-    "version": "codex-cli 0.145.0",
+    "version": "codex-cli 0.149.0",
     "experimental": false
   },
   "initialize": {
@@ -25,7 +25,9 @@
       "platformFamily": "unix",
       "platformOs": "macos"
     },
-    "initializedNotification": { "method": "initialized" }
+    "initializedNotification": {
+      "method": "initialized"
+    }
   },
   "modelList": {
     "method": "model/list",
@@ -52,7 +54,9 @@
             }
           ],
           "defaultReasoningEffort": "medium",
-          "isDefault": true
+          "isDefault": true,
+          "modelSpecialty": null,
+          "multiAgentVersion": "v2"
         }
       ],
       "nextCursor": null
@@ -72,7 +76,7 @@
       "thread": {
         "id": "thread-1",
         "sessionId": "session-1",
-        "cliVersion": "0.145.0",
+        "cliVersion": "0.149.0",
         "preview": "Run the focused tests",
         "ephemeral": false,
         "modelProvider": "openai",
@@ -81,9 +85,12 @@
         "cwd": "/native/stored-root",
         "name": "Native contract",
         "source": "appServer",
-        "status": { "type": "idle" },
+        "status": {
+          "type": "idle"
+        },
         "threadSource": "schoolx-code/67f11a1d-0274-4d40-9b0c-e406e51c64fb",
-        "turns": []
+        "turns": [],
+        "projectId": null
       },
       "instructionSources": ["AGENTS.md"],
       "model": "gpt-5.2-codex",
@@ -118,7 +125,7 @@
         {
           "id": "thread-1",
           "sessionId": "session-1",
-          "cliVersion": "0.145.0",
+          "cliVersion": "0.149.0",
           "preview": "Run the focused tests",
           "ephemeral": false,
           "modelProvider": "openai",
@@ -126,9 +133,12 @@
           "updatedAt": 1723600001,
           "cwd": "/native/stored-root",
           "source": "appServer",
-          "status": { "type": "idle" },
+          "status": {
+            "type": "idle"
+          },
           "threadSource": "schoolx-code/67f11a1d-0274-4d40-9b0c-e406e51c64fb",
-          "turns": []
+          "turns": [],
+          "projectId": null
         }
       ],
       "nextCursor": "list-page-2",
@@ -137,17 +147,26 @@
   },
   "threadLoadedList": {
     "method": "thread/loaded/list",
-    "params": { "limit": 100, "cursor": "loaded-next" },
-    "result": { "data": ["thread-1", "thread-2"], "nextCursor": null }
+    "params": {
+      "limit": 100,
+      "cursor": "loaded-next"
+    },
+    "result": {
+      "data": ["thread-1", "thread-2"],
+      "nextCursor": null
+    }
   },
   "threadRead": {
     "method": "thread/read",
-    "params": { "threadId": "thread-1", "includeTurns": false },
+    "params": {
+      "threadId": "thread-1",
+      "includeTurns": false
+    },
     "result": {
       "thread": {
         "id": "thread-1",
         "sessionId": "session-1",
-        "cliVersion": "0.145.0",
+        "cliVersion": "0.149.0",
         "preview": "Run the focused tests",
         "ephemeral": false,
         "modelProvider": "openai",
@@ -155,15 +174,20 @@
         "updatedAt": 1723600001,
         "cwd": "/native/stored-root",
         "source": "appServer",
-        "status": { "type": "idle" },
+        "status": {
+          "type": "idle"
+        },
         "threadSource": "schoolx-code/67f11a1d-0274-4d40-9b0c-e406e51c64fb",
-        "turns": []
+        "turns": [],
+        "projectId": null
       }
     }
   },
   "threadArchive": {
     "method": "thread/archive",
-    "params": { "threadId": "thread-1" },
+    "params": {
+      "threadId": "thread-1"
+    },
     "result": {}
   },
   "threadFork": {
@@ -181,7 +205,7 @@
         "sessionId": "thread-2",
         "forkedFromId": "thread-1",
         "parentThreadId": null,
-        "cliVersion": "0.145.0",
+        "cliVersion": "0.149.0",
         "preview": "Run the focused tests",
         "ephemeral": false,
         "modelProvider": "openai",
@@ -190,7 +214,9 @@
         "cwd": "/native/fork-root",
         "name": "Native contract",
         "source": "appServer",
-        "status": { "type": "idle" },
+        "status": {
+          "type": "idle"
+        },
         "threadSource": "schoolx-code/89c210f4-7a5b-4bd5-a98c-322386a8a2e9",
         "turns": [
           {
@@ -205,7 +231,8 @@
             ],
             "error": null
           }
-        ]
+        ],
+        "projectId": null
       },
       "instructionSources": ["AGENTS.md"],
       "model": "gpt-5.2-codex",
@@ -232,12 +259,14 @@
   },
   "threadUnarchive": {
     "method": "thread/unarchive",
-    "params": { "threadId": "thread-1" },
+    "params": {
+      "threadId": "thread-1"
+    },
     "result": {
       "thread": {
         "id": "thread-1",
         "sessionId": "session-1",
-        "cliVersion": "0.145.0",
+        "cliVersion": "0.149.0",
         "preview": "Run the focused tests",
         "ephemeral": false,
         "modelProvider": "openai",
@@ -245,9 +274,12 @@
         "updatedAt": 1723600011,
         "cwd": "/native/stored-root",
         "source": "appServer",
-        "status": { "type": "idle" },
+        "status": {
+          "type": "idle"
+        },
         "threadSource": "schoolx-code/67f11a1d-0274-4d40-9b0c-e406e51c64fb",
-        "turns": []
+        "turns": [],
+        "projectId": null
       }
     }
   },
@@ -263,7 +295,7 @@
       "thread": {
         "id": "thread-1",
         "sessionId": "session-1",
-        "cliVersion": "0.145.0",
+        "cliVersion": "0.149.0",
         "preview": "Run the focused tests",
         "ephemeral": false,
         "modelProvider": "openai",
@@ -271,7 +303,9 @@
         "updatedAt": 1723600010,
         "cwd": "/native/stored-root",
         "source": "appServer",
-        "status": { "type": "idle" },
+        "status": {
+          "type": "idle"
+        },
         "threadSource": "schoolx-code/67f11a1d-0274-4d40-9b0c-e406e51c64fb",
         "turns": [
           {
@@ -286,7 +320,8 @@
             ],
             "error": null
           }
-        ]
+        ],
+        "projectId": null
       },
       "instructionSources": ["AGENTS.md"],
       "model": "gpt-5.2-codex",
@@ -309,7 +344,11 @@
     "params": {
       "threadId": "thread-1",
       "input": [
-        { "type": "text", "text": "Run the focused tests", "text_elements": [] }
+        {
+          "type": "text",
+          "text": "Run the focused tests",
+          "text_elements": []
+        }
       ],
       "cwd": "/native/stored-root",
       "approvalPolicy": "on-request",
@@ -324,7 +363,11 @@
       "effort": "medium"
     },
     "result": {
-      "turn": { "id": "turn-1", "status": "inProgress", "items": [] }
+      "turn": {
+        "id": "turn-1",
+        "status": "inProgress",
+        "items": []
+      }
     }
   },
   "turnSteer": {
@@ -332,15 +375,24 @@
     "params": {
       "threadId": "thread-1",
       "input": [
-        { "type": "text", "text": "Start with unit tests", "text_elements": [] }
+        {
+          "type": "text",
+          "text": "Start with unit tests",
+          "text_elements": []
+        }
       ],
       "expectedTurnId": "turn-1"
     },
-    "result": { "turnId": "turn-1" }
+    "result": {
+      "turnId": "turn-1"
+    }
   },
   "turnInterrupt": {
     "method": "turn/interrupt",
-    "params": { "threadId": "thread-1", "turnId": "turn-1" },
+    "params": {
+      "threadId": "thread-1",
+      "turnId": "turn-1"
+    },
     "result": {}
   },
   "approvals": [
@@ -368,9 +420,14 @@
         },
         "threadId": "thread-1",
         "turnId": "turn-1",
-        "response": { "type": "decision", "decision": "acceptForSession" }
+        "response": {
+          "type": "decision",
+          "decision": "acceptForSession"
+        }
       },
-      "wireResult": { "decision": "acceptForSession" }
+      "wireResult": {
+        "decision": "acceptForSession"
+      }
     },
     {
       "request": {
@@ -394,9 +451,14 @@
         },
         "threadId": "thread-1",
         "turnId": "turn-1",
-        "response": { "type": "decision", "decision": "decline" }
+        "response": {
+          "type": "decision",
+          "decision": "decline"
+        }
       },
-      "wireResult": { "decision": "decline" }
+      "wireResult": {
+        "decision": "decline"
+      }
     },
     {
       "request": {
@@ -409,8 +471,12 @@
           "startedAtMs": 1723600013000,
           "cwd": "/native/stored-root",
           "permissions": {
-            "network": { "enabled": true },
-            "fileSystem": { "read": ["/native/stored-root"] }
+            "network": {
+              "enabled": true
+            },
+            "fileSystem": {
+              "read": ["/native/stored-root"]
+            }
           }
         }
       },
@@ -432,8 +498,12 @@
       },
       "wireResult": {
         "permissions": {
-          "network": { "enabled": true },
-          "fileSystem": { "read": ["/native/stored-root"] }
+          "network": {
+            "enabled": true
+          },
+          "fileSystem": {
+            "read": ["/native/stored-root"]
+          }
         },
         "scope": "turn",
         "strictAutoReview": true
@@ -450,7 +520,9 @@
           "startedAtMs": 1723600013500,
           "cwd": "/native/stored-root",
           "permissions": {
-            "fileSystem": { "write": ["/native/stored-root"] }
+            "fileSystem": {
+              "write": ["/native/stored-root"]
+            }
           }
         }
       },
@@ -472,7 +544,9 @@
       },
       "wireResult": {
         "permissions": {
-          "fileSystem": { "write": ["/native/stored-root"] }
+          "fileSystem": {
+            "write": ["/native/stored-root"]
+          }
         },
         "scope": "session",
         "strictAutoReview": false
@@ -489,8 +563,12 @@
           "startedAtMs": 1723600014000,
           "cwd": "/native/stored-root",
           "permissions": {
-            "network": { "enabled": true },
-            "fileSystem": { "write": ["/native/stored-root"] }
+            "network": {
+              "enabled": true
+            },
+            "fileSystem": {
+              "write": ["/native/stored-root"]
+            }
           }
         }
       },
@@ -523,17 +601,25 @@
       "params": {
         "threadId": "thread-1",
         "turnId": "turn-1",
-        "error": { "message": "turn failed" },
+        "error": {
+          "message": "turn failed"
+        },
         "willRetry": false
       }
     },
     {
       "method": "warning",
-      "params": { "threadId": "thread-1", "message": "watch this turn" }
+      "params": {
+        "threadId": "thread-1",
+        "message": "watch this turn"
+      }
     },
     {
       "method": "configWarning",
-      "params": { "summary": "ignored setting", "details": "unsupported key" }
+      "params": {
+        "summary": "ignored setting",
+        "details": "unsupported key"
+      }
     },
     {
       "method": "thread/started",
@@ -543,7 +629,7 @@
           "sessionId": "thread-2",
           "forkedFromId": "thread-1",
           "parentThreadId": null,
-          "cliVersion": "0.145.0",
+          "cliVersion": "0.149.0",
           "preview": "Run the focused tests",
           "ephemeral": false,
           "modelProvider": "openai",
@@ -552,9 +638,12 @@
           "cwd": "/native/fork-root",
           "name": "Native contract",
           "source": "appServer",
-          "status": { "type": "idle" },
+          "status": {
+            "type": "idle"
+          },
           "threadSource": "schoolx-code/89c210f4-7a5b-4bd5-a98c-322386a8a2e9",
-          "turns": []
+          "turns": [],
+          "projectId": null
         }
       }
     },
@@ -562,33 +651,50 @@
       "method": "thread/status/changed",
       "params": {
         "threadId": "thread-1",
-        "status": { "type": "active", "activeFlags": [] }
+        "status": {
+          "type": "active",
+          "activeFlags": []
+        }
       }
     },
     {
       "method": "thread/closed",
-      "params": { "threadId": "thread-1" }
+      "params": {
+        "threadId": "thread-1"
+      }
     },
     {
       "method": "thread/archived",
-      "params": { "threadId": "thread-1" }
+      "params": {
+        "threadId": "thread-1"
+      }
     },
     {
       "method": "thread/unarchived",
-      "params": { "threadId": "thread-1" }
+      "params": {
+        "threadId": "thread-1"
+      }
     },
     {
       "method": "turn/started",
       "params": {
         "threadId": "thread-1",
-        "turn": { "id": "turn-1", "status": "inProgress", "items": [] }
+        "turn": {
+          "id": "turn-1",
+          "status": "inProgress",
+          "items": []
+        }
       }
     },
     {
       "method": "turn/completed",
       "params": {
         "threadId": "thread-1",
-        "turn": { "id": "turn-1", "status": "completed", "items": [] }
+        "turn": {
+          "id": "turn-1",
+          "status": "completed",
+          "items": []
+        }
       }
     },
     {
@@ -604,7 +710,12 @@
       "params": {
         "threadId": "thread-1",
         "turnId": "turn-1",
-        "plan": [{ "step": "Run tests", "status": "inProgress" }]
+        "plan": [
+          {
+            "step": "Run tests",
+            "status": "inProgress"
+          }
+        ]
       }
     },
     {
@@ -613,7 +724,11 @@
         "threadId": "thread-1",
         "turnId": "turn-1",
         "startedAtMs": 1723600014000,
-        "item": { "id": "item-agent", "type": "agentMessage", "text": "" }
+        "item": {
+          "id": "item-agent",
+          "type": "agentMessage",
+          "text": ""
+        }
       }
     },
     {
@@ -622,7 +737,11 @@
         "threadId": "thread-1",
         "turnId": "turn-1",
         "completedAtMs": 1723600015000,
-        "item": { "id": "item-agent", "type": "agentMessage", "text": "done" }
+        "item": {
+          "id": "item-agent",
+          "type": "agentMessage",
+          "text": "done"
+        }
       }
     },
     {
@@ -700,7 +819,9 @@
         "changes": [
           {
             "path": "src/lib.rs",
-            "kind": { "type": "update" },
+            "kind": {
+              "type": "update"
+            },
             "diff": "+contract"
           }
         ]
@@ -708,7 +829,10 @@
     },
     {
       "method": "serverRequest/resolved",
-      "params": { "threadId": "thread-1", "requestId": "approval-command" }
+      "params": {
+        "threadId": "thread-1",
+        "requestId": "approval-command"
+      }
     }
   ]
 }

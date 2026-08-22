@@ -720,6 +720,21 @@ private func serviceLaunch(state: ServiceConnectionState, message: xpc_object_t)
     }
     return
   }
+  if let diagnostic = consumeInitialSuspendedChildStatus(pid: pid) {
+    if killAndProveServiceSpawnFailure(state: state, pid: pid) {
+      reject(diagnostic)
+    } else {
+      startServiceReaper(
+        state: state,
+        requestID: requestID,
+        nonceHigh: nonceHigh,
+        nonceLow: nonceLow,
+        pid: pid
+      )
+      quarantineLaunch(diagnostic)
+    }
+    return
+  }
 
   switch state.currentOwnerState() {
   case .serviceCleaning:
@@ -845,14 +860,7 @@ func reapGitProcessGroup(
   nonceLow: UInt64,
   pid: Int32
 ) {
-  var info = siginfo_t()
-  var diagnostic: String?
-  while true {
-    if waitid(P_PID, id_t(pid), &info, WEXITED | WNOWAIT) == 0 { break }
-    if errno == EINTR { continue }
-    diagnostic = "waitid failed for typed Git: \(errnoDiagnostic())"
-    break
-  }
+  var diagnostic = waitForTerminalChildStatus(pid: pid)
   let disposition = state.beginCleanup(pid: pid)
   switch disposition {
   case .kill(let cleanupPID):

@@ -17,6 +17,9 @@ const MACOS_XPC_SERVICE_SOURCE: &str = include_str!("../../macos/SchoolXGitXpcSe
 const MACOS_XPC_LIFECYCLE_SOURCE: &str = include_str!("../../macos/SchoolXGitXpcLifecycle.swift");
 const MACOS_XPC_SESSION_SOURCE: &str = include_str!("../../macos/SchoolXGitXpcSession.swift");
 const MACOS_XPC_SUPPORT_SOURCE: &str = include_str!("../../macos/SchoolXGitXpcSupport.swift");
+const WORKTREE_INVENTORY_SOURCE: &str = include_str!("worktree_inventory.rs");
+const CODE_WORKSPACE_SCREEN_SOURCE: &str =
+    include_str!("../../../src/features/code/ui/CodeWorkspaceScreen.tsx");
 const TAURI_BUILD_SOURCE: &str = include_str!("../../build.rs");
 const MAIN_SOURCE: &str = include_str!("../main.rs");
 
@@ -81,7 +84,6 @@ fn linux_launch_is_descriptor_bound_without_child_side_rust_callbacks() {
 #[test]
 fn macos_rust_bridge_has_no_raw_spawn_or_child_side_callback() {
     assert!(MACOS_XPC_SOURCE.contains("ROOT_TRUSTED_MACOS_GIT"));
-    assert!(MACOS_XPC_SOURCE.contains("require_capability()"));
     assert!(MACOS_XPC_SOURCE.contains("MacGitAuthoritySession"));
     assert!(MACOS_XPC_SOURCE.contains("ACTIVE_SESSION_ID"));
     assert!(MACOS_XPC_SOURCE.contains("schoolx_git_xpc_session_begin"));
@@ -141,6 +143,215 @@ fn macos_xpc_session_is_kernel_leased_and_exactly_signed() {
     }
     assert!(MACOS_XPC_SUPPORT_SOURCE.contains("SIGCHLD"));
     assert!(MACOS_XPC_SUPPORT_SOURCE.contains("SIGKILL"));
+}
+
+#[test]
+fn authenticated_macos_session_reuse_skips_redundant_static_code_validation() {
+    let rust_begin = MACOS_XPC_SOURCE
+        .find("pub(crate) fn begin() -> Result<Self, String>")
+        .map(|offset| &MACOS_XPC_SOURCE[offset..])
+        .expect("macOS authority-session begin must remain explicit");
+    let ambient = rust_begin
+        .find("let ambient = THREAD_SESSION")
+        .expect("macOS nested authority must inspect its ambient session");
+    let global_gate = rust_begin
+        .find("ACTIVE_SESSION_ID\n            .compare_exchange")
+        .expect("fresh macOS authority sessions must acquire the process-global gate");
+    let signed_admission = rust_begin
+        .find("schoolx_git_xpc_session_begin(session_id)")
+        .expect("fresh macOS authority sessions must enter signed XPC admission");
+    assert!(ambient < global_gate && global_gate < signed_admission);
+    assert!(!MACOS_XPC_SOURCE.contains("schoolx_git_xpc_capability"));
+    assert!(!MACOS_XPC_CLIENT_SOURCE.contains("schoolx_git_xpc_capability"));
+    assert!(!GIT_WRITE_SOURCE.contains("macos_git_xpc::require_capability()"));
+    assert!(!PINNED_GIT_SOURCE.contains("macos_git_xpc::require_capability()"));
+
+    let session_begin = MACOS_XPC_SESSION_SOURCE
+        .find("func schoolx_git_xpc_session_begin")
+        .map(|offset| &MACOS_XPC_SESSION_SOURCE[offset..])
+        .expect("macOS XPC session admission must remain explicit");
+    let session_begin_end = session_begin
+        .find("\nfunc schoolx_git_xpc_session_end")
+        .expect("macOS XPC session admission boundary must remain explicit");
+    let session_begin = &session_begin[..session_begin_end];
+    assert_eq!(session_begin.matches("capabilityDiagnostic()").count(), 1);
+    assert!(session_begin.contains("installPeerRequirement("));
+    let capability = session_begin
+        .find("capabilityDiagnostic()")
+        .expect("fresh session must validate the signed helper");
+    let reservation = session_begin
+        .find("openGitReservation()")
+        .expect("fresh session must reserve root-trusted Git");
+    let peer_requirement = session_begin
+        .find("installPeerRequirement(")
+        .expect("fresh session must authenticate its XPC peer");
+    let activation = session_begin
+        .find("xpc_connection_activate(connection)")
+        .expect("fresh session must activate its authenticated XPC connection");
+    assert!(capability < reservation && reservation < peer_requirement);
+    assert!(peer_requirement < activation);
+    assert!(
+        session_begin.contains("return encodeSessionFailure(sessionID: session_id, diagnostic)")
+    );
+    let encoded_failure = MACOS_XPC_SESSION_SOURCE
+        .find("private func encodeSessionFailure")
+        .map(|offset| &MACOS_XPC_SESSION_SOURCE[offset..])
+        .expect("clean XPC admission failures must have an explicit disposition");
+    let encoded_failure_end = encoded_failure
+        .find("\nprivate func encodeSessionRetained")
+        .expect("clean and retained XPC dispositions must remain separate");
+    let encoded_failure = &encoded_failure[..encoded_failure_end];
+    for required in [
+        "sessionId: sessionID",
+        "sessionCleanupProven: true",
+        "sessionAuthorityRetained: false",
+    ] {
+        assert!(
+            encoded_failure.contains(required),
+            "clean XPC admission failure lost {required}"
+        );
+    }
+
+    let rust_rejection = rust_begin
+        .find("if !begin_admitted")
+        .map(|offset| &rust_begin[offset..])
+        .expect("Rust must handle rejected signed admissions explicitly");
+    assert!(rust_rejection.contains("if session_cleanup_is_proven(&response)"));
+    assert!(rust_rejection.contains("release_global_session(session_id)?"));
+
+    let launch = MACOS_XPC_CLIENT_SOURCE
+        .find("func schoolx_git_xpc_launch")
+        .map(|offset| &MACOS_XPC_CLIENT_SOURCE[offset..])
+        .expect("macOS XPC Git launch must remain explicit");
+    let launch_end = launch
+        .find("\nprivate func installClientOperation")
+        .expect("macOS XPC Git launch boundary must remain explicit");
+    let launch = &launch[..launch_end];
+    assert!(!launch.contains("capabilityDiagnostic()"));
+    assert!(launch.contains("lookupClientSession(session_id)"));
+    assert!(launch.contains("session.reserveChild(request_id)"));
+
+    let reserve_child = MACOS_XPC_SESSION_SOURCE
+        .find("func reserveChild(_ requestID: UInt64) -> Bool")
+        .map(|offset| &MACOS_XPC_SESSION_SOURCE[offset..])
+        .expect("macOS client child reservation must remain explicit");
+    let reserve_child_end = reserve_child
+        .find("\n  func ")
+        .expect("macOS client child reservation boundary must remain explicit");
+    let reserve_child = &reserve_child[..reserve_child_end];
+    for required in [
+        "admitted",
+        "!ending",
+        "!quarantined",
+        "activeRequestID == 0",
+    ] {
+        assert!(
+            reserve_child.contains(required),
+            "macOS client-session reuse gate lost {required}"
+        );
+    }
+    for required in [
+        "state.matchesSession(message)",
+        "state.reserveLaunch(",
+        "state.validateSessionGitReservation()",
+    ] {
+        assert!(
+            MACOS_XPC_SERVICE_SOURCE.contains(required),
+            "macOS service launch gate lost {required}"
+        );
+    }
+}
+
+#[test]
+fn read_only_code_lists_batch_authenticated_git_and_do_not_poll_it() {
+    assert!(PINNED_GIT_SOURCE.contains("pub(crate) fn with_execution_root_authority<T>"));
+
+    let thread_list = CODE_WORKSPACE_COMMAND_SOURCE
+        .find("fn list_threads_native")
+        .map(|offset| &CODE_WORKSPACE_COMMAND_SOURCE[offset..])
+        .expect("bound-thread list must remain native");
+    let thread_list_end = thread_list
+        .find("\nfn require_binding")
+        .expect("bound-thread list boundary must remain explicit");
+    let thread_list = &thread_list[..thread_list_end];
+    let batch = thread_list
+        .find("with_execution_root_authority(||")
+        .expect("bound-thread roots must share one authenticated Git session");
+    let validation = thread_list
+        .find("revalidate_binding_root(&snapshot.binding, nest_root)")
+        .expect("each bound root must still be revalidated");
+    let authority_end = thread_list
+        .find("let mut data")
+        .expect("Codex hydration must remain separate from Git authority");
+    let runtime_read = thread_list
+        .find("runtime.thread_read")
+        .expect("validated bindings must still be hydrated from Codex");
+    assert!(batch < validation && validation < authority_end && authority_end < runtime_read);
+
+    let inventory = WORKTREE_INVENTORY_SOURCE
+        .find("pub fn list_worktree_inventory")
+        .map(|offset| &WORKTREE_INVENTORY_SOURCE[offset..])
+        .expect("managed-worktree inventory must remain native");
+    let inventory_end = inventory
+        .find("\nfn inspect_before_deadline")
+        .expect("managed-worktree inventory boundary must remain explicit");
+    let inventory = &inventory[..inventory_end];
+    let batch = inventory
+        .find("with_execution_root_authority(||")
+        .expect("inventory Git reads must share one authenticated session");
+    let deadline = inventory
+        .find("let deadline = Instant::now()")
+        .expect("inventory reads must remain time-bounded after admission");
+    let inspection = inventory
+        .find("inspect_before_deadline")
+        .expect("inventory roots must still be inspected");
+    let merge_proof = inventory
+        .find("inventory_merge_proof")
+        .expect("archived roots must retain merge proof");
+    assert!(batch < deadline && deadline < inspection && inspection < merge_proof);
+
+    assert!(!CODE_WORKSPACE_SCREEN_SOURCE.contains("refetchInterval: runtimeReady ? 5_000 : false"));
+    assert!(CODE_WORKSPACE_SCREEN_SOURCE.contains("codeSessionQueryKeys.threads(scope)"));
+}
+
+#[test]
+fn macos_descriptor_stat_preserves_signed_device_bit_pattern() {
+    assert!(MACOS_XPC_SUPPORT_SOURCE.contains("device: UInt64(bitPattern: Int64(value.st_dev))"));
+    assert!(!MACOS_XPC_SUPPORT_SOURCE.contains("device: UInt64(value.st_dev)"));
+}
+
+#[test]
+fn macos_xpc_reaper_ignores_nonterminal_waitid_events() {
+    for required in [
+        "func consumeInitialSuspendedChildStatus(pid: Int32)",
+        "stopped.si_pid == pid, stopped.si_code == CLD_STOPPED",
+        "func waitForTerminalChildStatus(pid: Int32)",
+        "case CLD_EXITED, CLD_KILLED, CLD_DUMPED:",
+        "case CLD_STOPPED, CLD_TRAPPED:",
+        "options: WSTOPPED",
+        "case CLD_CONTINUED:",
+        "options: WCONTINUED",
+    ] {
+        assert!(
+            MACOS_XPC_SUPPORT_SOURCE.contains(required),
+            "macOS child reaper contract lost {required}"
+        );
+    }
+    assert!(MACOS_XPC_SUPPORT_SOURCE.contains("options | WNOHANG"));
+    let suspended = MACOS_XPC_SERVICE_SOURCE
+        .find("consumeInitialSuspendedChildStatus(pid: pid)")
+        .expect("macOS helper must confirm the initial suspended child status");
+    let reaper = MACOS_XPC_SERVICE_SOURCE
+        .rfind("startServiceReaper(")
+        .expect("macOS helper must retain a terminal child reaper");
+    let started = MACOS_XPC_SERVICE_SOURCE
+        .find("xpc_dictionary_set_string(reply, \"kind\", \"started\")")
+        .expect("macOS helper must send an exact Started reply");
+    assert!(suspended < reaper && reaper < started);
+    assert!(MACOS_XPC_SERVICE_SOURCE.contains("waitForTerminalChildStatus(pid: pid)"));
+    assert!(
+        !MACOS_XPC_SERVICE_SOURCE.contains("waitid(P_PID, id_t(pid), &info, WEXITED | WNOWAIT)")
+    );
 }
 
 #[test]

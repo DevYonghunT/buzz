@@ -598,6 +598,25 @@ fn graph_failure_marks_only_stable_state_unknown_with_preserved_target() -> Resu
 }
 
 #[test]
+fn deferred_active_proof_candidates_preserve_the_native_unknown_target() -> Result<(), String> {
+    let (directory, store) = store()?;
+    let owner = scope("community-a", 'a');
+
+    let active = seed_active(&directory, &store, &owner, "thread-active")?;
+    assert!(store.allows_deferred_active_membership_proof(&active)?);
+    store.mark_stable_lifecycle_unknown(&active)?;
+    assert!(store.allows_deferred_active_membership_proof(&active)?);
+
+    let archived = seed_active(&directory, &store, &owner, "thread-archived")?;
+    let archive = store.begin_archive(&archived)?;
+    store.complete_lifecycle_transition(&archive)?;
+    assert!(!store.allows_deferred_active_membership_proof(&archived)?);
+    store.mark_stable_lifecycle_unknown(&archived)?;
+    assert!(!store.allows_deferred_active_membership_proof(&archived)?);
+    Ok(())
+}
+
+#[test]
 fn injected_save_failure_leaves_prior_index_bytes_and_active_state() -> Result<(), String> {
     let (directory, store) = store()?;
     let owner = scope("community-a", 'a');

@@ -5,6 +5,7 @@ import {
   Code2,
   FolderGit2,
   LoaderCircle,
+  SquareTerminal,
 } from "lucide-react";
 import * as React from "react";
 
@@ -14,6 +15,10 @@ import {
   useProjectLocalRepoSnapshotQuery,
   useProjectQuery,
 } from "@/features/projects/hooks";
+import {
+  projectTerminalLabel,
+  useOpenProjectTerminal,
+} from "@/features/projects/ui/useOpenProjectTerminal";
 import { TopChromeInsetHeader } from "@/shared/layout/TopChromeInsetHeader";
 import { Button } from "@/shared/ui/button";
 import { codeRepositoryQueryOptions } from "../state/codeSessionQueries";
@@ -23,10 +28,18 @@ const CODE_BASE_REF_RESOLUTION_ERROR =
   "failed to resolve SchoolX Code base ref";
 
 function isFirstCommitRequiredError(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    error.message.includes(CODE_BASE_REF_RESOLUTION_ERROR)
-  );
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === "string"
+        ? error
+        : typeof error === "object" &&
+            error !== null &&
+            "message" in error &&
+            typeof error.message === "string"
+          ? error.message
+          : "";
+  return message.includes(CODE_BASE_REF_RESOLUTION_ERROR);
 }
 
 function CodeBootstrapState({
@@ -73,19 +86,42 @@ export function ProjectCodeScreen({
   const project = projectQuery.data;
   const baseRef =
     requestedBaseRef?.trim() || project?.defaultBranch?.trim() || "HEAD";
+  const terminalBranch =
+    baseRef === "HEAD" ? project?.defaultBranch?.trim() || null : baseRef;
   const localRepositoryQuery = useProjectLocalRepoSnapshotQuery(
     project,
     activeCommunity?.reposDir,
     baseRef,
   );
+  const openProjectTerminal = useOpenProjectTerminal(activeCommunity?.reposDir);
+  const [isOpeningTerminal, setIsOpeningTerminal] = React.useState(false);
+  const handleOpenProjectTerminal = React.useCallback(
+    async (hasLocalCheckout: boolean) => {
+      if (!project || isOpeningTerminal) return;
+
+      setIsOpeningTerminal(true);
+      try {
+        await openProjectTerminal(project, {
+          branch: terminalBranch,
+          hasLocalCheckout,
+        });
+      } finally {
+        setIsOpeningTerminal(false);
+      }
+    },
+    [isOpeningTerminal, openProjectTerminal, project, terminalBranch],
+  );
   const repositoryRoot = localRepositoryQuery.data?.path ?? "";
+  const isEmptyLocalRepository =
+    repositoryRoot.length > 0 &&
+    localRepositoryQuery.data?.snapshot.latestCommit === null;
   const repositoryInput = React.useMemo(
     () => ({ repositoryRoot, baseRef }),
     [baseRef, repositoryRoot],
   );
   const repositoryQuery = useQuery({
     ...codeRepositoryQueryOptions(repositoryInput),
-    enabled: repositoryRoot.length > 0,
+    enabled: repositoryRoot.length > 0 && !isEmptyLocalRepository,
     staleTime: 30_000,
   });
 
@@ -158,15 +194,26 @@ export function ProjectCodeScreen({
     content = (
       <CodeBootstrapState
         action={
-          <Button onClick={backToProject} size="sm" variant="outline">
-            Open project
+          <Button
+            disabled={isOpeningTerminal}
+            onClick={() => void handleOpenProjectTerminal(false)}
+            size="sm"
+          >
+            {isOpeningTerminal ? (
+              <LoaderCircle className="animate-spin motion-reduce:animate-none" />
+            ) : (
+              <SquareTerminal />
+            )}
+            {isOpeningTerminal
+              ? "Opening Terminal…"
+              : projectTerminalLabel(false)}
           </Button>
         }
-        description="Clone this project from its project page before starting a Code task."
+        description="Clone this project and open its checkout in Terminal before starting a Code task."
         title="Local checkout required"
       />
     );
-  } else if (repositoryQuery.isPending) {
+  } else if (repositoryQuery.isPending && !isEmptyLocalRepository) {
     content = (
       <CodeBootstrapState
         description="Validating the selected Git repository and base branch."
@@ -175,19 +222,34 @@ export function ProjectCodeScreen({
       />
     );
   } else if (
-    repositoryQuery.isError &&
-    isFirstCommitRequiredError(repositoryQuery.error)
+    isEmptyLocalRepository ||
+    (repositoryQuery.isError &&
+      isFirstCommitRequiredError(repositoryQuery.error))
   ) {
     content = (
       <CodeBootstrapState
         action={
           <div className="flex flex-wrap items-center justify-center gap-2">
-            <Button onClick={backToProject} size="sm">
-              <ArrowLeft />
-              Open project
+            <Button
+              disabled={isOpeningTerminal}
+              onClick={() => void handleOpenProjectTerminal(true)}
+              size="sm"
+            >
+              {isOpeningTerminal ? (
+                <LoaderCircle className="animate-spin motion-reduce:animate-none" />
+              ) : (
+                <SquareTerminal />
+              )}
+              {isOpeningTerminal
+                ? "Opening Terminal…"
+                : projectTerminalLabel(true)}
             </Button>
             <Button
-              onClick={() => void repositoryQuery.refetch()}
+              onClick={() =>
+                void (isEmptyLocalRepository
+                  ? localRepositoryQuery.refetch()
+                  : repositoryQuery.refetch())
+              }
               size="sm"
               variant="outline"
             >

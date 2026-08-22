@@ -28,7 +28,7 @@ function ProjectTabLabel({ children }: { children: string }) {
 
 export function ProjectTabsList({ prsActive }: { prsActive?: boolean }) {
   return (
-    <TabsList className="h-full min-w-0 max-w-full flex-none justify-start gap-1 overflow-x-auto bg-transparent p-0 scrollbar-none">
+    <TabsList className="h-full min-w-0 max-w-full flex-1 justify-start gap-1 overflow-x-auto bg-transparent p-0 scrollbar-none">
       <TabsTrigger
         aria-label="Overview"
         className={PROJECT_OVERVIEW_TAB_CLASS}

@@ -7,7 +7,9 @@ use serde::Serialize;
 
 const VERSION_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 const VERSION_OUTPUT_CAP: u64 = 64 * 1024;
-const SUPPORTED_CODEX_VERSION_PREFIX: &str = "0.145.";
+const SUPPORTED_CODEX_VERSION_PREFIXES: [&str; 2] = ["0.145.", "0.149."];
+const SUPPORTED_CODEX_VERSION_REQUIREMENT: &str =
+    "codex-cli 0.145.<numeric patch> or codex-cli 0.149.<numeric patch>";
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -77,10 +79,9 @@ pub(crate) fn ensure_supported_codex_version(probe: &CodeRuntimeProbe) -> Result
     if is_supported_codex_version(version) {
         Ok(())
     } else {
-        Err(
-            "unsupported Codex CLI version; SchoolX Code currently requires codex-cli 0.145.<numeric patch> without a prerelease or build suffix"
-                .to_string(),
-        )
+        Err(format!(
+            "unsupported Codex CLI version; SchoolX Code currently requires {SUPPORTED_CODEX_VERSION_REQUIREMENT} without a prerelease or build suffix"
+        ))
     }
 }
 
@@ -92,11 +93,17 @@ fn is_supported_codex_version(value: &str) -> bool {
     let Some(version) = fields.next() else {
         return false;
     };
-    if fields.next().is_some() || !version.starts_with(SUPPORTED_CODEX_VERSION_PREFIX) {
+    if fields.next().is_some() {
         return false;
     }
 
-    let patch = &version[SUPPORTED_CODEX_VERSION_PREFIX.len()..];
+    let Some(prefix) = SUPPORTED_CODEX_VERSION_PREFIXES
+        .iter()
+        .find(|prefix| version.starts_with(**prefix))
+    else {
+        return false;
+    };
+    let patch = &version[prefix.len()..];
     if patch.is_empty()
         || !patch.bytes().all(|byte| byte.is_ascii_digit())
         || (patch.len() > 1 && patch.starts_with('0'))
@@ -307,8 +314,13 @@ mod tests {
     }
 
     #[test]
-    fn compatibility_gate_accepts_only_codex_cli_0_145_patch_versions() {
-        for version in ["codex-cli 0.145.0", "codex-cli 0.145.9"] {
+    fn compatibility_gate_accepts_only_audited_codex_minor_patch_versions() {
+        for version in [
+            "codex-cli 0.145.0",
+            "codex-cli 0.145.9",
+            "codex-cli 0.149.0",
+            "codex-cli 0.149.12",
+        ] {
             assert!(
                 is_supported_codex_version(version),
                 "expected {version} to pass"
@@ -318,6 +330,9 @@ mod tests {
         for version in [
             "codex-cli 0.144.99",
             "codex-cli 0.146.0",
+            "codex-cli 0.147.0",
+            "codex-cli 0.148.0",
+            "codex-cli 0.150.0",
             "codex-cli 1.145.0",
             "codex-cli 0.145",
             "codex-cli 0.145.x",
@@ -331,6 +346,12 @@ mod tests {
             "codex-cli 0.145.0-test..two",
             "codex-cli 0.145.0-test+one+two",
             "codex-cli 0.145.0 trailing",
+            "codex-cli 0.149",
+            "codex-cli 0.149.x",
+            "codex-cli 0.149.00",
+            "codex-cli 0.149.0-test",
+            "codex-cli 0.149.12+fixture.1",
+            "codex-cli 0.149.0 trailing",
             "codex 0.145.0",
             "codex-cli v0.145.0",
         ] {

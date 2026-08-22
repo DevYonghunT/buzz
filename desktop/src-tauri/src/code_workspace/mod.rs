@@ -29,7 +29,8 @@ mod worktrees;
 
 pub(crate) use worktrees::{
     collect_filter_override_names, collect_local_filter_overrides,
-    prepare_execution_root_with_merge_target, repository_identity, CodePinnedReadCommand,
+    prepare_execution_root_with_merge_target, repository_identity, with_execution_root_authority,
+    CodePinnedReadCommand,
 };
 #[cfg(unix)]
 pub(crate) use worktrees::{spawn_pinned_read_git_helper, PinnedGitChild};

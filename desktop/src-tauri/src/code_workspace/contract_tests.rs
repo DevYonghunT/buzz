@@ -65,6 +65,10 @@ const SCHEMA_MANIFEST: &str = include_str!("fixtures/codex-0.145.0-schema-manife
 const WIRE_FIXTURE: &str = include_str!("fixtures/codex-0.145.0-wire.json");
 const SELECTED_SCHEMA_ARCHIVE: &str =
     include_str!("fixtures/codex-0.145.0-selected-schemas.tar.gz.base64");
+const SCHEMA_MANIFEST_0_149: &str = include_str!("fixtures/codex-0.149.0-schema-manifest.json");
+const WIRE_FIXTURE_0_149: &str = include_str!("fixtures/codex-0.149.0-wire.json");
+const SELECTED_SCHEMA_ARCHIVE_0_149: &str =
+    include_str!("fixtures/codex-0.149.0-selected-schemas.tar.gz.base64");
 const LIB_SOURCE: &str = include_str!("../lib.rs");
 const COMMAND_SOURCE: &str = include_str!("../commands/code_workspace.rs");
 const TERMINAL_COMMAND_SOURCE: &str = include_str!("../commands/code_terminal.rs");
@@ -238,8 +242,10 @@ fn manifest_aggregate(schemas: &Value) -> Result<String, String> {
     Ok(sha256_hex(input.as_bytes()))
 }
 
-fn selected_schema_artifact() -> Result<BTreeMap<String, (Value, Vec<u8>)>, String> {
-    let encoded = SELECTED_SCHEMA_ARCHIVE
+fn selected_schema_artifact(
+    selected_schema_archive: &str,
+) -> Result<BTreeMap<String, (Value, Vec<u8>)>, String> {
+    let encoded = selected_schema_archive
         .lines()
         .map(str::trim)
         .collect::<String>();
@@ -591,9 +597,25 @@ fn registered_code_commands() -> Result<Vec<String>, String> {
 fn schema_manifest_freezes_the_audited_codex_0_145_0_contract() -> Result<(), String> {
     let manifest = fixture(SCHEMA_MANIFEST)?;
     assert_eq!(manifest["snapshotSchemaVersion"], 1);
-    assert_eq!(manifest["source"]["cliVersion"], "codex-cli 0.145.0");
-    assert_eq!(manifest["source"]["experimental"], false);
-    assert_eq!(manifest["source"]["generatedFileCount"], 273);
+    assert_eq!(
+        manifest["source"],
+        json!({
+            "cliVersion": "codex-cli 0.145.0",
+            "generator": "app-server generate-json-schema",
+            "experimental": false,
+            "generatedFileCount": 273,
+            "canonicalization": "jq -S -c output including final LF",
+            "aggregateFormat": "relative paths sorted bytewise, then <canonical-file-sha256><two spaces><relative-path><LF>",
+            "fullGeneratedSetSha256": "757aa191b6d452c6e6d05f6c1f1cb093b9f673da2d185a29ee8d5d96feae67a8",
+            "selectedLeafSchemasSha256": "b8d695b56e3ea5255857e2eb2dc9685d5ad65b735f276a5c743363d792677c73",
+            "selectedSchemaCount": 66,
+            "selectedSchemasSha256": "1ce5af96175ce83bb1d91db7939e8dcc243984255cf44777f19e58e0afe6549a",
+            "selectedSchemaArtifact": "codex-0.145.0-selected-schemas.tar.gz.base64",
+            "selectedSchemaArtifactEncoding": "base64(gzip(tar(canonical jq -S -c files)))",
+            "executableSha256": "1da3f4e0e96028b8a771814293c3033dafd1971f943f6c7e79b0897fe705f590",
+            "executableHashIsInformational": true
+        })
+    );
     assert_eq!(
         manifest["runtimeVersionRequirement"],
         "codex-cli 0.145.<numeric patch>"
@@ -654,9 +676,239 @@ fn schema_manifest_freezes_the_audited_codex_0_145_0_contract() -> Result<(), St
 }
 
 #[test]
-fn selected_schema_artifact_recomputes_every_manifest_hash() -> Result<(), String> {
-    let manifest = fixture(SCHEMA_MANIFEST)?;
-    let archived = selected_schema_artifact()?;
+fn schema_manifest_freezes_the_audited_codex_0_149_0_contract() -> Result<(), String> {
+    let manifest = fixture(SCHEMA_MANIFEST_0_149)?;
+    assert_eq!(manifest["snapshotSchemaVersion"], 1);
+    assert_eq!(
+        manifest["source"],
+        json!({
+            "cliVersion": "codex-cli 0.149.0",
+            "generator": "app-server generate-json-schema",
+            "experimental": false,
+            "generatedFileCount": 291,
+            "canonicalization": "jq -S -c output including final LF",
+            "aggregateFormat": "relative paths sorted bytewise, then <canonical-file-sha256><two spaces><relative-path><LF>",
+            "fullGeneratedSetSha256": "cb215283cdd5a870f56ffae341e7809bbb9640eebc19db6974dc1cf54a66851f",
+            "selectedLeafSchemasSha256": "e63d7bffa5e8b25c99d24af47b185e002c98356d03ab0552c5dbb11a95474afb",
+            "selectedSchemaCount": 66,
+            "selectedSchemasSha256": "5a8cb724fc8073bb4bedad9f6ad18f470edae6f3b38f31fe8d65a87898bf674b",
+            "selectedSchemaArtifact": "codex-0.149.0-selected-schemas.tar.gz.base64",
+            "selectedSchemaArtifactEncoding": "base64(gzip(tar(canonical jq -S -c files)))",
+            "executableSha256": "f4a74117b8142cda581c95ff753abf4508b5636d89682c1ed77e4a9249af8963",
+            "executableHashIsInformational": true
+        })
+    );
+    assert_eq!(
+        manifest["runtimeVersionRequirement"],
+        "codex-cli 0.149.<numeric patch>"
+    );
+    assert_eq!(manifest["provenSnapshotVersion"], "codex-cli 0.149.0");
+
+    let schemas = manifest["schemas"]
+        .as_array()
+        .ok_or_else(|| "missing Codex 0.149 schemas".to_string())?;
+    assert_eq!(schemas.len(), 66);
+    assert_eq!(manifest["source"]["selectedSchemaCount"], 66);
+    assert_eq!(
+        manifest_aggregate(&manifest["schemas"])?,
+        manifest["source"]["selectedSchemasSha256"]
+    );
+    assert_eq!(
+        manifest["source"]["selectedSchemasSha256"],
+        "5a8cb724fc8073bb4bedad9f6ad18f470edae6f3b38f31fe8d65a87898bf674b"
+    );
+    assert_eq!(
+        manifest["source"]["selectedLeafSchemasSha256"],
+        "e63d7bffa5e8b25c99d24af47b185e002c98356d03ab0552c5dbb11a95474afb"
+    );
+    assert_eq!(
+        manifest["source"]["fullGeneratedSetSha256"],
+        "cb215283cdd5a870f56ffae341e7809bbb9640eebc19db6974dc1cf54a66851f"
+    );
+    assert_eq!(
+        manifest["compatibilityWithBaseline"],
+        json!({
+            "baselineVersion": "codex-cli 0.145.0",
+            "retainedSelectedSchemaPaths": 66,
+            "exactUnchangedSelectedSchemas": 45,
+            "exactChangedSelectedSchemas": 21,
+            "structurallyUnchangedSelectedSchemas": 45,
+            "structurallyChangedSelectedSchemas": 21,
+            "numericRepresentationOnlyChanges": 0,
+            "schoolxRequestPropertiesRemoved": [],
+            "requiredThreadFieldsAdded": ["projectId"],
+            "strictModelParserPropertiesAdded": {
+                "Model": ["modelSpecialty", "multiAgentVersion"],
+                "ModelUpgradeInfo": ["retirementAt"]
+            }
+        })
+    );
+    Ok(())
+}
+
+fn schema_properties(schema: &Value, label: &str) -> Result<BTreeSet<String>, String> {
+    schema
+        .get("properties")
+        .and_then(Value::as_object)
+        .ok_or_else(|| format!("{label} has no object properties"))
+        .map(|properties| properties.keys().cloned().collect())
+}
+
+fn schema_required(schema: &Value, label: &str) -> Result<BTreeSet<String>, String> {
+    match schema.get("required") {
+        Some(required) => string_set(required, label),
+        None => Ok(BTreeSet::new()),
+    }
+}
+
+fn schema_definition<'a>(
+    schemas: &'a BTreeMap<String, (Value, Vec<u8>)>,
+    path: &str,
+    definition: &str,
+) -> Result<&'a Value, String> {
+    schemas
+        .get(path)
+        .and_then(|(schema, _)| schema.get("definitions"))
+        .and_then(|definitions| definitions.get(definition))
+        .ok_or_else(|| format!("{path} is missing definition {definition}"))
+}
+
+fn schemas_are_structurally_equal(left: &Value, right: &Value) -> bool {
+    match (left, right) {
+        (Value::Number(left), Value::Number(right)) => left.as_f64() == right.as_f64(),
+        (Value::Array(left), Value::Array(right)) => {
+            left.len() == right.len()
+                && left
+                    .iter()
+                    .zip(right)
+                    .all(|(left, right)| schemas_are_structurally_equal(left, right))
+        }
+        (Value::Object(left), Value::Object(right)) => {
+            left.len() == right.len()
+                && left.iter().all(|(key, left)| {
+                    right
+                        .get(key)
+                        .is_some_and(|right| schemas_are_structurally_equal(left, right))
+                })
+        }
+        _ => left == right,
+    }
+}
+
+#[test]
+fn codex_0_149_schema_delta_preserves_schoolx_requests_and_freezes_parser_additions(
+) -> Result<(), String> {
+    let baseline_manifest = fixture(SCHEMA_MANIFEST)?;
+    let next_manifest = fixture(SCHEMA_MANIFEST_0_149)?;
+    assert_eq!(baseline_manifest["methods"], next_manifest["methods"]);
+    assert_eq!(
+        baseline_manifest["serverRequests"],
+        next_manifest["serverRequests"]
+    );
+
+    let baseline = selected_schema_artifact(SELECTED_SCHEMA_ARCHIVE)?;
+    let next = selected_schema_artifact(SELECTED_SCHEMA_ARCHIVE_0_149)?;
+    assert_eq!(
+        baseline.keys().collect::<Vec<_>>(),
+        next.keys().collect::<Vec<_>>()
+    );
+    let exact_unchanged = baseline
+        .iter()
+        .filter(|(path, (_, bytes))| next.get(*path).is_some_and(|(_, next)| next == bytes))
+        .count();
+    let structurally_unchanged = baseline
+        .iter()
+        .filter(|(path, (schema, _))| {
+            next.get(*path)
+                .is_some_and(|(next_schema, _)| schemas_are_structurally_equal(schema, next_schema))
+        })
+        .count();
+    assert_eq!(exact_unchanged, 45);
+    assert_eq!(baseline.len().saturating_sub(exact_unchanged), 21);
+    assert_eq!(structurally_unchanged, 45);
+    assert_eq!(baseline.len().saturating_sub(structurally_unchanged), 21);
+    assert_eq!(structurally_unchanged.saturating_sub(exact_unchanged), 0);
+
+    for schemas in next_manifest["methods"]
+        .as_object()
+        .ok_or_else(|| "Codex 0.149 manifest has no method map".to_string())?
+        .values()
+    {
+        let request_path = schemas
+            .as_array()
+            .and_then(|schemas| schemas.first())
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Codex method has no request schema".to_string())?;
+        let old = &baseline
+            .get(request_path)
+            .ok_or_else(|| format!("baseline is missing {request_path}"))?
+            .0;
+        let new = &next
+            .get(request_path)
+            .ok_or_else(|| format!("Codex 0.149 is missing {request_path}"))?
+            .0;
+        let removed = schema_properties(old, request_path)?
+            .difference(&schema_properties(new, request_path)?)
+            .cloned()
+            .collect::<Vec<_>>();
+        assert!(
+            removed.is_empty(),
+            "request properties removed from {request_path}: {removed:?}"
+        );
+        assert_eq!(
+            schema_required(old, request_path)?,
+            schema_required(new, request_path)?,
+            "request required fields drifted for {request_path}"
+        );
+    }
+
+    let old_thread = schema_definition(&baseline, "v2/ThreadReadResponse.json", "Thread")?;
+    let new_thread = schema_definition(&next, "v2/ThreadReadResponse.json", "Thread")?;
+    let added_thread_required = schema_required(new_thread, "Codex 0.149 Thread")?
+        .difference(&schema_required(old_thread, "Codex 0.145 Thread")?)
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        added_thread_required,
+        BTreeSet::from(["projectId".to_string()])
+    );
+
+    let old_model = schema_definition(&baseline, "v2/ModelListResponse.json", "Model")?;
+    let new_model = schema_definition(&next, "v2/ModelListResponse.json", "Model")?;
+    let added_model_properties = schema_properties(new_model, "Codex 0.149 Model")?
+        .difference(&schema_properties(old_model, "Codex 0.145 Model")?)
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        added_model_properties,
+        BTreeSet::from([
+            "modelSpecialty".to_string(),
+            "multiAgentVersion".to_string()
+        ])
+    );
+    let old_upgrade =
+        schema_definition(&baseline, "v2/ModelListResponse.json", "ModelUpgradeInfo")?;
+    let new_upgrade = schema_definition(&next, "v2/ModelListResponse.json", "ModelUpgradeInfo")?;
+    let added_upgrade_properties = schema_properties(new_upgrade, "Codex 0.149 ModelUpgradeInfo")?
+        .difference(&schema_properties(
+            old_upgrade,
+            "Codex 0.145 ModelUpgradeInfo",
+        )?)
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        added_upgrade_properties,
+        BTreeSet::from(["retirementAt".to_string()])
+    );
+    Ok(())
+}
+
+fn assert_selected_schema_artifact_recomputes_every_manifest_hash(
+    schema_manifest: &str,
+    selected_schema_archive: &str,
+) -> Result<(), String> {
+    let manifest = fixture(schema_manifest)?;
+    let archived = selected_schema_artifact(selected_schema_archive)?;
     let entries = manifest["schemas"]
         .as_array()
         .ok_or_else(|| "manifest schemas must be an array".to_string())?;
@@ -719,10 +971,29 @@ fn selected_schema_artifact_recomputes_every_manifest_hash() -> Result<(), Strin
 }
 
 #[test]
-fn wire_fixture_conforms_to_the_curated_schema_shapes() -> Result<(), String> {
-    let manifest = fixture(SCHEMA_MANIFEST)?;
-    let wire = fixture(WIRE_FIXTURE)?;
-    let selected_schemas = selected_schema_artifact()?;
+fn codex_0_145_selected_schema_artifact_recomputes_every_manifest_hash() -> Result<(), String> {
+    assert_selected_schema_artifact_recomputes_every_manifest_hash(
+        SCHEMA_MANIFEST,
+        SELECTED_SCHEMA_ARCHIVE,
+    )
+}
+
+#[test]
+fn codex_0_149_selected_schema_artifact_recomputes_every_manifest_hash() -> Result<(), String> {
+    assert_selected_schema_artifact_recomputes_every_manifest_hash(
+        SCHEMA_MANIFEST_0_149,
+        SELECTED_SCHEMA_ARCHIVE_0_149,
+    )
+}
+
+fn assert_wire_fixture_conforms_to_the_curated_schema_shapes(
+    schema_manifest: &str,
+    wire_fixture: &str,
+    selected_schema_archive: &str,
+) -> Result<(), String> {
+    let manifest = fixture(schema_manifest)?;
+    let wire = fixture(wire_fixture)?;
+    let selected_schemas = selected_schema_artifact(selected_schema_archive)?;
     let mut referenced_schemas = BTreeSet::new();
 
     assert_eq!(wire["initialize"]["request"]["method"], "initialize");
@@ -931,6 +1202,24 @@ fn wire_fixture_conforms_to_the_curated_schema_shapes() -> Result<(), String> {
         )?;
     }
     Ok(())
+}
+
+#[test]
+fn codex_0_145_wire_fixture_conforms_to_the_curated_schema_shapes() -> Result<(), String> {
+    assert_wire_fixture_conforms_to_the_curated_schema_shapes(
+        SCHEMA_MANIFEST,
+        WIRE_FIXTURE,
+        SELECTED_SCHEMA_ARCHIVE,
+    )
+}
+
+#[test]
+fn codex_0_149_wire_fixture_conforms_to_the_curated_schema_shapes() -> Result<(), String> {
+    assert_wire_fixture_conforms_to_the_curated_schema_shapes(
+        SCHEMA_MANIFEST_0_149,
+        WIRE_FIXTURE_0_149,
+        SELECTED_SCHEMA_ARCHIVE_0_149,
+    )
 }
 
 #[test]
@@ -1973,9 +2262,10 @@ fn binding_store_fixture_reloads_and_public_list_scrubs_recovery_baseline() -> R
     Ok(())
 }
 
-#[test]
-fn native_codex_builders_and_parsers_match_the_wire_fixture() -> Result<(), String> {
-    let wire = fixture(WIRE_FIXTURE)?;
+fn assert_native_codex_builders_and_parsers_match_wire_fixture(
+    wire_fixture: &str,
+) -> Result<(), String> {
+    let wire = fixture(wire_fixture)?;
     let contract = fixture(TAURI_CONTRACT)?;
     let inputs = &contract["strictInputs"];
 
@@ -2141,8 +2431,19 @@ fn native_codex_builders_and_parsers_match_the_wire_fixture() -> Result<(), Stri
 }
 
 #[test]
-fn all_supported_notifications_and_approvals_match_wire_fixtures() -> Result<(), String> {
-    let wire = fixture(WIRE_FIXTURE)?;
+fn native_codex_builders_and_parsers_match_the_0_145_wire_fixture() -> Result<(), String> {
+    assert_native_codex_builders_and_parsers_match_wire_fixture(WIRE_FIXTURE)
+}
+
+#[test]
+fn native_codex_builders_and_parsers_match_the_0_149_wire_fixture() -> Result<(), String> {
+    assert_native_codex_builders_and_parsers_match_wire_fixture(WIRE_FIXTURE_0_149)
+}
+
+fn assert_supported_notifications_and_approvals_match_wire_fixture(
+    wire_fixture: &str,
+) -> Result<(), String> {
+    let wire = fixture(wire_fixture)?;
     let notifications = wire["notifications"]
         .as_array()
         .ok_or_else(|| "missing notifications".to_string())?;
@@ -2201,7 +2502,17 @@ fn all_supported_notifications_and_approvals_match_wire_fixtures() -> Result<(),
 }
 
 #[test]
-#[ignore = "manual audit: requires the pinned Codex 0.145.0 CLI"]
+fn all_supported_notifications_and_approvals_match_0_145_wire_fixtures() -> Result<(), String> {
+    assert_supported_notifications_and_approvals_match_wire_fixture(WIRE_FIXTURE)
+}
+
+#[test]
+fn all_supported_notifications_and_approvals_match_0_149_wire_fixtures() -> Result<(), String> {
+    assert_supported_notifications_and_approvals_match_wire_fixture(WIRE_FIXTURE_0_149)
+}
+
+#[test]
+#[ignore = "manual audit: requires an exact audited Codex 0.145.0 or 0.149.0 CLI"]
 fn refresh_schema_snapshot_is_manual_only() -> Result<(), String> {
     let executable = crate::managed_agents::resolve_command("codex")
         .ok_or_else(|| "Codex CLI is not installed".to_string())?;
@@ -2209,11 +2520,19 @@ fn refresh_schema_snapshot_is_manual_only() -> Result<(), String> {
         .arg("--version")
         .output()
         .map_err(|error| error.to_string())?;
-    if !version.status.success()
-        || String::from_utf8_lossy(&version.stdout).trim() != "codex-cli 0.145.0"
-    {
-        return Err("schema refresh requires exact codex-cli 0.145.0".to_string());
+    if !version.status.success() {
+        return Err("schema refresh Codex version probe failed".to_string());
     }
+    let version = String::from_utf8_lossy(&version.stdout);
+    let manifest = match version.trim() {
+        "codex-cli 0.145.0" => fixture(SCHEMA_MANIFEST)?,
+        "codex-cli 0.149.0" => fixture(SCHEMA_MANIFEST_0_149)?,
+        _ => {
+            return Err(
+                "schema refresh requires exact codex-cli 0.145.0 or codex-cli 0.149.0".to_string(),
+            )
+        }
+    };
 
     let generated = tempfile::tempdir().map_err(|error| error.to_string())?;
     let output = Command::new(executable)
@@ -2231,7 +2550,6 @@ fn refresh_schema_snapshot_is_manual_only() -> Result<(), String> {
     let mut paths = Vec::new();
     collect_json_paths(generated.path(), generated.path(), &mut paths)?;
     paths.sort();
-    let manifest = fixture(SCHEMA_MANIFEST)?;
     assert_eq!(
         paths.len(),
         manifest["source"]["generatedFileCount"]

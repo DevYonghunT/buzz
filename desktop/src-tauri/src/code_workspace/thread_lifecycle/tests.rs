@@ -54,7 +54,10 @@ fn lifecycle_input_and_archive_wire_are_exact() -> Result<(), String> {
 #[test]
 fn authoritative_list_params_have_every_source_and_no_cwd_or_search() -> Result<(), String> {
     let active = authoritative_thread_list_params(CodeThreadMembership::Active, None)?;
-    assert_eq!(active["sourceKinds"], json!(CODEX_0145_THREAD_SOURCE_KINDS));
+    assert_eq!(
+        active["sourceKinds"],
+        json!(SUPPORTED_CODEX_THREAD_SOURCE_KINDS)
+    );
     assert_eq!(active["archived"], false);
     assert_eq!(active["limit"], CODE_AUTHORITATIVE_THREAD_PAGE_LIMIT);
     assert_eq!(active["useStateDbOnly"], false);
@@ -133,6 +136,42 @@ fn strict_source_parser_accepts_every_pinned_shape() -> Result<(), String> {
         json!({ "subAgent": { "other": "fixture" } }),
     ] {
         assert!(parse_threads(vec![thread("thread-parentless", parentless, None, None,)]).is_err());
+    }
+    Ok(())
+}
+
+#[test]
+fn deferred_schoolx_thread_accepts_real_0_149_vscode_source_only_with_marker() -> Result<(), String>
+{
+    let deferred = |source: &str, thread_source: Option<&str>| {
+        json!({
+            "thread": {
+                "id": "thread-deferred",
+                "sessionId": "thread-deferred",
+                "cwd": "/tmp/schoolx-code",
+                "source": source,
+                "status": { "type": "idle" },
+                "ephemeral": false,
+                "parentThreadId": null,
+                "forkedFromId": null,
+                "threadSource": thread_source,
+                "turns": []
+            }
+        })
+    };
+    let marker = "schoolx-code/67f11a1d-0274-4d40-9b0c-e406e51c64fb";
+    for source in ["appServer", "vscode"] {
+        assert_eq!(
+            parse_authoritative_deferred_bound_thread_read(deferred(source, Some(marker)))?.id,
+            "thread-deferred"
+        );
+    }
+    for rejected in [
+        deferred("cli", Some(marker)),
+        deferred("vscode", None),
+        deferred("vscode", Some("schoolx-code/not-a-uuid")),
+    ] {
+        assert!(parse_authoritative_deferred_bound_thread_read(rejected).is_err());
     }
     Ok(())
 }

@@ -119,4 +119,14 @@ grep -Fq 'certificate leaf[field.1.2.840.113635.100.6.1.13] exists' \
 grep -Fq 'codesign --verify --strict --verbose=2 -R="$xpc_requirement" "$xpc_path"' \
   "$repo_root/desktop/scripts/verify-code-git-xpc-signature.sh"
 
+if ! awk '
+  /^desktop-release-build / { in_recipe = 1 }
+  in_recipe { print }
+  in_recipe && /^desktop-ci:/ { exit }
+' "$repo_root/justfile" | grep -Fq \
+  'export SCHOOLX_CODE_GIT_CARGO_LAYOUT=target-triple'; then
+  echo "desktop-release-build must select the target-triple XPC Cargo output" >&2
+  exit 1
+fi
+
 echo "Code Git XPC packaging contract passed"

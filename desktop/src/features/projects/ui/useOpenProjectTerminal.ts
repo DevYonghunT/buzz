@@ -12,7 +12,8 @@ export function projectTerminalLabel(hasLocalCheckout: boolean) {
 /**
  * Opens the OS terminal at a project's local checkout, cloning first when
  * only a remote exists. Handles the clone progress/success/error toasts and
- * refreshes project queries after a clone so local-checkout state updates.
+ * refreshes project queries after a missing checkout is resolved so the UI
+ * also recovers when another actor completed the clone first.
  */
 export function useOpenProjectTerminal(reposDir?: string | null) {
   const queryClient = useQueryClient();
@@ -34,12 +35,15 @@ export function useOpenProjectTerminal(reposDir?: string | null) {
         });
         if (result.cloned) {
           toast.success(`Cloned to ${result.path}`, { id: toastId });
+        } else if (toastId !== undefined) {
+          toast.dismiss(toastId);
+        }
+
+        if (result.cloned || !options.hasLocalCheckout) {
           void queryClient.invalidateQueries({
             queryKey: ["project", project.id],
           });
           void queryClient.invalidateQueries({ queryKey: ["projects"] });
-        } else if (toastId !== undefined) {
-          toast.dismiss(toastId);
         }
       } catch (error) {
         toast.error(

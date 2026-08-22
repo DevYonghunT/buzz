@@ -12,19 +12,20 @@ use super::project_git_exec::{build_git_auth_config, with_pinned_git_directory, 
 use crate::app_state::AppState;
 use crate::code_workspace::{
     code_thread_source, preflight_execution_root, revalidate_execution_root,
-    CodeActiveTurnCheckpoint, CodeApprovalCheckpoint, CodeApprovalResponseInput,
-    CodeBoundThreadOpenResult, CodeBoundThreadSummary, CodeEventBacklog, CodeEventCheckpoint,
-    CodeEventEmitter, CodeModelSelection, CodeModelSelectionStore, CodeModelsListResult,
-    CodePreparedWorktree, CodeRecoveryThread, CodeRepositoryDescriptor, CodeRepositoryInspectInput,
-    CodeRuntime, CodeRuntimeEvent, CodeRuntimeEventBacklog, CodeRuntimeProbe, CodeRuntimeStatus,
-    CodeThreadBinding, CodeThreadBindingLookupInput, CodeThreadBindingRecoverInput,
-    CodeThreadBindingScope, CodeThreadBindingStore, CodeThreadChangeStatus, CodeThreadChangedFile,
-    CodeThreadChanges, CodeThreadChangesInput, CodeThreadListInput, CodeThreadPreparation,
-    CodeThreadPreparationListInput, CodeThreadPreparationOperation, CodeThreadResumeInput,
-    CodeThreadStartError, CodeThreadStartInput, CodeThreadsPage, CodeTurnInterruptInput,
-    CodeTurnStartInput, CodeTurnSteerInput, CodeTurnSummary, CodeWorkspaceEvent,
-    CodeWorktreeDescriptor, CodeWorktreePrepareCommandInput, CodeWorktreeRemovalContext,
-    CodeWorktreeRemovalReceipt, CodeWorktreeRemoveInput, CodeWorktreeStatus, CODE_WORKSPACE_EVENT,
+    with_execution_root_authority, CodeActiveTurnCheckpoint, CodeApprovalCheckpoint,
+    CodeApprovalResponseInput, CodeBoundThreadOpenResult, CodeBoundThreadSummary, CodeEventBacklog,
+    CodeEventCheckpoint, CodeEventEmitter, CodeModelSelection, CodeModelSelectionStore,
+    CodeModelsListResult, CodePreparedWorktree, CodeRecoveryThread, CodeRepositoryDescriptor,
+    CodeRepositoryInspectInput, CodeRuntime, CodeRuntimeEvent, CodeRuntimeEventBacklog,
+    CodeRuntimeProbe, CodeRuntimeStatus, CodeThreadBinding, CodeThreadBindingLookupInput,
+    CodeThreadBindingRecoverInput, CodeThreadBindingScope, CodeThreadBindingStore,
+    CodeThreadChangeStatus, CodeThreadChangedFile, CodeThreadChanges, CodeThreadChangesInput,
+    CodeThreadListInput, CodeThreadPreparation, CodeThreadPreparationListInput,
+    CodeThreadPreparationOperation, CodeThreadResumeInput, CodeThreadStartError,
+    CodeThreadStartInput, CodeThreadsPage, CodeTurnInterruptInput, CodeTurnStartInput,
+    CodeTurnSteerInput, CodeTurnSummary, CodeWorkspaceEvent, CodeWorktreeDescriptor,
+    CodeWorktreePrepareCommandInput, CodeWorktreeRemovalContext, CodeWorktreeRemovalReceipt,
+    CodeWorktreeRemoveInput, CodeWorktreeStatus, CODE_WORKSPACE_EVENT,
 };
 
 const MAX_EVENT_SCOPE_CACHE: usize = 512;
@@ -548,12 +549,23 @@ fn list_threads_native(
         lifecycle_authority,
     )?;
     let bindings = store.list_with_lifecycle(&input.scope)?;
-    let mut data = Vec::with_capacity(bindings.len());
-    for snapshot in bindings {
-        let binding = snapshot.binding;
-        let lifecycle = snapshot.status;
+    let validated_bindings = if bindings.is_empty() {
+        Vec::new()
+    } else {
+        with_execution_root_authority(|| {
+            Ok(bindings
+                .into_iter()
+                .map(|snapshot| {
+                    let execution_root = revalidate_binding_root(&snapshot.binding, nest_root);
+                    (snapshot.binding, snapshot.status, execution_root)
+                })
+                .collect::<Vec<_>>())
+        })?
+    };
+    let mut data = Vec::with_capacity(validated_bindings.len());
+    for (binding, lifecycle, execution_root) in validated_bindings {
         let hydrated = (|| {
-            let execution_root = revalidate_binding_root(&binding, nest_root)?;
+            let execution_root = execution_root?;
             let thread = if lifecycle == crate::code_workspace::CodeThreadLifecycleStatus::Active {
                 runtime.thread_read(&binding.codex_thread_id)?
             } else {

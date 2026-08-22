@@ -12,6 +12,7 @@ import type {
   CodeThreadBindingScope,
   CodeThreadPreparation,
   CodeThreadSummary,
+  CodeThreadsPage,
 } from "../api/types";
 import {
   type CodeTimelineLocalPrompt,
@@ -93,12 +94,12 @@ export function CodeWorkspaceScreen({
   const threadsQuery = useQuery({
     ...codeThreadsQueryOptions(scope),
     enabled: runtimeReady,
-    refetchInterval: runtimeReady ? 5_000 : false,
   });
   const threads = React.useMemo(
     () => (runtimeReady ? (threadsQuery.data?.data ?? []) : []),
     [runtimeReady, threadsQuery.data?.data],
   );
+  const threadListReady = threadsQuery.isSuccess && !threadsQuery.isFetching;
   const [openedThreads, setOpenedThreads] = React.useState<OpenedThreads>(
     () => new Map(),
   );
@@ -216,21 +217,53 @@ export function CodeWorkspaceScreen({
     ]);
   }, [queryClient, scope]);
 
+  const refreshAfterThreadOpen = React.useCallback(() => {
+    void queryClient.invalidateQueries({
+      queryKey: codeSessionQueryKeys.preparations(scope),
+    });
+    void queryClient.invalidateQueries({
+      queryKey: codeSessionQueryKeys.worktrees(scope),
+      refetchType: "none",
+    });
+  }, [queryClient, scope]);
+
   const retainOpenedThread = React.useCallback(
     (
       opened: CodeBoundThreadOpenResult,
       pendingSelection: CodeModelSelection | null = null,
     ) => {
       if (!mountedRef.current) return;
+      void queryClient.cancelQueries({
+        exact: true,
+        queryKey: codeSessionQueryKeys.threads(scope),
+      });
       modelSelection.seedOpenedThread(opened, pendingSelection);
       setOpenedThreads((current) => {
         const next = new Map(current);
         next.set(opened.thread.id, opened);
         return next;
       });
+      queryClient.setQueryData<CodeThreadsPage>(
+        codeSessionQueryKeys.threads(scope),
+        (current) => ({
+          data: [
+            {
+              binding: opened.binding,
+              lifecycle: "active",
+              thread: opened.thread,
+              unavailable: null,
+            },
+            ...(current?.data.filter(
+              (row) => row.binding.codexThreadId !== opened.thread.id,
+            ) ?? []),
+          ],
+          nextCursor: current?.nextCursor ?? null,
+          backwardsCursor: current?.backwardsCursor ?? null,
+        }),
+      );
       resumeAttemptedRef.current.add(opened.thread.id);
     },
-    [modelSelection.seedOpenedThread],
+    [modelSelection.seedOpenedThread, queryClient, scope],
   );
 
   const retainThreadSnapshot = React.useCallback(
@@ -254,6 +287,16 @@ export function CodeWorkspaceScreen({
     onThreadSnapshot: retainThreadSnapshot,
     scope,
   });
+  const taskActionPending =
+    threadMutations.pendingForkThreadId !== null ||
+    threadMutations.pendingLifecycleThreadId !== null;
+  const sidebarActionsReady =
+    interactionReady &&
+    threadListReady &&
+    !taskActionPending &&
+    !creating &&
+    actionPendingId === null &&
+    !modelSelection.saving;
   const selectedCapabilities = selectedRow
     ? codeThreadLifecycleCapabilities(selectedRow.lifecycle)
     : null;
@@ -475,6 +518,7 @@ export function CodeWorkspaceScreen({
     async (preparation: CodeThreadPreparation) => {
       if (
         !interactionReady ||
+        !threadListReady ||
         creating ||
         actionPendingId !== null ||
         modelSelection.saving
@@ -510,9 +554,8 @@ export function CodeWorkspaceScreen({
           return;
         }
         retainOpenedThread(opened, pendingSelection);
-        await refreshLists();
-        if (!mountedRef.current) return;
         onSelectedThreadIdChange(opened.thread.id);
+        refreshAfterThreadOpen();
       } catch (error) {
         if (!mountedRef.current) return;
         if (threadStartPending) modelSelection.revalidateCatalog();
@@ -531,13 +574,16 @@ export function CodeWorkspaceScreen({
       modelSelection.saving,
       onSelectedThreadIdChange,
       refreshLists,
+      refreshAfterThreadOpen,
       retainOpenedThread,
       scope,
+      threadListReady,
     ],
   );
 
   const forkThread = React.useCallback(
     async (threadId: string) => {
+      if (!threadListReady) return;
       const runtimeGeneration = runtimeGenerationRef.current;
       if (runtimeGeneration === null) return;
       const opened = await threadMutations.forkThread(threadId);
@@ -549,12 +595,18 @@ export function CodeWorkspaceScreen({
       retainOpenedThread(opened);
       onSelectedThreadIdChange(opened.thread.id);
     },
-    [onSelectedThreadIdChange, retainOpenedThread, threadMutations.forkThread],
+    [
+      onSelectedThreadIdChange,
+      retainOpenedThread,
+      threadListReady,
+      threadMutations.forkThread,
+    ],
   );
 
   const createTask = React.useCallback(async () => {
     if (
       !interactionReady ||
+      !threadListReady ||
       creating ||
       actionPendingId !== null ||
       modelSelection.saving
@@ -593,9 +645,8 @@ export function CodeWorkspaceScreen({
         return;
       }
       retainOpenedThread(opened, pendingSelection);
-      await refreshLists();
-      if (!mountedRef.current) return;
       onSelectedThreadIdChange(opened.thread.id);
+      refreshAfterThreadOpen();
     } catch (error) {
       if (!mountedRef.current) return;
       if (threadStartAttempted) modelSelection.revalidateCatalog();
@@ -614,9 +665,11 @@ export function CodeWorkspaceScreen({
     modelSelection.saving,
     onSelectedThreadIdChange,
     refreshLists,
+    refreshAfterThreadOpen,
     repository.repositoryRoot,
     retainOpenedThread,
     scope,
+    threadListReady,
   ]);
 
   const selectedThreadEvents = React.useMemo(
@@ -797,12 +850,8 @@ export function CodeWorkspaceScreen({
         {sidebarOpen ? (
           <CodeThreadSidebar
             actionPendingId={actionPendingId}
-            actionsReady={interactionReady && !modelSelection.saving}
-            canCreate={
-              interactionReady &&
-              actionPendingId === null &&
-              !modelSelection.saving
-            }
+            actionsReady={sidebarActionsReady}
+            canCreate={sidebarActionsReady}
             creating={creating}
             isForkBlocked={threadMutations.isForkLocallyBlocked}
             isLifecycleBlocked={threadMutations.isLifecycleLocallyBlocked}

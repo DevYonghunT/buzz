@@ -11,8 +11,9 @@ use super::bindings::{
     CodeThreadPreparationState,
 };
 use super::worktrees::{
-    prove_binding_merge_target_before, revalidate_execution_root_before, CodeMergeProofOutcome,
-    CodeWorktreeDescriptor, CodeWorktreeStatus,
+    prove_binding_merge_target_before, revalidate_execution_root_before,
+    with_execution_root_authority, CodeMergeProofOutcome, CodeWorktreeDescriptor,
+    CodeWorktreeStatus,
 };
 
 const INVENTORY_INSPECTION_BUDGET: Duration = Duration::from_secs(30);
@@ -136,25 +137,31 @@ pub fn list_worktree_inventory(
     scope: &CodeThreadBindingScope,
 ) -> Result<Vec<CodeWorktreeInventoryRow>, String> {
     let (bindings, preparations) = store.list_managed_inventory_authority(scope)?;
-    let mut rows = Vec::with_capacity(bindings.len() + preparations.len());
-    let deadline = Instant::now() + INVENTORY_INSPECTION_BUDGET;
-    for snapshot in bindings {
-        let descriptor = binding_descriptor(&snapshot.binding);
-        let inspection = inspect_before_deadline(&descriptor, nest_root, deadline);
-        let merge_proof = inventory_merge_proof(store, &snapshot, &inspection, nest_root, deadline);
-        rows.push(project_binding_row(
-            snapshot.binding,
-            snapshot.status,
-            inspection,
-            merge_proof,
-        ));
+    if bindings.is_empty() && preparations.is_empty() {
+        return Ok(Vec::new());
     }
-    for preparation in preparations {
-        let descriptor = preparation.descriptor();
-        let inspection = inspect_before_deadline(&descriptor, nest_root, deadline);
-        rows.push(project_preparation_row(preparation, inspection));
-    }
-    Ok(rows)
+    with_execution_root_authority(|| {
+        let mut rows = Vec::with_capacity(bindings.len() + preparations.len());
+        let deadline = Instant::now() + INVENTORY_INSPECTION_BUDGET;
+        for snapshot in bindings {
+            let descriptor = binding_descriptor(&snapshot.binding);
+            let inspection = inspect_before_deadline(&descriptor, nest_root, deadline);
+            let merge_proof =
+                inventory_merge_proof(store, &snapshot, &inspection, nest_root, deadline);
+            rows.push(project_binding_row(
+                snapshot.binding,
+                snapshot.status,
+                inspection,
+                merge_proof,
+            ));
+        }
+        for preparation in preparations {
+            let descriptor = preparation.descriptor();
+            let inspection = inspect_before_deadline(&descriptor, nest_root, deadline);
+            rows.push(project_preparation_row(preparation, inspection));
+        }
+        Ok(rows)
+    })
 }
 
 fn inspect_before_deadline(

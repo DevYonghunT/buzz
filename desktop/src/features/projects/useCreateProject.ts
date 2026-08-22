@@ -10,11 +10,11 @@ import {
   type Project,
   projectsQueryKey,
 } from "@/features/projects/hooks";
+import { resolveProjectRelayBase } from "@/features/projects/projectRelayBase";
 import { relayClient } from "@/shared/api/relayClient";
 import { createChannel, signRelayEvent } from "@/shared/api/tauri";
 import type { Channel, ChannelVisibility } from "@/shared/api/types";
 import { KIND_REPO_ANNOUNCEMENT } from "@/shared/constants/kinds";
-import { getCachedRelayOrigin } from "@/shared/lib/mediaUrl";
 
 export type CreateProjectInput = {
   name: string;
@@ -100,10 +100,11 @@ async function createProject(
     "Timed out creating project.",
     "Failed to create project.",
   );
+  const relayBase = await resolveProjectRelayBase();
 
   return {
     channel,
-    project: eventToProject(event, getCachedRelayOrigin()),
+    project: eventToProject(event, relayBase),
   };
 }
 

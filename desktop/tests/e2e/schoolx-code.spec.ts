@@ -451,13 +451,10 @@ async function openCodeProjectRoute(page: Page, keyboardOnly = false) {
   await expect(projectEntry).toBeVisible({ timeout: 10_000 });
   await activate(
     page,
-    projectEntry.getByRole("button", { name: /^View buzz$/i }),
-    keyboardOnly,
-  );
-
-  await activate(
-    page,
-    page.getByRole("button", { name: "Code", exact: true }),
+    projectEntry.getByRole("button", {
+      name: "Open buzz in SchoolX Code",
+      exact: true,
+    }),
     keyboardOnly,
   );
   await expect(page).toHaveURL(/\/#\/projects\/[^/]+\/code(?:\?|$)/);
@@ -465,6 +462,77 @@ async function openCodeProjectRoute(page: Page, keyboardOnly = false) {
     page.getByRole("navigation", { name: "Code project breadcrumb" }),
   ).toContainText("buzz");
 }
+
+test("keeps SchoolX Code entry points visible across narrow project layouts", async ({
+  page,
+}) => {
+  await page.setViewportSize({ height: 600, width: 768 });
+  await page.addInitScript(() => {
+    window.localStorage.setItem("buzz.projects.viewMode", "grid");
+  });
+  await installMockBridge(page, { schoolxCodeWorkspace: true });
+
+  await enterMockApp(page);
+  await page.getByTestId("open-projects-view").click();
+  await page.getByRole("button", { name: "Repositories", exact: true }).click();
+  const projectEntry = page
+    .locator(
+      '[data-testid="project-card-buzz"], [data-testid="project-row-buzz"]',
+    )
+    .first();
+  const projectCodeAction = projectEntry.getByRole("button", {
+    name: "Open buzz in SchoolX Code",
+    exact: true,
+  });
+  for (const width of [768, 900]) {
+    await page.setViewportSize({ height: 600, width });
+    await expect(projectCodeAction).toBeVisible();
+    const projectBox = await projectEntry.boundingBox();
+    const actionBox = await projectCodeAction.boundingBox();
+    expect(projectBox).not.toBeNull();
+    expect(actionBox).not.toBeNull();
+    expect(actionBox?.x ?? -1).toBeGreaterThanOrEqual(projectBox?.x ?? 0);
+    expect(actionBox?.y ?? -1).toBeGreaterThanOrEqual(projectBox?.y ?? 0);
+    expect((actionBox?.x ?? 0) + (actionBox?.width ?? 0)).toBeLessThanOrEqual(
+      (projectBox?.x ?? 0) + (projectBox?.width ?? 0),
+    );
+    expect((actionBox?.y ?? 0) + (actionBox?.height ?? 0)).toBeLessThanOrEqual(
+      (projectBox?.y ?? 0) + (projectBox?.height ?? 0),
+    );
+  }
+  await activate(
+    page,
+    projectEntry.getByRole("button", { name: "View buzz", exact: true }),
+    true,
+  );
+
+  const codeAction = page.getByRole("button", {
+    name: "Open buzz in SchoolX Code",
+    exact: true,
+  });
+  await expect(codeAction).toContainText("SchoolX Code");
+  const terminalAction = page.getByRole("button", {
+    name: "Open terminal",
+    exact: true,
+  });
+  for (const width of [768, 900]) {
+    await page.setViewportSize({ height: 600, width });
+    for (const action of [codeAction, terminalAction]) {
+      await expect(action).toBeVisible();
+      const actionBox = await action.boundingBox();
+      expect(actionBox).not.toBeNull();
+      expect(actionBox?.x ?? -1).toBeGreaterThanOrEqual(0);
+      expect((actionBox?.x ?? 0) + (actionBox?.width ?? 0)).toBeLessThanOrEqual(
+        width,
+      );
+    }
+  }
+  await codeAction.click();
+  await expect(page).toHaveURL(/\/#\/projects\/[^/]+\/code(?:\?|$)/);
+  await expect(
+    page.getByRole("navigation", { name: "Code project breadcrumb" }),
+  ).toContainText("buzz");
+});
 
 async function openCodeWorkspace(page: Page, keyboardOnly = false) {
   await openCodeProjectRoute(page, keyboardOnly);
@@ -505,6 +573,8 @@ async function createManagedTask(
   page: Page,
   expectedModel: string | null = "gpt-5.2-codex",
 ) {
+  const threadListCount = (await commandPayloads(page, "code_threads_list"))
+    .length;
   const newTask = page.getByRole("button", { name: "New task", exact: true });
   await expect(newTask).toBeEnabled();
   await newTask.click();
@@ -539,6 +609,12 @@ async function createManagedTask(
   await expect(
     page.getByRole("textbox", { name: "Message Code task" }),
   ).toBeEnabled();
+  await expect(
+    page.getByTestId(`code-thread-lifecycle-${CREATED_THREAD_ID}`),
+  ).toHaveText("Active");
+  expect((await commandPayloads(page, "code_threads_list")).length).toBe(
+    threadListCount,
+  );
   await waitForTwoAnimationFrames(page);
   expect(await commandPayloads(page, "code_thread_resume")).toEqual([
     {
@@ -551,13 +627,77 @@ async function createManagedTask(
   ]);
 }
 
+test("refreshes a missing checkout even when Terminal reports an existing clone", async ({
+  page,
+}) => {
+  await installMockBridge(page, {
+    projectOmitCloneTag: true,
+    schoolxCodeWorkspace: true,
+    schoolxCodeHasLocalCheckout: false,
+    schoolxCodeTerminalReportsCloned: false,
+  });
+
+  await openCodeProjectRoute(page);
+
+  await expect(
+    page.getByRole("heading", { name: "Local checkout required" }),
+  ).toBeVisible();
+  const cloneAction = page.getByRole("button", {
+    name: "Clone & open in Terminal",
+    exact: true,
+  });
+  await expect(cloneAction).toBeVisible();
+
+  await cloneAction.click();
+  await waitForCommand(page, "open_project_terminal");
+  expect(await commandPayload(page, "open_project_terminal")).toEqual({
+    reposDir: null,
+    projectDtag: "buzz",
+    cloneUrl: expect.stringMatching(
+      /^http:\/\/localhost:3000\/git\/[0-9a-f]{64}\/buzz$/,
+    ),
+    defaultBranch: "main",
+  });
+  await expect(codeRuntimeReadyLabel(page)).toBeVisible({ timeout: 10_000 });
+  await expect(
+    page.getByRole("heading", { name: "Local checkout required" }),
+  ).toHaveCount(0);
+});
+
+test("keeps a failed checkout clone retryable in SchoolX Code", async ({
+  page,
+}) => {
+  await installMockBridge(page, {
+    schoolxCodeWorkspace: true,
+    schoolxCodeHasLocalCheckout: false,
+    schoolxCodeTerminalError: "Mock checkout failed",
+  });
+
+  await openCodeProjectRoute(page);
+  const cloneAction = page.getByRole("button", {
+    name: "Clone & open in Terminal",
+    exact: true,
+  });
+  await cloneAction.click();
+  await waitForCommand(page, "open_project_terminal");
+
+  await expect(
+    page
+      .locator("[data-sonner-toast]")
+      .filter({ hasText: "Mock checkout failed" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Local checkout required" }),
+  ).toBeVisible();
+  await expect(cloneAction).toBeEnabled();
+});
+
 test("explains that an empty repository needs its first commit", async ({
   page,
 }) => {
   await installMockBridge(page, {
     schoolxCodeWorkspace: true,
-    schoolxCodeRepositoryInspectError:
-      "failed to resolve SchoolX Code base ref `main`: Git exited with status 128",
+    schoolxCodeEmptyLocalRepository: true,
   });
 
   await openCodeProjectRoute(page);
@@ -566,19 +706,31 @@ test("explains that an empty repository needs its first commit", async ({
     page.getByRole("heading", { name: "First commit required" }),
   ).toBeVisible();
   await expect(page.getByText(/create its first commit/i)).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Open project", exact: true }),
-  ).toBeVisible();
+  const terminalAction = page.getByRole("button", {
+    name: "Open in Terminal",
+    exact: true,
+  });
+  await expect(terminalAction).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Retry", exact: true }),
+  ).toBeVisible();
+
+  await terminalAction.click();
+  await waitForCommand(page, "open_project_terminal");
+  expect(await commandPayload(page, "open_project_terminal")).toEqual({
+    reposDir: null,
+    projectDtag: "buzz",
+    cloneUrl: expect.stringMatching(/\/buzz$/),
+    defaultBranch: "main",
+  });
+  await expect(
+    page.getByRole("heading", { name: "First commit required" }),
   ).toBeVisible();
 
   await page.getByRole("button", { name: "Retry", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "First commit required" }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Open project", exact: true }).click();
-  await expect(page).not.toHaveURL(/\/code(?:\?|$)/);
 });
 
 test("keeps unrelated repository inspection failures generic", async ({
@@ -714,6 +866,36 @@ test("opens a scoped SchoolX Code task and submits through its bound thread", as
       prompt: STEER_PROMPT,
     },
   });
+});
+
+test("locks task refresh while a new Codex thread opens without relisting it", async ({
+  page,
+}) => {
+  await installMockBridge(page, {
+    schoolxCodeWorkspace: true,
+    schoolxCodeThreadStartDelayMs: 300,
+  });
+  await openCodeWorkspace(page);
+
+  const listCount = (await commandPayloads(page, "code_threads_list")).length;
+  await page.getByRole("button", { name: "New task", exact: true }).click();
+  await waitForCommand(page, "code_thread_start");
+  const refresh = page.getByRole("button", { name: "Refresh Code tasks" });
+  await expect(refresh).toBeDisabled();
+  expect((await commandPayloads(page, "code_threads_list")).length).toBe(
+    listCount,
+  );
+
+  await expect(
+    page.getByTestId(`code-thread-${CREATED_THREAD_ID}`),
+  ).toHaveAttribute("aria-current", "page");
+  await expect(
+    page.getByRole("textbox", { name: "Message Code task" }),
+  ).toBeEnabled();
+  await expect(refresh).toBeEnabled();
+  expect((await commandPayloads(page, "code_threads_list")).length).toBe(
+    listCount,
+  );
 });
 
 test("stages one managed-worktree file only after receipt, refresh, and acknowledgement", async ({
@@ -2573,9 +2755,9 @@ test("forks an active managed task into a fresh selected destination", async ({
       exact: true,
     }),
   ).toBeVisible();
-  expect(
-    (await commandPayloads(page, "code_threads_list")).length,
-  ).toBeGreaterThan(listCountBefore);
+  expect((await commandPayloads(page, "code_threads_list")).length).toBe(
+    listCountBefore,
+  );
   expect(
     (await commandPayloads(page, "code_thread_preparations_list")).length,
   ).toBeGreaterThan(preparationCountBefore);

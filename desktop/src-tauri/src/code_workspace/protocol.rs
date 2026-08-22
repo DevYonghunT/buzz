@@ -206,9 +206,28 @@ impl CodeThreadStartInput {
 /// still exposes that thread.
 pub(crate) fn code_thread_source(preparation_id: &str) -> Result<String, String> {
     validate_id("preparation", preparation_id)?;
+    let parsed = uuid::Uuid::parse_str(preparation_id)
+        .map_err(|_| "SchoolX Code preparation id must be a UUID".to_string())?;
+    if parsed.hyphenated().to_string() != preparation_id {
+        return Err(
+            "SchoolX Code preparation id must use canonical lowercase UUID form".to_string(),
+        );
+    }
     let source = format!("{CODE_THREAD_SOURCE_PREFIX}{preparation_id}");
     validate_id("thread source", &source)?;
     Ok(source)
+}
+
+/// Verify the opaque source marker emitted only from a native preparation.
+pub(crate) fn validate_code_thread_source_marker(source: &str) -> Result<(), String> {
+    let preparation_id = source
+        .strip_prefix(CODE_THREAD_SOURCE_PREFIX)
+        .ok_or_else(|| "Codex thread source is not a SchoolX Code marker".to_string())?;
+    if code_thread_source(preparation_id)? == source {
+        Ok(())
+    } else {
+        Err("Codex thread source is not canonical".to_string())
+    }
 }
 
 /// Exact bound source accepted for a whole-history `thread/fork`.
@@ -817,15 +836,16 @@ pub(crate) fn parse_thread_open(value: Value) -> Result<CodeThreadRpcOpenResult,
     })
 }
 
-/// Build the stable Codex 0.145 `thread/read` request used to hydrate one
-/// thread selected from the native binding index.
+/// Build the audited Codex 0.145/0.149 `thread/read` request used to hydrate
+/// one thread selected from the native binding index.
 pub(crate) fn thread_read_params(thread_id: &str) -> Result<Value, String> {
     validate_id("thread", thread_id)?;
     Ok(json!({ "threadId": thread_id, "includeTurns": false }))
 }
 
-/// Build the stable Codex 0.145 exact-root list request used only for native
-/// start recovery. `appServer` is the spelling in the generated 0.145 schema.
+/// Build the audited Codex 0.145/0.149 exact-root list request used only for
+/// native start recovery. Codex 0.149 reports SchoolX app-server sessions as
+/// `vscode`, while 0.145 and the shared schema use `appServer`.
 pub(crate) fn recovery_thread_list_params(
     workspace_root: &str,
     cursor: Option<&str>,
@@ -837,7 +857,7 @@ pub(crate) fn recovery_thread_list_params(
         validate_cursor(cursor)?;
     }
     let mut params = Map::from_iter([
-        ("sourceKinds".to_string(), json!(["appServer"])),
+        ("sourceKinds".to_string(), json!(["appServer", "vscode"])),
         ("archived".to_string(), json!(false)),
         ("cwd".to_string(), json!(workspace_root)),
         ("limit".to_string(), json!(CODE_RECOVERY_THREAD_PAGE_LIMIT)),
@@ -932,7 +952,7 @@ pub(crate) fn parse_thread_read(value: Value) -> Result<CodeThreadSummary, Strin
     normalize_thread(result.thread)
 }
 
-/// Validate the exact empty result frozen for Codex 0.145 `thread/name/set`.
+/// Validate the exact empty result frozen for Codex 0.145/0.149 `thread/name/set`.
 pub(crate) fn parse_thread_name_set(value: Value) -> Result<(), String> {
     match value.as_object() {
         Some(result) if result.is_empty() => Ok(()),
@@ -1296,6 +1316,14 @@ mod tests {
             code_thread_source("67f11a1d-0274-4d40-9b0c-e406e51c64fb")?,
             code_thread_source("77f11a1d-0274-4d40-9b0c-e406e51c64fb")?
         );
+        validate_code_thread_source_marker("schoolx-code/67f11a1d-0274-4d40-9b0c-e406e51c64fb")?;
+        for invalid in [
+            "schoolx-code/not-a-uuid",
+            "schoolx-code/67F11A1D-0274-4D40-9B0C-E406E51C64FB",
+            "foreign/67f11a1d-0274-4d40-9b0c-e406e51c64fb",
+        ] {
+            assert!(validate_code_thread_source_marker(invalid).is_err());
+        }
         Ok(())
     }
 
@@ -1441,7 +1469,7 @@ mod tests {
         assert_eq!(
             recovery_thread_list_params("/native/stored-root", Some("next-page"))?,
             json!({
-                "sourceKinds": ["appServer"],
+                "sourceKinds": ["appServer", "vscode"],
                 "archived": false,
                 "cursor": "next-page",
                 "cwd": "/native/stored-root",

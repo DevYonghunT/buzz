@@ -677,10 +677,6 @@ func schoolx_git_xpc_is_service() -> Bool {
     && Bundle.main.bundleURL.pathExtension == "xpc"
 }
 
-func schoolx_git_xpc_capability() -> RustString {
-  RustString(capabilityDiagnostic() ?? "")
-}
-
 func schoolx_git_xpc_launch(
   session_id: UInt64,
   request_id: UInt64,
@@ -696,9 +692,6 @@ func schoolx_git_xpc_launch(
       "unknown XPC authority session",
       cleanupProvenWithoutOperation: false
     )
-  }
-  if let diagnostic = capabilityDiagnostic() {
-    return encodeChildFailure(diagnostic)
   }
   guard request_id != 0 else {
     return encodeChildFailure("invalid XPC request identifier")

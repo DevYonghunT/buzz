@@ -591,7 +591,7 @@ func descriptorStat(_ fd: Int32) -> DescriptorStat? {
   var value = stat()
   guard fstat(fd, &value) == 0 else { return nil }
   return DescriptorStat(
-    device: UInt64(value.st_dev),
+    device: UInt64(bitPattern: Int64(value.st_dev)),
     inode: UInt64(value.st_ino),
     mode: UInt32(value.st_mode),
     size: UInt64(max(0, value.st_size))
@@ -607,6 +607,73 @@ func decodePrepareError(_ encoded: String) -> String {
     !error.isEmpty
   else { return "signed helper rejected the typed Git request" }
   return error
+}
+
+private func consumeChildWaitStatus(
+  pid: Int32,
+  options: Int32,
+  expectedCode: Int32
+) -> String? {
+  while true {
+    var consumed = siginfo_t()
+    errno = 0
+    if waitid(P_PID, id_t(pid), &consumed, options | WNOHANG) == 0 {
+      if consumed.si_pid == 0 { return nil }
+      guard consumed.si_pid == pid, consumed.si_code == expectedCode else {
+        return "waitid consumed an unexpected typed Git child status"
+      }
+      return nil
+    }
+    if errno == EINTR { continue }
+    return "waitid failed while consuming a nonterminal typed Git status: \(errnoDiagnostic())"
+  }
+}
+
+func consumeInitialSuspendedChildStatus(pid: Int32) -> String? {
+  while true {
+    var stopped = siginfo_t()
+    errno = 0
+    if waitid(P_PID, id_t(pid), &stopped, WSTOPPED) == 0 {
+      guard stopped.si_pid == pid, stopped.si_code == CLD_STOPPED else {
+        return "typed Git did not enter its required suspended launch state"
+      }
+      return nil
+    }
+    if errno == EINTR { continue }
+    return "waitid failed while confirming suspended typed Git: \(errnoDiagnostic())"
+  }
+}
+
+func waitForTerminalChildStatus(pid: Int32) -> String? {
+  while true {
+    var observed = siginfo_t()
+    errno = 0
+    if waitid(P_PID, id_t(pid), &observed, WEXITED | WNOWAIT) != 0 {
+      if errno == EINTR { continue }
+      return "waitid failed for typed Git: \(errnoDiagnostic())"
+    }
+    guard observed.si_pid == pid else {
+      return "waitid changed typed Git child identity"
+    }
+    switch observed.si_code {
+    case CLD_EXITED, CLD_KILLED, CLD_DUMPED:
+      return nil
+    case CLD_STOPPED, CLD_TRAPPED:
+      if let error = consumeChildWaitStatus(
+        pid: pid,
+        options: WSTOPPED,
+        expectedCode: observed.si_code
+      ) { return error }
+    case CLD_CONTINUED:
+      if let error = consumeChildWaitStatus(
+        pid: pid,
+        options: WCONTINUED,
+        expectedCode: observed.si_code
+      ) { return error }
+    default:
+      return "waitid returned unexpected typed Git status \(observed.si_code)"
+    }
+  }
 }
 
 

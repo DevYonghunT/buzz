@@ -138,6 +138,9 @@ struct WireModel {
     availability_nux: Option<WireModelAvailabilityNux>,
     display_name: String,
     description: String,
+    /// Optional display-only specialty added by the audited Codex 0.149 schema.
+    #[serde(default)]
+    model_specialty: Option<String>,
     hidden: bool,
     supported_reasoning_efforts: Vec<WireReasoningEffortOption>,
     default_reasoning_effort: String,
@@ -145,6 +148,9 @@ struct WireModel {
     input_modalities: Vec<WireInputModality>,
     #[serde(default)]
     supports_personality: bool,
+    /// Closed Codex 0.149 multi-agent capability. It is not execution authority.
+    #[serde(default)]
+    multi_agent_version: Option<WireMultiAgentVersion>,
     #[serde(default)]
     additional_speed_tiers: Vec<String>,
     #[serde(default)]
@@ -160,7 +166,19 @@ struct WireModelUpgradeInfo {
     model: String,
     migration_markdown: Option<String>,
     model_link: Option<String>,
+    /// Informational Unix timestamp added by the audited Codex 0.149 schema.
+    #[serde(default)]
+    retirement_at: Option<i64>,
     upgrade_copy: Option<String>,
+}
+
+#[allow(dead_code)]
+#[derive(Deserialize)]
+#[serde(rename_all = "lowercase")]
+enum WireMultiAgentVersion {
+    Disabled,
+    V1,
+    V2,
 }
 
 #[allow(dead_code)]

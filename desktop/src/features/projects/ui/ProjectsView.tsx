@@ -98,7 +98,7 @@ const ISSUE_SCOPE_OPTIONS: Array<{
 ];
 
 export function ProjectsView() {
-  const { goProject } = useAppNavigation();
+  const { goProject, goProjectCode } = useAppNavigation();
   const { activeCommunity } = useCommunities();
   const scrollIdleTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(
     null,
@@ -391,6 +391,15 @@ export function ProjectsView() {
     [goProject],
   );
 
+  const handleOpenProjectCode = React.useCallback(
+    (project: Project) => {
+      void goProjectCode(project.id, {
+        baseRef: project.defaultBranch?.trim() || "HEAD",
+      });
+    },
+    [goProjectCode],
+  );
+
   const handleOpenPullRequest = React.useCallback(
     (project: Project, pullRequest: ProjectPullRequest) => {
       void goProject(project.id, { pullRequestId: pullRequest.id });
@@ -467,6 +476,7 @@ export function ProjectsView() {
               key={project.id}
               onDelete={handleDeleteProject}
               onOpen={handleOpenProject}
+              onOpenCode={handleOpenProjectCode}
               onOpenTerminal={handleOpenTerminal}
               people={projectPeople(project, summary)}
               profiles={profiles}
@@ -491,6 +501,7 @@ export function ProjectsView() {
               key={project.id}
               onDelete={handleDeleteProject}
               onOpen={handleOpenProject}
+              onOpenCode={handleOpenProjectCode}
               onOpenTerminal={handleOpenTerminal}
               people={projectPeople(project, summary)}
               profiles={profiles}

@@ -5,6 +5,7 @@ import { codeWorkspaceApi } from "../api/codeWorkspace";
 import type {
   CodeBoundThreadOpenResult,
   CodeThreadBindingScope,
+  CodeThreadPreparation,
   CodeThreadSummary,
   CodeThreadsPage,
 } from "../api/types";
@@ -57,6 +58,7 @@ export function useCodeThreadMutations({
   const [unreconciledForkThreadIds, setUnreconciledForkThreadIds] =
     React.useState<ReadonlySet<string>>(() => new Set());
   const pendingMutationThreadIdRef = React.useRef<string | null>(null);
+  const semanticForkBlockerThreadIdsRef = React.useRef(new Set<string>());
 
   const mutateLifecycle = React.useCallback(
     async (threadId: string, mutation: LifecycleMutation): Promise<void> => {
@@ -171,6 +173,25 @@ export function useCodeThreadMutations({
       } catch (error) {
         mutationError = error;
       }
+      if (opened !== null) {
+        semanticForkBlockerThreadIdsRef.current.delete(threadId);
+        pendingMutationThreadIdRef.current = null;
+        setPendingForkThreadId(null);
+        setUnreconciledForkThreadIds((current) => {
+          if (!current.has(threadId)) return current;
+          const next = new Set(current);
+          next.delete(threadId);
+          return next;
+        });
+        void queryClient.invalidateQueries({
+          queryKey: codeSessionQueryKeys.preparations(scope),
+        });
+        void queryClient.invalidateQueries({
+          queryKey: codeSessionQueryKeys.worktrees(scope),
+          refetchType: "none",
+        });
+        return opened;
+      }
       void queryClient.invalidateQueries({
         queryKey: codeSessionQueryKeys.worktrees(scope),
       });
@@ -194,16 +215,6 @@ export function useCodeThreadMutations({
             "The fork source was missing from its authoritative scope.",
           );
         }
-        if (
-          opened !== null &&
-          !refreshed.data.some(
-            (row) => row.binding.codexThreadId === opened.thread.id,
-          )
-        ) {
-          throw new Error(
-            "The forked task was missing from its authoritative scope.",
-          );
-        }
         setUnreconciledForkThreadIds((current) => {
           if (!current.has(threadId) || semanticResultError) return current;
           const next = new Set(current);
@@ -223,6 +234,7 @@ export function useCodeThreadMutations({
       }
 
       if (semanticResultError) {
+        semanticForkBlockerThreadIdsRef.current.add(threadId);
         setUnreconciledForkThreadIds((current) => {
           const next = new Set(current);
           next.add(threadId);
@@ -236,10 +248,7 @@ export function useCodeThreadMutations({
         );
       }
       if (mutationError !== null) throw mutationError;
-      if (opened === null) {
-        throw new Error("The fork action returned no destination task.");
-      }
-      return opened;
+      throw new Error("The fork action returned no destination task.");
     },
     [mutationsReady, queryClient, scope],
   );
@@ -288,10 +297,36 @@ export function useCodeThreadMutations({
   }, []);
 
   const acknowledgeAuthoritativeForkRefresh = React.useCallback(() => {
-    setUnreconciledForkThreadIds((current) =>
-      current.size === 0 ? current : new Set(),
+    const threads = queryClient.getQueryData<CodeThreadsPage>(
+      codeSessionQueryKeys.threads(scope),
     );
-  }, []);
+    const preparations = queryClient.getQueryData<
+      readonly CodeThreadPreparation[]
+    >(codeSessionQueryKeys.preparations(scope));
+    if (!threads || !preparations) return;
+    setUnreconciledForkThreadIds((current) => {
+      if (current.size === 0) return current;
+      const next = new Set(current);
+      for (const threadId of current) {
+        const sourcePresent = threads.data.some(
+          (row) => row.binding.codexThreadId === threadId,
+        );
+        const forkUnfinished = preparations.some(
+          (preparation) =>
+            preparation.operation === "fork" &&
+            preparation.sourceThreadId === threadId,
+        );
+        if (
+          sourcePresent &&
+          !forkUnfinished &&
+          !semanticForkBlockerThreadIdsRef.current.has(threadId)
+        ) {
+          next.delete(threadId);
+        }
+      }
+      return next.size === current.size ? current : next;
+    });
+  }, [queryClient, scope]);
 
   const isLifecycleLocallyBlocked = React.useCallback(
     (threadId: string | null) =>

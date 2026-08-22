@@ -400,10 +400,7 @@ fn deferred_active_thread_ids(
             scope: binding.scope(),
             codex_thread_id: binding.codex_thread_id.clone(),
         };
-        let lifecycle = store.lookup_with_lifecycle(&lookup)?.ok_or_else(|| {
-            "SchoolX Code lifecycle reconciliation lost a persisted binding".to_string()
-        })?;
-        if lifecycle.status == CodeThreadLifecycleStatus::Active {
+        if store.allows_deferred_active_membership_proof(&lookup)? {
             thread_ids.push(binding.codex_thread_id.clone());
         }
     }

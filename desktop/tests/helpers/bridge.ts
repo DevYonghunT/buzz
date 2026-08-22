@@ -176,8 +176,18 @@ type MockBridgeOptions = {
   pocketVoiceImportResult?: "success" | "cancel" | "invalid";
   /** Advertised HEAD for the first mock project without adding that branch. */
   projectHeadBranch?: string;
+  /** Omit the first project's clone tag so relay URL derivation is exercised. */
+  projectOmitCloneTag?: boolean;
   /** Enable the scoped SchoolX Code native boundary fixture. */
   schoolxCodeWorkspace?: boolean;
+  /** Start SchoolX Code without a local checkout until Terminal clones it. */
+  schoolxCodeHasLocalCheckout?: boolean;
+  /** Return an unborn local checkout that still needs its first commit. */
+  schoolxCodeEmptyLocalRepository?: boolean;
+  /** Override whether opening Terminal reports that it performed the clone. */
+  schoolxCodeTerminalReportsCloned?: boolean;
+  /** Error returned by the mocked project Terminal boundary. */
+  schoolxCodeTerminalError?: string;
   /** Error returned by the native Code repository inspection boundary. */
   schoolxCodeRepositoryInspectError?: string;
   /** Successive native replay snapshots returned to the Code event adapter. */
@@ -192,6 +202,8 @@ type MockBridgeOptions = {
   schoolxCodeForkErrors?: Array<string | null>;
   /** Delay a fork result so source-selection and pending UI remain observable. */
   schoolxCodeForkDelayMs?: number;
+  /** Delay a new thread result so task-list mutation locking can be asserted. */
+  schoolxCodeThreadStartDelayMs?: number;
   /** Sequenced managed-worktree removal failures; null allows the call through. */
   schoolxCodeRemovalErrors?: Array<string | null>;
   /** Sequenced response-loss failures after native removal has committed. */

@@ -1,5 +1,6 @@
 import {
   CircleDot,
+  Code2,
   FolderGit2,
   GitCommit,
   GitPullRequest,
@@ -314,7 +315,7 @@ function ProjectCardButton({
 }) {
   return (
     <button
-      className="absolute inset-0"
+      className="absolute inset-0 z-0 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       onClick={() => onOpen(project)}
       type="button"
     >
@@ -416,8 +417,30 @@ type ProjectItemProps = {
   deleteDisabled: boolean;
   onDelete: (project: Project) => Promise<void> | void;
   onOpen: (project: Project) => void;
+  onOpenCode: (project: Project) => void;
   onOpenTerminal: (project: Project) => Promise<void> | void;
 };
+
+function ProjectCodeAction({
+  className,
+  onOpenCode,
+  project,
+}: Pick<ProjectItemProps, "onOpenCode" | "project"> & { className?: string }) {
+  return (
+    <Button
+      aria-label={`Open ${project.name} in SchoolX Code`}
+      className={cn("relative z-10 h-8 shrink-0 gap-1.5", className)}
+      onClick={() => onOpenCode(project)}
+      size="sm"
+      title={`Open ${project.name} in SchoolX Code`}
+      type="button"
+      variant="outline"
+    >
+      <Code2 className="size-4" />
+      SchoolX Code
+    </Button>
+  );
+}
 
 export function ProjectGridCard({
   project,
@@ -429,6 +452,7 @@ export function ProjectGridCard({
   deleteDisabled,
   onDelete,
   onOpen,
+  onOpenCode,
   onOpenTerminal,
 }: ProjectItemProps) {
   return (
@@ -470,7 +494,7 @@ export function ProjectGridCard({
           {project.description || "A shared space for internal git work."}
         </p>
 
-        <div className="relative z-10 flex items-center px-4 pb-1">
+        <div className="flex items-center px-4 pb-1">
           <ProjectPeopleStack
             profiles={profiles}
             pubkeys={people}
@@ -479,8 +503,13 @@ export function ProjectGridCard({
         </div>
 
         <div className="mt-auto">
-          <div className="flex min-w-0 items-center px-4 pb-2 pt-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-3 px-4 pb-2 pt-1">
             <ProjectStatsRow summary={summary} />
+            <ProjectCodeAction
+              className="ml-auto"
+              onOpenCode={onOpenCode}
+              project={project}
+            />
           </div>
           <div className="px-4 pb-3">
             <ProjectActivityBar summary={summary} />
@@ -501,6 +530,7 @@ export function ProjectListRow({
   deleteDisabled,
   onDelete,
   onOpen,
+  onOpenCode,
   onOpenTerminal,
 }: ProjectItemProps) {
   return (
@@ -526,6 +556,8 @@ export function ProjectListRow({
             </p>
           </div>
         </div>
+
+        <ProjectCodeAction onOpenCode={onOpenCode} project={project} />
 
         <div className={PROJECT_LIST_ROW_TRAILING_CLASS}>
           <div
