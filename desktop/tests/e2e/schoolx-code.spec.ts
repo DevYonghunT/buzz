@@ -434,7 +434,7 @@ function codeRuntimeReadyLabel(page: Page) {
   return page.getByRole("paragraph").filter({ hasText: /^Ready$/ });
 }
 
-async function openCodeWorkspace(page: Page, keyboardOnly = false) {
+async function openCodeProjectRoute(page: Page, keyboardOnly = false) {
   await enterMockApp(page);
   await activate(page, page.getByTestId("open-projects-view"), keyboardOnly);
   await activate(
@@ -464,6 +464,10 @@ async function openCodeWorkspace(page: Page, keyboardOnly = false) {
   await expect(
     page.getByRole("navigation", { name: "Code project breadcrumb" }),
   ).toContainText("buzz");
+}
+
+async function openCodeWorkspace(page: Page, keyboardOnly = false) {
+  await openCodeProjectRoute(page, keyboardOnly);
   await expect(codeRuntimeReadyLabel(page)).toBeVisible({
     timeout: 10_000,
   });
@@ -546,6 +550,66 @@ async function createManagedTask(
     },
   ]);
 }
+
+test("explains that an empty repository needs its first commit", async ({
+  page,
+}) => {
+  await installMockBridge(page, {
+    schoolxCodeWorkspace: true,
+    schoolxCodeRepositoryInspectError:
+      "failed to resolve SchoolX Code base ref `main`: Git exited with status 128",
+  });
+
+  await openCodeProjectRoute(page);
+
+  await expect(
+    page.getByRole("heading", { name: "First commit required" }),
+  ).toBeVisible();
+  await expect(page.getByText(/create its first commit/i)).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Open project", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Retry", exact: true }),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "Retry", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "First commit required" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Open project", exact: true }).click();
+  await expect(page).not.toHaveURL(/\/code(?:\?|$)/);
+});
+
+test("keeps unrelated repository inspection failures generic", async ({
+  page,
+}) => {
+  await installMockBridge(page, {
+    schoolxCodeWorkspace: true,
+    schoolxCodeRepositoryInspectError:
+      "SchoolX Code repository root is not a Git repository",
+  });
+
+  await openCodeProjectRoute(page);
+
+  await expect(
+    page.getByRole("heading", { name: "Project scope unavailable" }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(
+      "The local repository or selected base branch could not be validated.",
+    ),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Retry", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Open project", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("heading", { name: "First commit required" }),
+  ).toHaveCount(0);
+});
 
 test("opens a scoped SchoolX Code task and submits through its bound thread", async ({
   page,

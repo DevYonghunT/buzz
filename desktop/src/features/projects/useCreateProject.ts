@@ -1,65 +1,88 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import {
+  channelsQueryKey,
+  upsertCachedChannel,
+} from "@/features/channels/hooks";
+import {
   eventToProject,
   fetchProjects,
   type Project,
   projectsQueryKey,
 } from "@/features/projects/hooks";
 import { relayClient } from "@/shared/api/relayClient";
-import { getCachedRelayOrigin } from "@/shared/lib/mediaUrl";
-import { signRelayEvent } from "@/shared/api/tauri";
-import { getIdentity } from "@/shared/api/tauriIdentity";
+import { createChannel, signRelayEvent } from "@/shared/api/tauri";
+import type { Channel, ChannelVisibility } from "@/shared/api/types";
 import { KIND_REPO_ANNOUNCEMENT } from "@/shared/constants/kinds";
+import { getCachedRelayOrigin } from "@/shared/lib/mediaUrl";
 
 export type CreateProjectInput = {
   name: string;
+  repositoryId: string;
+  visibility: ChannelVisibility;
   description?: string;
-  cloneUrl?: string;
   webUrl?: string;
 };
 
-function projectDtagFromName(name: string): string {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
+export type CreateProjectResult = {
+  channel: Channel;
+  project: Project;
+};
+
+const PROJECT_REPOSITORY_ID_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
+
+/** Returns the first validation error for a relay-backed repository ID. */
+export function projectRepositoryIdError(value: string): string | null {
+  const repositoryId = value.trim();
+  if (!repositoryId) {
+    return "Repository ID is required.";
+  }
+  if (!PROJECT_REPOSITORY_ID_PATTERN.test(repositoryId)) {
+    return "Repository ID must be 1–64 characters using only letters, numbers, dots, underscores, and hyphens.";
+  }
+  if (repositoryId.startsWith(".")) {
+    return "Repository ID must not start with a dot.";
+  }
+  if (repositoryId.includes("..")) {
+    return "Repository ID must not contain consecutive dots.";
+  }
+  return null;
 }
 
 /** Publishes a NIP-34 repo announcement so the project appears on the relay. */
-async function createProject(input: CreateProjectInput): Promise<Project> {
+async function createProject(
+  input: CreateProjectInput,
+): Promise<CreateProjectResult> {
   const name = input.name.trim();
   if (!name) {
     throw new Error("Project name is required.");
   }
-  const dtag = projectDtagFromName(name);
-  if (!dtag) {
-    throw new Error("Project name must include letters or numbers.");
+  const repositoryId = input.repositoryId.trim();
+  const repositoryIdError = projectRepositoryIdError(repositoryId);
+  if (repositoryIdError) {
+    throw new Error(repositoryIdError);
   }
 
-  const identity = await getIdentity();
   const existing = await fetchProjects();
-  const ownerPubkey = identity.pubkey.toLowerCase();
-  if (
-    existing.some(
-      (project) =>
-        project.owner.toLowerCase() === ownerPubkey && project.dtag === dtag,
-    )
-  ) {
-    throw new Error(`You already have a project named "${dtag}".`);
+  if (existing.some((project) => project.dtag === repositoryId)) {
+    throw new Error(`Repository ID "${repositoryId}" is already in use.`);
   }
 
   const description = input.description?.trim() ?? "";
+  const channel = await createChannel({
+    channelType: "stream",
+    description: description || undefined,
+    name,
+    visibility: input.visibility,
+  });
+
   const tags: string[][] = [
-    ["d", dtag],
+    ["d", repositoryId],
     ["name", name],
+    ["buzz-channel", channel.id],
   ];
   if (description) {
     tags.push(["description", description]);
-  }
-  const cloneUrl = input.cloneUrl?.trim();
-  if (cloneUrl) {
-    tags.push(["clone", cloneUrl]);
   }
   const webUrl = input.webUrl?.trim();
   if (webUrl) {
@@ -78,21 +101,33 @@ async function createProject(input: CreateProjectInput): Promise<Project> {
     "Failed to create project.",
   );
 
-  return eventToProject(event, getCachedRelayOrigin());
+  return {
+    channel,
+    project: eventToProject(event, getCachedRelayOrigin()),
+  };
 }
 
-/** Mutation that creates a project and inserts it into the projects cache. */
+/** Mutation that creates a project with its stream and updates both caches. */
 export function useCreateProjectMutation() {
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: createProject,
-    onSuccess: (project) => {
+    onSuccess: ({ channel, project }) => {
+      queryClient.setQueryData<Channel[]>(channelsQueryKey, (current) =>
+        upsertCachedChannel(current, channel),
+      );
       queryClient.setQueryData<Project[]>(projectsQueryKey, (current = []) => [
         project,
-        ...current,
+        ...current.filter((candidate) => candidate.id !== project.id),
       ]);
       void queryClient.invalidateQueries({ queryKey: projectsQueryKey });
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({
+        queryKey: channelsQueryKey,
+        refetchType: "none",
+      });
     },
   });
 }

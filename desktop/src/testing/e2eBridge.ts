@@ -208,6 +208,8 @@ type E2eConfig = {
     projectHeadBranch?: string;
     /** Enable the scoped SchoolX Code native boundary fixture. */
     schoolxCodeWorkspace?: boolean;
+    /** Error returned by the native Code repository inspection boundary. */
+    schoolxCodeRepositoryInspectError?: string;
     /** Successive native replay snapshots returned to the Code event adapter. */
     schoolxCodeEventBacklogs?: CodeEventBacklog[];
     /** Successive strict Changes snapshots returned for a selected Code thread. */
@@ -5330,10 +5332,13 @@ function getMockProjectEventStore(): RelayEvent[] {
   return mockProjectEventStore;
 }
 
-/** Project-scoped publishes (PR/issue comments, NIP-34 status events) carry
- * a repo-address `a` tag instead of a channel `h` tag — store them with the
- * seeded project events so refetches see them. */
+/** Repo announcements are the project root; later project-scoped publishes
+ * carry a repo-address `a` tag instead of a channel `h` tag. Store both with
+ * the seeded project events so create flows and refetches see them. */
 function isMockProjectScopedEvent(event: RelayEvent): boolean {
+  if (event.kind === KIND_REPO_ANNOUNCEMENT) {
+    return true;
+  }
   const hasRepoAddressTag = event.tags.some(
     (tag) => tag[0] === "a" && (tag[1] ?? "").startsWith("30617:"),
   );
@@ -11717,6 +11722,9 @@ export function maybeInstallE2eTauriMocks() {
         }
       case "code_repository_inspect":
         requireSchoolxCodeWorkspace();
+        if (activeConfig?.mock?.schoolxCodeRepositoryInspectError) {
+          throw new Error(activeConfig.mock.schoolxCodeRepositoryInspectError);
+        }
         return structuredClone(mockCodeRepository);
       case "code_worktree_prepare": {
         requireSchoolxCodeWorkspace();

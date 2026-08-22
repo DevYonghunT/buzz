@@ -204,14 +204,13 @@ export function eventToProject(
   const webUrl = getTag(event, "web") ?? null;
   const setupUsers = getAllTags(event, "auth");
   const contributors = [...new Set([...getAllTags(event, "p"), ...setupUsers])];
-  // `h`/`project-channel`, `status`, and `default-branch` are NOT part of
-  // NIP-34 — they are read-side tolerance for extension tags no code writes
-  // today (the write path that emitted them was removed). If a write path is
-  // reintroduced it must go through the buzz-sdk repo-announcement builder;
-  // the canonical NIP-34 source for the default branch is the kind:30618
-  // state event's HEAD ref, not a 30617 tag.
+  // `buzz-channel` is canonical; `h`/`project-channel` remain read-compatible.
+  // The kind:30618 state event's HEAD ref is canonical for the default branch.
   const projectChannelId =
-    getTag(event, "h") ?? getTag(event, "project-channel") ?? null;
+    getTag(event, "buzz-channel") ??
+    getTag(event, "h") ??
+    getTag(event, "project-channel") ??
+    null;
 
   return {
     id: `${event.pubkey}:${d}`,

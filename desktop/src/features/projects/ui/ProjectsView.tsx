@@ -447,10 +447,6 @@ export function ProjectsView() {
     );
   }
 
-  if (projects.length === 0) {
-    return <EmptyState />;
-  }
-
   const repositoryItems =
     visibleProjects.length === 0 ? (
       <EmptyFilteredState />
@@ -605,7 +601,8 @@ export function ProjectsView() {
       <CreateProjectDialog
         isCreating={createProjectMutation.isPending}
         onCreate={async (input) => {
-          const project = await createProjectMutation.mutateAsync(input);
+          const result = await createProjectMutation.mutateAsync(input);
+          const project = result.project;
           toast.success(`Project "${project.name}" created.`);
           // Land on the list that actually shows the new project — the
           // Overview only surfaces the top few most-active repositories.
@@ -649,7 +646,11 @@ export function ProjectsView() {
           </div>
           <div className="mx-auto w-full max-w-6xl">
             <div className="w-full min-w-0 pb-4 pt-4">
-              {filter === "all" ? (
+              {projects.length === 0 ? (
+                <EmptyState
+                  onCreateProject={() => setCreateProjectOpen(true)}
+                />
+              ) : filter === "all" ? (
                 <ProjectsOverviewPanel
                   localRepositoryCount={localProjectCount}
                   metadata={

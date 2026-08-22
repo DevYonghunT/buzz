@@ -19,6 +19,16 @@ import { Button } from "@/shared/ui/button";
 import { codeRepositoryQueryOptions } from "../state/codeSessionQueries";
 import { CodeWorkspaceScreen } from "./CodeWorkspaceScreen";
 
+const CODE_BASE_REF_RESOLUTION_ERROR =
+  "failed to resolve SchoolX Code base ref";
+
+function isFirstCommitRequiredError(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    error.message.includes(CODE_BASE_REF_RESOLUTION_ERROR)
+  );
+}
+
 function CodeBootstrapState({
   action,
   description,
@@ -33,12 +43,12 @@ function CodeBootstrapState({
   return (
     <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 py-12 text-center">
       {loading ? (
-        <LoaderCircle className="h-8 w-8 animate-spin text-muted-foreground motion-reduce:animate-none" />
+        <LoaderCircle className="size-8 animate-spin text-muted-foreground motion-reduce:animate-none" />
       ) : (
-        <Code2 className="h-8 w-8 text-muted-foreground/40" />
+        <Code2 className="size-8 text-muted-foreground/40" />
       )}
-      <h2 className="mt-3 text-sm font-semibold">{title}</h2>
-      <p className="mt-1 max-w-md text-xs text-muted-foreground">
+      <h2 className="mt-3 text-balance text-sm font-semibold">{title}</h2>
+      <p className="mt-1 max-w-md text-pretty text-xs text-muted-foreground">
         {description}
       </p>
       {action ? <div className="mt-4">{action}</div> : null}
@@ -164,6 +174,31 @@ export function ProjectCodeScreen({
         title="Preparing project scope"
       />
     );
+  } else if (
+    repositoryQuery.isError &&
+    isFirstCommitRequiredError(repositoryQuery.error)
+  ) {
+    content = (
+      <CodeBootstrapState
+        action={
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <Button onClick={backToProject} size="sm">
+              <ArrowLeft />
+              Open project
+            </Button>
+            <Button
+              onClick={() => void repositoryQuery.refetch()}
+              size="sm"
+              variant="outline"
+            >
+              Retry
+            </Button>
+          </div>
+        }
+        description="Open this project in Terminal, create its first commit, then retry SchoolX Code."
+        title="First commit required"
+      />
+    );
   } else if (repositoryQuery.isError || !repositoryQuery.data) {
     content = (
       <CodeBootstrapState
@@ -220,10 +255,10 @@ export function ProjectCodeScreen({
               onClick={() => void goProjects()}
               type="button"
             >
-              <FolderGit2 className="h-3.5 w-3.5" />
+              <FolderGit2 className="size-3.5" />
               Projects
             </button>
-            <ChevronRight className="h-3 w-3 shrink-0 opacity-60" />
+            <ChevronRight className="size-3 shrink-0 opacity-60" />
             <button
               className="min-w-0 truncate rounded-md px-1 py-1 font-medium transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
               onClick={backToProject}
@@ -231,7 +266,7 @@ export function ProjectCodeScreen({
             >
               {project.name}
             </button>
-            <ChevronRight className="h-3 w-3 shrink-0 opacity-60" />
+            <ChevronRight className="size-3 shrink-0 opacity-60" />
             <span aria-current="page" className="shrink-0 px-1 font-medium">
               Code
             </span>

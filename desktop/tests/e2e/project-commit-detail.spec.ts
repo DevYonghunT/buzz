@@ -1,14 +1,19 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page, type Route } from "@playwright/test";
 
 import { waitForAnimations } from "../helpers/animations";
-import { installMockBridge } from "../helpers/bridge";
+import { installMockBridge, TEST_IDENTITIES } from "../helpers/bridge";
 
 const SHOTS = "test-results/project-commit-detail";
 const ALIGNMENT_TOLERANCE_PX = 2;
+const EMPTY_PROJECT_COORDINATES = [
+  `30617:${"deadbeef".repeat(8)}:buzz`,
+  `30617:${TEST_IDENTITIES.alice.pubkey}:relay-tools`,
+  `30617:${TEST_IDENTITIES.bob.pubkey}:design-system`,
+];
 
 // The projects surface is a preview feature — opt in before the app mounts.
 // Must run before installMockBridge so React reads the override on mount.
-async function enableProjectsFeature(page: import("@playwright/test").Page) {
+async function enableProjectsFeature(page: Page) {
   await page.addInitScript(() => {
     window.localStorage.setItem(
       "buzz-feature-overrides-v1",
@@ -16,6 +21,121 @@ async function enableProjectsFeature(page: import("@playwright/test").Page) {
     );
   });
 }
+
+async function fetchStaticModule(route: Route) {
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      return await route.fetch({ maxRetries: 2 });
+    } catch (error) {
+      const isBrokenPipe =
+        error instanceof Error && /\bEPIPE\b/.test(error.message);
+      if (!isBrokenPipe || attempt >= 2) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 50 * 2 ** attempt));
+    }
+  }
+}
+
+async function openMockApp(page: Page) {
+  // Python's preview server can reset Vite's cold parallel ESM fan-out.
+  // Serialize built modules while leaving product bootstrap failures visible.
+  let moduleQueue = Promise.resolve();
+  await page.route("http://127.0.0.1:4173/assets/*.js", async (route) => {
+    const response = moduleQueue.then(() => fetchStaticModule(route));
+    moduleQueue = response.then(
+      () => undefined,
+      () => undefined,
+    );
+    await route.fulfill({ response: await response });
+  });
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.waitForFunction(
+    () => Array.isArray(window.__BUZZ_E2E_COMMANDS__),
+    undefined,
+    { timeout: 15_000 },
+  );
+}
+
+test("empty projects state exposes project creation", async ({ page }) => {
+  await enableProjectsFeature(page);
+  await page.addInitScript((coordinates) => {
+    window.localStorage.setItem(
+      "buzz.projects.hidden-cards.v1",
+      JSON.stringify(coordinates),
+    );
+  }, EMPTY_PROJECT_COORDINATES);
+  await installMockBridge(page);
+
+  await openMockApp(page);
+  await page.getByTestId("open-projects-view").click();
+
+  await expect(
+    page.getByText("No projects yet", { exact: true }),
+  ).toBeVisible();
+  const createProject = page.getByRole("button", {
+    name: "Create project",
+    exact: true,
+  });
+  await expect(createProject).toBeVisible();
+  await createProject.click();
+
+  await expect(page.getByTestId("create-project-dialog")).toBeVisible();
+  await expect(page.getByTestId("create-project-name")).toBeFocused();
+});
+
+test("creates a relay project with a dedicated discussion channel", async ({
+  page,
+}) => {
+  await enableProjectsFeature(page);
+  await page.addInitScript((coordinates) => {
+    window.localStorage.setItem(
+      "buzz.projects.hidden-cards.v1",
+      JSON.stringify(coordinates),
+    );
+  }, EMPTY_PROJECT_COORDINATES);
+  await installMockBridge(page);
+
+  await openMockApp(page);
+  await page.getByTestId("open-projects-view").click();
+  await page
+    .getByRole("button", { name: "Create project", exact: true })
+    .click();
+
+  await page.getByTestId("create-project-name").fill("첫 번째 프로젝트");
+  await expect(page.getByTestId("create-project-repository-id")).toHaveValue(
+    "",
+  );
+  await page.getByTestId("create-project-repository-id").fill("first-project");
+  await page
+    .getByTestId("create-project-description")
+    .fill("SchoolX에서 시작한 첫 프로젝트");
+  await page.getByTestId("create-project-submit").click();
+
+  await expect(page.getByTestId("create-project-dialog")).toBeHidden();
+  await expect(page.getByTestId("project-card-first-project")).toBeVisible();
+
+  const announcement = await page.evaluate(() =>
+    window.__BUZZ_E2E_SIGNED_EVENTS__?.find((event) => event.kind === 30617),
+  );
+  expect(announcement?.content).toBe("SchoolX에서 시작한 첫 프로젝트");
+  expect(announcement?.tags).toContainEqual(["d", "first-project"]);
+  expect(announcement?.tags).toContainEqual(["name", "첫 번째 프로젝트"]);
+  expect(announcement?.tags.filter((tag) => tag[0] === "clone")).toHaveLength(
+    0,
+  );
+  const discussionTags =
+    announcement?.tags.filter((tag) => tag[0] === "buzz-channel") ?? [];
+  expect(discussionTags).toHaveLength(1);
+  expect(discussionTags[0]?.[1]).toMatch(
+    /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+  );
+
+  await page
+    .getByRole("button", { name: "View 첫 번째 프로젝트", exact: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: "Open Discussion", exact: true }),
+  ).toBeVisible();
+});
 
 test("top-level project lists align dates and overflow actions", async ({
   page,
@@ -25,7 +145,7 @@ test("top-level project lists align dates and overflow actions", async ({
     window.localStorage.setItem("buzz.projects.viewMode", "list");
   });
   await installMockBridge(page);
-  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await openMockApp(page);
   await page.getByTestId("open-projects-view").click();
   await expect(
     page.getByRole("heading", { level: 1, name: "Projects" }),
@@ -143,7 +263,7 @@ test("commit detail opens from the commits feed with a diff", async ({
   await installMockBridge(page);
   // The preview server is a static file server without SPA fallback, so
   // enter at "/" and navigate via the sidebar.
-  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await openMockApp(page);
   await page.getByTestId("open-projects-view").click();
 
   // The overview no longer lists repository cards — switch to the
@@ -252,7 +372,7 @@ test("pull request and issue feeds share the commit row structure", async ({
 }) => {
   await enableProjectsFeature(page);
   await installMockBridge(page);
-  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await openMockApp(page);
   await page.getByTestId("open-projects-view").click();
 
   // The overview no longer lists repository cards — switch to the

@@ -178,6 +178,8 @@ type MockBridgeOptions = {
   projectHeadBranch?: string;
   /** Enable the scoped SchoolX Code native boundary fixture. */
   schoolxCodeWorkspace?: boolean;
+  /** Error returned by the native Code repository inspection boundary. */
+  schoolxCodeRepositoryInspectError?: string;
   /** Successive native replay snapshots returned to the Code event adapter. */
   schoolxCodeEventBacklogs?: CodeEventBacklog[];
   /** Successive strict Changes snapshots returned for a selected Code thread. */
