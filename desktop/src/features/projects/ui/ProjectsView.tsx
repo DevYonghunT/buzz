@@ -72,6 +72,7 @@ import { cn } from "@/shared/lib/cn";
 import { normalizePubkey } from "@/shared/lib/pubkey";
 import { Button } from "@/shared/ui/button";
 import { PageHeader } from "@/shared/ui/PageHeader";
+import { ViewLoadingFallback } from "@/shared/ui/ViewLoadingFallback";
 
 const MANY_PROJECTS_THRESHOLD = 12;
 const REPOSITORY_SCOPE_OPTIONS: Array<{
@@ -438,19 +439,23 @@ export function ProjectsView() {
   );
 
   if (projectsQuery.isLoading) {
-    return null;
+    return <ViewLoadingFallback kind="projects" label="Loading projects" />;
   }
 
   if (projectsQuery.isError) {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-2 text-muted-foreground">
-        <p className="text-sm text-red-400">Failed to load projects</p>
+      <div
+        className="flex flex-1 flex-col items-center justify-center gap-2 text-muted-foreground"
+        role="alert"
+      >
+        <p className="text-sm text-destructive">Failed to load projects</p>
         <Button
+          disabled={projectsQuery.isFetching}
           onClick={() => void projectsQuery.refetch()}
           size="sm"
           variant="outline"
         >
-          Retry
+          {projectsQuery.isFetching ? "Retrying…" : "Retry"}
         </Button>
       </div>
     );

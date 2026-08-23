@@ -42,6 +42,7 @@ import {
 import { useCodeThreadLifecycleSync } from "../state/useCodeThreadLifecycleSync";
 import { useCodeThreadMutations } from "../state/useCodeThreadMutations";
 import { useCodeWorkspaceGitHandoff } from "../state/useCodeWorkspaceGitHandoff";
+import { useCodeWorkspaceListRefresh } from "../state/useCodeWorkspaceListRefresh";
 import { CodeChangesPanel } from "./CodeChangesPanel";
 import { CodeComposer } from "./CodeComposer";
 import { CodeRuntimeStatus } from "./CodeRuntimeStatus";
@@ -168,7 +169,7 @@ export function CodeWorkspaceScreen({
   }, [session.state.runtimeGeneration]);
 
   React.useEffect(() => {
-    if (!runtimeReady || threadsQuery.isPending || threadsQuery.isFetching) {
+    if (!runtimeReady || !threadsQuery.isSuccess || threadsQuery.isFetching) {
       return;
     }
     const resolved = selectCodeThreadId(selectedThreadId, threads);
@@ -181,7 +182,7 @@ export function CodeWorkspaceScreen({
     selectedThreadId,
     threads,
     threadsQuery.isFetching,
-    threadsQuery.isPending,
+    threadsQuery.isSuccess,
   ]);
 
   const selectedRow = React.useMemo(
@@ -202,20 +203,8 @@ export function CodeWorkspaceScreen({
     runtimeReady,
     selectedThreadId,
   });
-
-  const refreshLists = React.useCallback(async () => {
-    await Promise.all([
-      queryClient.invalidateQueries({
-        queryKey: codeSessionQueryKeys.preparations(scope),
-      }),
-      queryClient.invalidateQueries({
-        queryKey: codeSessionQueryKeys.threads(scope),
-      }),
-      queryClient.invalidateQueries({
-        queryKey: codeSessionQueryKeys.worktrees(scope),
-      }),
-    ]);
-  }, [queryClient, scope]);
+  const { pending: listRefreshPending, refresh: refreshLists } =
+    useCodeWorkspaceListRefresh(queryClient, scope, mountedRef);
 
   const refreshAfterThreadOpen = React.useCallback(() => {
     void queryClient.invalidateQueries({
@@ -290,13 +279,15 @@ export function CodeWorkspaceScreen({
   const taskActionPending =
     threadMutations.pendingForkThreadId !== null ||
     threadMutations.pendingLifecycleThreadId !== null;
+  const sidebarBusy =
+    taskActionPending ||
+    creating ||
+    actionPendingId !== null ||
+    modelSelection.saving ||
+    listRefreshPending;
+  const sidebarRefreshReady = interactionReady && !sidebarBusy;
   const sidebarActionsReady =
-    interactionReady &&
-    threadListReady &&
-    !taskActionPending &&
-    !creating &&
-    actionPendingId === null &&
-    !modelSelection.saving;
+    interactionReady && threadListReady && !sidebarBusy;
   const selectedCapabilities = selectedRow
     ? codeThreadLifecycleCapabilities(selectedRow.lifecycle)
     : null;
@@ -855,7 +846,11 @@ export function CodeWorkspaceScreen({
             creating={creating}
             isForkBlocked={threadMutations.isForkLocallyBlocked}
             isLifecycleBlocked={threadMutations.isLifecycleLocallyBlocked}
-            loading={preparationsQuery.isFetching || threadsQuery.isFetching}
+            loading={
+              listRefreshPending ||
+              preparationsQuery.isFetching ||
+              threadsQuery.isFetching
+            }
             onArchiveThread={threadMutations.archiveThread}
             onCreate={() => void createTask()}
             onForkThread={forkThread}
@@ -871,6 +866,7 @@ export function CodeWorkspaceScreen({
             }}
             onUnarchiveThread={threadMutations.unarchiveThread}
             preparations={preparationsQuery.data ?? []}
+            refreshReady={sidebarRefreshReady}
             scope={scope}
             selectedThreadId={selectedThreadId}
             threads={threads}

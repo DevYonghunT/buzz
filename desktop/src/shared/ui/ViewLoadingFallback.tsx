@@ -15,6 +15,16 @@ type ViewLoadingFallbackKind =
 type ViewLoadingFallbackProps = {
   includeHeader?: boolean;
   kind: ViewLoadingFallbackKind;
+  label?: string;
+};
+
+const DEFAULT_LOADING_LABELS: Record<ViewLoadingFallbackKind, string> = {
+  agents: "Loading agents",
+  channel: "Loading channel",
+  forum: "Loading forum",
+  projects: "Loading projects",
+  pulse: "Loading pulse",
+  workflows: "Loading workflows",
 };
 
 function LoadingHeaderSkeleton() {
@@ -393,12 +403,18 @@ function ForumLoadingBody({ hasHeader = false }: { hasHeader?: boolean }) {
 export function ViewLoadingFallback({
   includeHeader = false,
   kind,
+  label = DEFAULT_LOADING_LABELS[kind],
 }: ViewLoadingFallbackProps) {
   const shouldShowChannelHeader =
     includeHeader && (kind === "channel" || kind === "forum");
 
   return (
-    <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+    <div
+      aria-busy="true"
+      aria-label={label}
+      className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+      role="status"
+    >
       {shouldShowChannelHeader ? <LoadingHeaderSkeleton /> : null}
       {kind === "agents" ? <AgentsLoadingBody /> : null}
       {kind === "workflows" ? <CardListLoadingBody /> : null}

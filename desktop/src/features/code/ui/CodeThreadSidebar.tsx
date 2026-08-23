@@ -169,6 +169,7 @@ export function CodeThreadSidebar({
   onSelectThread,
   onUnarchiveThread,
   preparations,
+  refreshReady,
   scope,
   selectedThreadId,
   threads,
@@ -189,6 +190,7 @@ export function CodeThreadSidebar({
   onSelectThread: (threadId: string) => void;
   onUnarchiveThread: (threadId: string) => Promise<void>;
   preparations: readonly CodeThreadPreparation[];
+  refreshReady: boolean;
   scope: CodeThreadBindingScope;
   selectedThreadId: string | null;
   threads: readonly CodeBoundThreadSummary[];
@@ -228,7 +230,7 @@ export function CodeThreadSidebar({
           aria-label="Refresh Code tasks"
           className="h-6 w-6"
           disabled={
-            loading || !actionsReady || creating || actionPendingId !== null
+            loading || !refreshReady || creating || actionPendingId !== null
           }
           onClick={onRefresh}
           size="icon-xs"

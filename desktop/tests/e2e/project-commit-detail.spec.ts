@@ -55,6 +55,41 @@ async function openMockApp(page: Page) {
   );
 }
 
+test("keeps project loading visible and accessible during delayed relay reads", async ({
+  page,
+}) => {
+  await enableProjectsFeature(page);
+  await installMockBridge(page, { projectQueryDelayMs: 500 });
+
+  await openMockApp(page);
+  await page.getByTestId("open-projects-view").click();
+
+  await expect(
+    page.getByRole("status", { name: "Loading projects", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { level: 1, name: "Projects" }),
+  ).toBeVisible();
+
+  await page.getByRole("button", { name: "Repositories", exact: true }).click();
+  const projectEntry = page
+    .locator(
+      '[data-testid="project-card-buzz"], [data-testid="project-row-buzz"]',
+    )
+    .first();
+  await expect(projectEntry).toBeVisible();
+  await projectEntry
+    .getByRole("button", { name: "View buzz", exact: true })
+    .click();
+
+  await expect(
+    page.getByRole("status", { name: "Loading project", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("tab", { name: "Overview", exact: true }),
+  ).toBeVisible();
+});
+
 test("empty projects state exposes project creation", async ({ page }) => {
   await enableProjectsFeature(page);
   await page.addInitScript((coordinates) => {

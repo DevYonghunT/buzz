@@ -176,6 +176,8 @@ type MockBridgeOptions = {
   pocketVoiceImportResult?: "success" | "cancel" | "invalid";
   /** Advertised HEAD for the first mock project without adding that branch. */
   projectHeadBranch?: string;
+  /** Delay project relay query responses so loading surfaces stay observable. */
+  projectQueryDelayMs?: number;
   /** Omit the first project's clone tag so relay URL derivation is exercised. */
   projectOmitCloneTag?: boolean;
   /** Enable the scoped SchoolX Code native boundary fixture. */
@@ -204,6 +206,8 @@ type MockBridgeOptions = {
   schoolxCodeForkDelayMs?: number;
   /** Delay a new thread result so task-list mutation locking can be asserted. */
   schoolxCodeThreadStartDelayMs?: number;
+  /** Sequenced Code task-list failures; null entries allow that read through. */
+  schoolxCodeThreadListErrors?: Array<string | null>;
   /** Sequenced managed-worktree removal failures; null allows the call through. */
   schoolxCodeRemovalErrors?: Array<string | null>;
   /** Sequenced response-loss failures after native removal has committed. */

@@ -59,6 +59,7 @@ import { ProfilePanelProvider } from "@/shared/context/ProfilePanelContext";
 import { useHistorySearchState } from "@/shared/hooks/useHistorySearchState";
 import { useThreadPanelWidth } from "@/shared/hooks/useThreadPanelWidth";
 import { Button } from "@/shared/ui/button";
+import { ViewLoadingFallback } from "@/shared/ui/ViewLoadingFallback";
 import { useCommunities } from "@/features/communities/useCommunities";
 import { useProjectCommitDiffQuery } from "@/features/projects/useProjectCommitDiff";
 import { useGitIdentityQuery } from "@/features/projects/useGitIdentity";
@@ -78,6 +79,7 @@ import {
 } from "./useOpenProjectTerminal";
 import type { CreateIssueDialogInput } from "./CreateIssueDialog";
 import { ProjectBranchActionDialogs } from "./ProjectBranchActionDialogs";
+import { ProjectDetailLoadError } from "./ProjectDetailLoadError";
 import {
   PROJECT_TAB_CRUMB_LABELS,
   projectPeople,
@@ -667,33 +669,15 @@ export function ProjectDetailScreen(props: ProjectDetailScreenProps) {
   );
 
   if (projectQuery.isLoading) {
-    return null;
+    return <ViewLoadingFallback kind="projects" label="Loading project" />;
   }
   if (projectQuery.isError) {
     return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-3 px-4 py-16 text-center">
-        <FolderGit2 className="h-10 w-10 text-muted-foreground/40" />
-        <p className="text-sm text-red-400">Failed to load project</p>
-        <div className="flex items-center gap-2">
-          <Button
-            onClick={() => void projectQuery.refetch()}
-            size="sm"
-            variant="outline"
-          >
-            Retry
-          </Button>
-          <Button
-            onClick={() => {
-              void goProjects();
-            }}
-            size="sm"
-            variant="ghost"
-          >
-            <ArrowLeft className="mr-1.5 h-4 w-4" />
-            Back to Projects
-          </Button>
-        </div>
-      </div>
+      <ProjectDetailLoadError
+        isRetrying={projectQuery.isFetching}
+        onBack={goProjects}
+        onRetry={projectQuery.refetch}
+      />
     );
   }
   if (!project) {

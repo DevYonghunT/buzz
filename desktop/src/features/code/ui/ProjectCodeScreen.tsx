@@ -44,17 +44,23 @@ function isFirstCommitRequiredError(error: unknown): boolean {
 
 function CodeBootstrapState({
   action,
+  announcementRole,
   description,
   loading = false,
   title,
 }: {
   action?: React.ReactNode;
+  announcementRole?: "alert" | "status";
   description: string;
   loading?: boolean;
   title: string;
 }) {
   return (
-    <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 py-12 text-center">
+    <div
+      aria-busy={loading || undefined}
+      className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 py-12 text-center"
+      role={announcementRole ?? (loading ? "status" : undefined)}
+    >
       {loading ? (
         <LoaderCircle className="size-8 animate-spin text-muted-foreground motion-reduce:animate-none" />
       ) : (
@@ -135,7 +141,39 @@ export function ProjectCodeScreen({
     );
   }
 
-  if (!project || projectQuery.isError) {
+  if (projectQuery.isError) {
+    return (
+      <CodeBootstrapState
+        action={
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <Button
+              disabled={projectQuery.isFetching}
+              onClick={() => void projectQuery.refetch()}
+              size="sm"
+            >
+              {projectQuery.isFetching ? (
+                <LoaderCircle className="animate-spin motion-reduce:animate-none" />
+              ) : null}
+              {projectQuery.isFetching ? "Retrying…" : "Retry"}
+            </Button>
+            <Button
+              onClick={() => void goProjects()}
+              size="sm"
+              variant="outline"
+            >
+              <ArrowLeft />
+              Back to Projects
+            </Button>
+          </div>
+        }
+        announcementRole="alert"
+        description="A relay request failed. This project may still be available; retry to check again."
+        title="Project load failed"
+      />
+    );
+  }
+
+  if (!project) {
     return (
       <CodeBootstrapState
         action={
@@ -144,11 +182,7 @@ export function ProjectCodeScreen({
             Back to Projects
           </Button>
         }
-        description={
-          projectQuery.isError
-            ? "The project could not be loaded."
-            : "This project is no longer available in the active community."
-        }
+        description="This project is no longer available in the active community."
         title="Project unavailable"
       />
     );

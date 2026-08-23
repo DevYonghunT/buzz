@@ -434,6 +434,18 @@ function codeRuntimeReadyLabel(page: Page) {
   return page.getByRole("paragraph").filter({ hasText: /^Ready$/ });
 }
 
+async function targetedProjectLookupCount(page: Page) {
+  return page.evaluate(
+    () =>
+      window.__BUZZ_E2E_PROJECT_QUERY_FILTERS__?.filter(
+        (filter) =>
+          filter.kinds?.length === 1 &&
+          filter.kinds[0] === 30617 &&
+          filter["#d"]?.includes("buzz"),
+      ).length ?? 0,
+  );
+}
+
 async function openCodeProjectRoute(page: Page, keyboardOnly = false) {
   await enterMockApp(page);
   await activate(page, page.getByTestId("open-projects-view"), keyboardOnly);
@@ -763,6 +775,81 @@ test("keeps unrelated repository inspection failures generic", async ({
   ).toHaveCount(0);
 });
 
+test("retries a transient project lookup without treating the project as absent", async ({
+  page,
+}) => {
+  await installMockBridge(page, {
+    projectQueryDelayMs: 300,
+    schoolxCodeWorkspace: true,
+  });
+
+  await enterMockApp(page);
+  await page.getByTestId("open-projects-view").click();
+  await page.getByRole("button", { name: "Repositories", exact: true }).click();
+  const projectEntry = page
+    .locator(
+      '[data-testid="project-card-buzz"], [data-testid="project-row-buzz"]',
+    )
+    .first();
+  await expect(projectEntry).toBeVisible();
+  await page.evaluate(() => {
+    window.__BUZZ_E2E_REJECT_PROJECT_QUERY_KINDS__ = [30617];
+  });
+  await projectEntry
+    .getByRole("button", {
+      name: "Open buzz in SchoolX Code",
+      exact: true,
+    })
+    .click();
+
+  await expect(
+    page.getByRole("heading", { name: "Project load failed", exact: true }),
+  ).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByText("A relay request failed.")).toBeVisible();
+  const retry = page.getByRole("button", { name: "Retry", exact: true });
+  await expect(retry).toBeEnabled();
+  await expect.poll(() => targetedProjectLookupCount(page)).toBe(2);
+
+  await page.evaluate(() => {
+    window.__BUZZ_E2E_REJECT_PROJECT_QUERY_KINDS__ = [];
+  });
+  await retry.click();
+  await expect(
+    page
+      .getByRole("main")
+      .getByRole("status")
+      .filter({ hasText: "Opening SchoolX Code" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Retry", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("navigation", { name: "Code project breadcrumb" }),
+  ).toContainText("buzz");
+  await expect.poll(() => targetedProjectLookupCount(page)).toBe(3);
+  await expect(codeRuntimeReadyLabel(page)).toBeVisible({ timeout: 10_000 });
+
+  const missingProjectId = `${"a".repeat(64)}:missing-project`;
+  await page.evaluate((projectId) => {
+    window.location.hash = `/projects/${encodeURIComponent(projectId)}/code`;
+  }, missingProjectId);
+  await expect(
+    page.getByRole("heading", { name: "Project unavailable", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByText(
+      "This project is no longer available in the active community.",
+      { exact: true },
+    ),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Retry", exact: true }),
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole("button", { name: "Back to Projects", exact: true }),
+  ).toBeVisible();
+});
+
 test("opens a scoped SchoolX Code task and submits through its bound thread", async ({
   page,
 }) => {
@@ -896,6 +983,53 @@ test("locks task refresh while a new Codex thread opens without relisting it", a
   expect((await commandPayloads(page, "code_threads_list")).length).toBe(
     listCount,
   );
+});
+
+test("recovers a failed Code task list through its explicit Refresh action", async ({
+  page,
+}) => {
+  await installMockBridge(page, {
+    schoolxCodeWorkspace: true,
+    schoolxCodeThreadListErrors: [
+      "Mock Code task list unavailable",
+      "Mock Code task list unavailable",
+      null,
+    ],
+  });
+  await openCodeWorkspace(page);
+  await waitForCommandCount(page, "code_threads_list", 2);
+
+  await page.evaluate((threadId) => {
+    const [path, queryString = ""] = window.location.hash.slice(1).split("?");
+    const search = new URLSearchParams(queryString);
+    search.set("threadId", threadId);
+    window.location.hash = `${path}?${search.toString()}`;
+  }, THREAD_ID);
+
+  const listError = page
+    .getByRole("alert")
+    .filter({ hasText: "Mock Code task list unavailable" });
+  await expect(listError).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`threadId=${THREAD_ID}`));
+  const refresh = page.getByRole("button", { name: "Refresh Code tasks" });
+  await expect(refresh).toBeEnabled();
+  await expect(
+    page.getByRole("button", { name: "New task", exact: true }),
+  ).toBeDisabled();
+
+  await refresh.click();
+  await waitForCommandCount(page, "code_threads_list", 3);
+  await expect(page.getByTestId(`code-thread-${THREAD_ID}`)).toHaveAttribute(
+    "aria-current",
+    "page",
+  );
+  await waitForCommand(page, "code_thread_resume");
+  await expect(page.getByTestId("code-timeline")).toContainText(
+    "Historical Code response from fixture.",
+  );
+  await expect(listError).toHaveCount(0);
+  await expect(refresh).toBeEnabled();
+  expect((await commandPayloads(page, "code_threads_list")).length).toBe(3);
 });
 
 test("stages one managed-worktree file only after receipt, refresh, and acknowledgement", async ({

@@ -206,6 +206,8 @@ type E2eConfig = {
     pocketVoiceImportResult?: "success" | "cancel" | "invalid";
     /** Advertised HEAD for the first mock project without adding that branch. */
     projectHeadBranch?: string;
+    /** Delay project relay query responses so loading surfaces stay observable. */
+    projectQueryDelayMs?: number;
     /** Omit the first project's clone tag so relay URL derivation is exercised. */
     projectOmitCloneTag?: boolean;
     /** Enable the scoped SchoolX Code native boundary fixture. */
@@ -240,6 +242,8 @@ type E2eConfig = {
     schoolxCodeForkDelayMs?: number;
     /** Delay a new thread result so task-list mutation locking can be asserted. */
     schoolxCodeThreadStartDelayMs?: number;
+    /** Sequenced Code task-list failures; null entries allow that read through. */
+    schoolxCodeThreadListErrors?: Array<string | null>;
     /** Sequenced managed-worktree removal failures; null allows the call through. */
     schoolxCodeRemovalErrors?: Array<string | null>;
     /** Sequenced response-loss failures after native removal has committed. */
@@ -9500,18 +9504,29 @@ function sendToMockSocket(args: {
       window.__BUZZ_E2E_PROJECT_QUERY_FILTERS__.push(filter);
       const rejectedKinds =
         window.__BUZZ_E2E_REJECT_PROJECT_QUERY_KINDS__ ?? [];
-      if (filter.kinds?.some((kind) => rejectedKinds.includes(kind))) {
-        sendWsText(socket.handler, [
-          "CLOSED",
-          subId,
-          "mock project query failure",
-        ]);
-        return;
+      const rejected =
+        filter.kinds?.some((kind) => rejectedKinds.includes(kind)) ?? false;
+      const events = rejected ? [] : filterMockProjectEvents(filter);
+      const deliverProjectQuery = () => {
+        if (rejected) {
+          sendWsText(socket.handler, [
+            "CLOSED",
+            subId,
+            "mock project query failure",
+          ]);
+          return;
+        }
+        for (const event of events) {
+          sendWsText(socket.handler, ["EVENT", subId, event]);
+        }
+        sendWsText(socket.handler, ["EOSE", subId]);
+      };
+      const delayMs = getConfig()?.mock?.projectQueryDelayMs ?? 0;
+      if (delayMs > 0) {
+        window.setTimeout(deliverProjectQuery, delayMs);
+      } else {
+        deliverProjectQuery();
       }
-      for (const event of filterMockProjectEvents(filter)) {
-        sendWsText(socket.handler, ["EVENT", subId, event]);
-      }
-      sendWsText(socket.handler, ["EOSE", subId]);
       return;
     }
 
@@ -10493,6 +10508,7 @@ export function maybeInstallE2eTauriMocks() {
   let mockCodeRenameCallCount = 0;
   let mockCodeForkCallCount = 0;
   let mockCodeRemovalCallCount = 0;
+  let mockCodeThreadListCallCount = 0;
   let mockCodeWorktreeInventoryError: string | null = null;
   const mockCodeRemovalReceipts = new Map<string, CodeWorktreeRemovalReceipt>();
   const mockCodeRemovalInFlight = new Map<
@@ -11944,6 +11960,12 @@ export function maybeInstallE2eTauriMocks() {
         if (!mockCodeScopesMatch(input.scope, mockCodeScope)) {
           return { data: [], nextCursor: null, backwardsCursor: null };
         }
+        const configuredError =
+          activeConfig?.mock?.schoolxCodeThreadListErrors?.[
+            mockCodeThreadListCallCount
+          ] ?? null;
+        mockCodeThreadListCallCount += 1;
+        if (configuredError) throw new Error(configuredError);
         const existingLifecycle =
           mockCodeThreadLifecycles.get(mockCodeBinding.codexThreadId) ??
           "unknown";
