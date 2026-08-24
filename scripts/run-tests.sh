@@ -113,6 +113,20 @@ run_unit_tests() {
   # Postgres/Redis, so it belongs in the infra-free unit job.
   run_test_step "schoolx-catalog tests" \
     cargo test -p schoolx-catalog --lib -- --nocapture
+
+  # Kubernetes backend provider: pure decision layers driven by a fake
+  # substrate, no cluster. Mirrors the nextest path in `just test-unit` —
+  # the two lists must stay in step or the fallback silently covers less.
+  run_test_step "buzz-backend-kubernetes tests" \
+    cargo test -p buzz-backend-kubernetes -- --nocapture
+
+  # buzz-agent model-capabilities corpus: the Rust half of the cross-language
+  # drift guard. model_capabilities.rs embeds scripts/model-capabilities.json +
+  # scripts/normative-corpus.json via include_str! and replays the full locked
+  # corpus as pure in-process tests (no infra). Mirrors the nextest path in
+  # `just test-unit` — the two lists must stay in step.
+  run_test_step "buzz-agent unit tests" \
+    cargo test -p buzz-agent --lib -- --nocapture
 }
 
 # ---- DB / integration tests (infra required) --------------------------------

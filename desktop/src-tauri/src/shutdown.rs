@@ -21,6 +21,9 @@ pub(crate) fn shut_down_app(app: &tauri::AppHandle, shutdown_done: &std::sync::a
         .store(false, Ordering::SeqCst);
     if !shutdown_done.swap(true, Ordering::SeqCst) {
         prevent_sleep::release(&app.state::<AppState>().prevent_sleep);
+        crate::observed_unread::flush(app);
+        app.state::<crate::terminal_runtime::TerminalSessions>()
+            .shutdown_all();
         if let Err(error) = stop_code_terminals(app) {
             eprintln!("buzz-desktop: failed to stop SchoolX Code terminals: {error}");
         }
@@ -50,6 +53,8 @@ pub(crate) fn install_signal_handler(
             .code_lifecycle_authority_ready
             .store(false, Ordering::SeqCst);
         if !shutdown_done.swap(true, Ordering::SeqCst) {
+            app.state::<crate::terminal_runtime::TerminalSessions>()
+                .shutdown_all();
             let _ = stop_code_terminals(&app);
             let _ = stop_code_runtime(&app);
             let _ = shutdown_managed_agents(&app);

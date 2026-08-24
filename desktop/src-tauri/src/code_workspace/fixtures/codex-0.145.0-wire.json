@@ -11,7 +11,7 @@
         "clientInfo": {
           "name": "schoolx-code",
           "title": "SchoolX Code",
-          "version": "0.5.3"
+          "version": "0.5.18"
         },
         "capabilities": {
           "experimentalApi": false,

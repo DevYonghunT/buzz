@@ -7,8 +7,6 @@
  * - `formatTimeWithoutDayPeriod` — the same clock time with that marker dropped,
  *   wherever in the string the locale puts it.
  * - `formatFullDateTime` — verbose string for tooltips.
- * - `formatDayHeading` — label for day dividers / sticky headers.
- *   Returns "Today", "Yesterday", or a date.
  * - `isSameDay` — compare two unix-second timestamps.
  *
  * Every function takes the app locale explicitly. These used to hold
@@ -19,11 +17,15 @@
  * their arguments; `shared/i18n/formatters` caches the underlying `Intl`
  * instances by locale and options, so there is no per-render construction cost.
  *
- * English output is preserved exactly as it shipped: ordinal dates
- * ("May 19th"), "3 hours ago", "on May 19th". Korean has no ordinal suffix and
- * builds dates in year→month→day order, so it uses the `Intl` forms instead.
- * Adding Korean must not restyle English product copy, which is why the ordinal
- * path below is English-only rather than replaced by `Intl` for both.
+ * Relative labels ("Today", "Yesterday", "June 20", "Yesterday at 9:05 AM") are
+ * not here: chat and the Inbox share them from `shared/lib/datetime.ts`. What
+ * stays in this file is the absolute end of the range — a bare clock time, the
+ * verbose tooltip string, and same-day comparison.
+ *
+ * `formatTime` is for places with only enough room for a clock: the hover gutter
+ * that replaces the avatar on continuation rows. A message header uses the
+ * relative ladder instead, because the day divider that supplies its date
+ * scrolls away while the messages under it stay on screen.
  */
 
 import { i18n } from "@/shared/i18n";
@@ -129,43 +131,6 @@ export function formatFullDateTime(
   );
 }
 
-/**
- * Human-friendly day label for dividers and sticky headers.
- * Returns "Today", "Yesterday", a current-year date, or a date carrying its year.
- */
-export function formatDayHeading(
-  unixSeconds: number,
-  locale: AppLocale,
-): string {
-  const date = new Date(unixSeconds * 1_000);
-  const now = new Date();
-
-  if (isSameDayDate(date, now)) {
-    return label(locale, "time.today");
-  }
-
-  const yesterday = new Date(now);
-  yesterday.setDate(yesterday.getDate() - 1);
-  if (isSameDayDate(date, yesterday)) {
-    return label(locale, "time.yesterday");
-  }
-
-  const includeYear = date.getFullYear() !== now.getFullYear();
-
-  if (locale !== "en") {
-    return formatDateTime(date, locale, {
-      weekday: "long",
-      month: "long",
-      day: "numeric",
-      ...(includeYear ? { year: "numeric" } : {}),
-    });
-  }
-
-  const weekday = formatDateTime(date, locale, { weekday: "long" });
-  const dateLabel = `${weekday}, ${formatMonthDayOrdinal(date, locale, "long")}`;
-  return includeYear ? `${dateLabel}, ${date.getFullYear()}` : dateLabel;
-}
-
 /** True when two unix-second timestamps fall on the same calendar day (local time). */
 export function isSameDay(a: number, b: number): boolean {
   return isSameDayDate(new Date(a * 1_000), new Date(b * 1_000));
@@ -183,12 +148,15 @@ export function startOfLocalDaySeconds(unixSeconds: number): number {
   return Math.floor(date.getTime() / 1_000);
 }
 
-/** Short month + day, e.g. "May 19th" or "5월 19일". */
-export function formatShortMonthDayOrdinal(
+/** Short month + day, e.g. "May 19" or "5월 19일". */
+export function formatShortMonthDay(
   unixSeconds: number,
   locale: AppLocale,
 ): string {
-  return formatMonthDayOrdinal(new Date(unixSeconds * 1_000), locale, "short");
+  return formatDateTime(new Date(unixSeconds * 1_000), locale, {
+    month: locale === "en" ? "short" : "long",
+    day: "numeric",
+  });
 }
 
 /**
@@ -208,7 +176,7 @@ export function formatThreadSummaryLastReplyTime(
   if (diff < 604_800)
     return formatAgo(Math.floor(diff / 86_400), "day", locale);
 
-  return labelWithDate(locale, formatShortMonthDayOrdinal(unixSeconds, locale));
+  return labelWithDate(locale, formatShortMonthDay(unixSeconds, locale));
 }
 
 function isSameDayDate(a: Date, b: Date): boolean {
@@ -217,22 +185,6 @@ function isSameDayDate(a: Date, b: Date): boolean {
     a.getMonth() === b.getMonth() &&
     a.getDate() === b.getDate()
   );
-}
-
-function formatMonthDayOrdinal(
-  date: Date,
-  locale: AppLocale,
-  monthWidth: "long" | "short",
-): string {
-  if (locale !== "en") {
-    // Always "long" for Korean: both widths render "5월", while "numeric" would
-    // produce the bare "5. 19." pattern, which reads as a serial number rather
-    // than a date next to timeline copy.
-    return formatDateTime(date, locale, { month: "long", day: "numeric" });
-  }
-
-  const month = formatDateTime(date, locale, { month: monthWidth });
-  return `${month} ${date.getDate()}${ordinalSuffix(date.getDate())}`;
 }
 
 function formatAgo(
@@ -244,22 +196,4 @@ function formatAgo(
   // which the previous `${value} ${unit}${value === 1 ? "" : "s"} ago` could
   // only ever get right for English. It renders the same English strings.
   return formatRelativeTime(-value, unit, locale, { numeric: "always" });
-}
-
-function ordinalSuffix(day: number): string {
-  const lastTwoDigits = day % 100;
-  if (lastTwoDigits >= 11 && lastTwoDigits <= 13) {
-    return "th";
-  }
-
-  switch (day % 10) {
-    case 1:
-      return "st";
-    case 2:
-      return "nd";
-    case 3:
-      return "rd";
-    default:
-      return "th";
-  }
 }

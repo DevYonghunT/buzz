@@ -2,8 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  formatDayHeading,
-  formatShortMonthDayOrdinal,
+  formatShortMonthDay,
   formatThreadSummaryLastReplyTime,
   formatTime,
   formatTimeWithoutDayPeriod,
@@ -14,54 +13,31 @@ function localUnixSeconds(year, monthIndex, day, hour = 12, minute = 0) {
   return new Date(year, monthIndex, day, hour, minute).getTime() / 1_000;
 }
 
-function weekday(date) {
-  return new Intl.DateTimeFormat("en-US", { weekday: "long" }).format(date);
-}
-
-function month(date) {
-  return new Intl.DateTimeFormat("en-US", { month: "long" }).format(date);
-}
-
 // English output is asserted exactly: adding Korean must not restyle copy that
 // already shipped. Korean is asserted on the parts that are stable across ICU
 // versions — the day-period marker in particular is CLDR data that has changed
 // between releases, and the app runs against the webview's ICU, not Node's.
 
-test("formatShortMonthDayOrdinal formats month before ordinal day", () => {
+test("formatShortMonthDay abbreviates the month and omits the ordinal", () => {
   assert.equal(
-    formatShortMonthDayOrdinal(localUnixSeconds(2026, 4, 19), "en"),
-    "May 19th",
+    formatShortMonthDay(localUnixSeconds(2026, 4, 19), "en"),
+    "May 19",
+  );
+  assert.equal(
+    formatShortMonthDay(localUnixSeconds(2026, 4, 1), "en"),
+    "May 1",
   );
 });
 
-test("formatShortMonthDayOrdinal handles ordinal suffixes", () => {
-  const expectations = [
-    [1, "May 1st"],
-    [2, "May 2nd"],
-    [3, "May 3rd"],
-    [4, "May 4th"],
-    [11, "May 11th"],
-    [12, "May 12th"],
-    [13, "May 13th"],
-    [21, "May 21st"],
-    [22, "May 22nd"],
-    [23, "May 23rd"],
-    [31, "May 31st"],
-  ];
-
-  for (const [day, expected] of expectations) {
-    assert.equal(
-      formatShortMonthDayOrdinal(localUnixSeconds(2026, 4, day), "en"),
-      expected,
-    );
+test("no day carries an ordinal suffix", () => {
+  for (const day of [1, 2, 3, 4, 11, 12, 13, 21, 22, 23, 31]) {
+    const label = formatShortMonthDay(localUnixSeconds(2026, 4, day), "en");
+    assert.doesNotMatch(label, /\d(?:st|nd|rd|th)\b/, `ordinal in "${label}"`);
   }
 });
 
-test("formatShortMonthDayOrdinal uses the Korean date form, not ordinals", () => {
-  const formatted = formatShortMonthDayOrdinal(
-    localUnixSeconds(2026, 4, 19),
-    "ko",
-  );
+test("formatShortMonthDay uses the Korean date form, not ordinals", () => {
+  const formatted = formatShortMonthDay(localUnixSeconds(2026, 4, 19), "ko");
 
   assert.equal(formatted, "5월 19일");
   // "st/nd/rd/th" is an English-only construct; it must not survive into Korean.
@@ -166,58 +142,19 @@ test("formatThreadSummaryLastReplyTime expands relative units in Korean", () => 
   );
 });
 
-test("formatThreadSummaryLastReplyTime uses ordinal dates for older replies", () => {
+test("formatThreadSummaryLastReplyTime dates older replies without an ordinal", () => {
   const now = localUnixSeconds(2026, 5, 15);
   const replyAt = localUnixSeconds(2026, 4, 19);
 
   assert.equal(
     formatThreadSummaryLastReplyTime(replyAt, "en", now),
-    "on May 19th",
+    "on May 19",
   );
   // Korean drops the preposition rather than translating it.
   assert.equal(
     formatThreadSummaryLastReplyTime(replyAt, "ko", now),
     "5월 19일",
   );
-});
-
-test("formatDayHeading omits the year for current-year dates", () => {
-  const now = new Date();
-  const date = new Date(now.getFullYear(), (now.getMonth() + 6) % 12, 19, 12);
-
-  assert.equal(
-    formatDayHeading(date.getTime() / 1_000, "en"),
-    `${weekday(date)}, ${month(date)} 19th`,
-  );
-});
-
-test("formatDayHeading includes the year for other years", () => {
-  const year = new Date().getFullYear() - 1;
-  const date = new Date(year, 4, 19, 12);
-
-  assert.equal(
-    formatDayHeading(date.getTime() / 1_000, "en"),
-    `${weekday(date)}, May 19th, ${year}`,
-  );
-});
-
-test("formatDayHeading builds Korean dates year-first and omits ordinals", () => {
-  const lastYear = new Date().getFullYear() - 1;
-  const dated = new Date(lastYear, 4, 19, 12).getTime() / 1_000;
-
-  const heading = formatDayHeading(dated, "ko");
-  assert.match(heading, new RegExp(`^${lastYear}년 5월 19일`));
-  assert.doesNotMatch(heading, /19th/);
-});
-
-test("formatDayHeading translates Today and Yesterday", () => {
-  const now = Date.now() / 1_000;
-  const yesterday = now - 86_400;
-
-  assert.equal(formatDayHeading(now, "en"), "Today");
-  assert.equal(formatDayHeading(now, "ko"), "오늘");
-  assert.equal(formatDayHeading(yesterday, "en"), "Yesterday");
-  assert.equal(formatDayHeading(yesterday, "ko"), "어제");
 });
 
 test("startOfLocalDaySeconds collapses a day's timestamps to one value", () => {

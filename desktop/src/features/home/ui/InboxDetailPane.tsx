@@ -19,7 +19,10 @@ import { ProjectInboxDetail } from "@/features/home/ui/ProjectInboxDetail";
 import { ChannelMembersBar } from "@/features/channels/ui/ChannelMembersBar";
 import { useCommunities } from "@/features/communities/useCommunities";
 import { formatInboxTypeLabel } from "@/features/home/lib/inbox";
-import { hasInboxThreadContext } from "@/features/home/lib/inboxViewHelpers";
+import {
+  hasInboxThreadContext,
+  toTimelineMessage,
+} from "@/features/home/lib/inboxViewHelpers";
 import {
   type InboxDisplayMessage,
   InboxMessageRow,
@@ -29,10 +32,17 @@ import { formatTime } from "@/features/messages/lib/dateFormatters";
 import {
   hasSameMessageAuthor,
   isWithinGroupingWindow,
+  startsNewMessageGroup,
 } from "@/features/messages/lib/messageGrouping";
 import { orderMentionPubkeysByText } from "@/features/messages/lib/orderMentionPubkeys";
+import { canManageMessageForCurrentUser } from "@/features/messages/lib/canManageMessage";
+import { buildEditMentionState } from "@/features/messages/lib/draftMentionRefs";
+import { imetaMediaFromTags } from "@/features/messages/lib/imetaMediaMarkdown";
+import {
+  buildVideoReviewPresentationByMessageId,
+  hasRenderedVideoAttachment,
+} from "@/features/messages/lib/videoReviewContext";
 import { getThreadReference } from "@/features/messages/lib/threading";
-import { normalizePubkey } from "@/shared/lib/pubkey";
 import { MessageComposer } from "@/features/messages/ui/MessageComposer";
 import { useAnchoredScroll } from "@/features/messages/ui/useAnchoredScroll";
 import { useComposerHeightPadding } from "@/features/messages/ui/useComposerHeightPadding";
@@ -42,7 +52,9 @@ import { resolveMentionProps } from "@/shared/lib/resolveMentionNames";
 import { TopChromeInsetHeader } from "@/shared/layout/TopChromeInsetHeader";
 import { useAppLocale } from "@/shared/i18n/useAppLocale";
 import { cn } from "@/shared/lib/cn";
+import { normalizePubkey } from "@/shared/lib/pubkey";
 import { Button } from "@/shared/ui/button";
+import { VideoReviewNavigationProvider } from "@/shared/ui/VideoReviewNavigation";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -61,6 +73,9 @@ const MembersSidebar = React.lazy(async () => {
   return { default: module.MembersSidebar };
 });
 
+const EMPTY_CONTEXT_MESSAGES: InboxContextMessage[] = [];
+const EMPTY_REPLIES: InboxReply[] = [];
+
 type InboxDetailPaneProps = {
   agentPubkeys?: ReadonlySet<string>;
   canDelete: boolean;
@@ -68,7 +83,9 @@ type InboxDetailPaneProps = {
   canReply: boolean;
   disabledReplyReason?: string | null;
   isDeletingMessage?: boolean;
+  isEditingMessage?: boolean;
   isSendingReply?: boolean;
+  editTargetId: string | null;
   isSinglePanelView?: boolean;
   hasThreadContextLoadError?: boolean;
   isThreadContextLoading?: boolean;
@@ -97,6 +114,15 @@ type InboxDetailPaneProps = {
   latchedDefaultParentId?: string | null;
   onBack?: () => void;
   onDelete: () => void;
+  onDeleteMessage: (eventId: string) => void;
+  onEditTargetChange: React.Dispatch<React.SetStateAction<string | null>>;
+  onEditSave: (input: {
+    content: string;
+    eventId: string;
+    mediaTags?: string[][];
+    mentionPubkeys?: string[];
+  }) => Promise<void>;
+  onRequestEmptyEditDelete: (eventId: string) => void;
   onManageChannel: (channelId: string) => void;
   onOpenContext: (
     channelId: string,
@@ -129,7 +155,11 @@ export function InboxDetailPane(props: InboxDetailPaneProps) {
     );
   }
 
-  return <InboxMessageDetailPane {...props} />;
+  return (
+    <VideoReviewNavigationProvider>
+      <InboxMessageDetailPane {...props} />
+    </VideoReviewNavigationProvider>
+  );
 }
 
 function InboxMessageDetailPane({
@@ -138,15 +168,17 @@ function InboxMessageDetailPane({
   canOpenChannel,
   canReply,
   disabledReplyReason,
+  editTargetId,
   isDeletingMessage = false,
+  isEditingMessage = false,
   isSendingReply = false,
   isSinglePanelView = false,
   hasThreadContextLoadError = false,
   isThreadContextLoading = false,
   item,
-  messages = [],
+  messages = EMPTY_CONTEXT_MESSAGES,
   profiles,
-  replies = [],
+  replies = EMPTY_REPLIES,
   channel,
   contextChannelName = null,
   currentPubkey,
@@ -155,6 +187,10 @@ function InboxMessageDetailPane({
   latchedDefaultParentId = null,
   onBack,
   onDelete,
+  onDeleteMessage,
+  onEditTargetChange,
+  onEditSave,
+  onRequestEmptyEditDelete,
   onManageChannel,
   onOpenContext,
   onSendReply,
@@ -180,7 +216,6 @@ function InboxMessageDetailPane({
   // Build the plain, non-virtualized timeline the shared hook anchors against.
   // Live arrivals rerun its layout compensation without changing the target.
 
-  const selectedMessage = messages.find((message) => message.isSelected);
   // A latest reply can represent an Inbox conversation. Resolve the actual
   // root from loaded context or the complete feed group; never treat an
   // unresolved root/profile lookup as an authoritative empty audience.
@@ -204,6 +239,56 @@ function InboxMessageDetailPane({
             .mentionPubkeysByName,
         }
       : null;
+
+  const displayMessages = React.useMemo<InboxDisplayMessage[]>(() => {
+    const selectedMessage = messages.find((message) => message.isSelected);
+    const pendingReplyMessages: InboxDisplayMessage[] = replies.map(
+      (reply) => ({
+        ...reply,
+        depth: reply.depth ?? (selectedMessage?.depth ?? 0) + 1,
+        isSelected: false,
+        mentionNames: [],
+      }),
+    );
+
+    if (messages.length > 0) {
+      return [...messages, ...pendingReplyMessages];
+    }
+    if (!item) return pendingReplyMessages;
+
+    const threadReference = getThreadReference(item.item.tags);
+    return [
+      {
+        authorLabel: item.senderLabel,
+        authorPubkey: item.item.pubkey,
+        avatarUrl: item.avatarUrl,
+        content: item.preview,
+        createdAt: item.item.createdAt,
+        depth: 0,
+        fullTimestampLabel: item.fullTimestampLabel,
+        id: item.id,
+        isSelected: true,
+        mentionNames: item.mentionNames,
+        mentionPubkeysByName: item.mentionPubkeysByName,
+        kind: item.item.kind,
+        parentId: threadReference.parentId,
+        rootId: threadReference.rootId,
+        tags: item.item.tags,
+        timeLabel: formatTime(item.item.createdAt, locale),
+      },
+      ...pendingReplyMessages,
+    ];
+  }, [item, locale, messages, replies]);
+  const videoReviewMessages = React.useMemo(
+    () => displayMessages.map(toTimelineMessage),
+    [displayMessages],
+  );
+  const videoReviewChannelType =
+    item?.item.channelType === "dm" ||
+    item?.item.channelType === "stream" ||
+    item?.item.channelType === "forum"
+      ? item.item.channelType
+      : null;
   const initialAgentPubkeys = rootMessage
     ? currentPubkey &&
       normalizePubkey(rootMessage.authorPubkey) ===
@@ -215,34 +300,51 @@ function InboxMessageDetailPane({
         )
       : []
     : undefined;
-  const pendingReplyMessages: InboxDisplayMessage[] = replies.map((reply) => ({
-    ...reply,
-    depth: reply.depth ?? (selectedMessage?.depth ?? 0) + 1,
-    isSelected: false,
-    mentionNames: [],
-  }));
-  const displayMessages: InboxDisplayMessage[] =
-    messages.length > 0
-      ? [...messages, ...pendingReplyMessages]
-      : item
-        ? [
-            {
-              authorLabel: item.senderLabel,
-              authorPubkey: item.item.pubkey,
-              avatarUrl: item.avatarUrl,
-              content: item.preview,
-              createdAt: item.item.createdAt,
-              depth: 0,
-              fullTimestampLabel: item.fullTimestampLabel,
-              id: item.id,
-              isSelected: true,
-              mentionNames: item.mentionNames,
-              mentionPubkeysByName: item.mentionPubkeysByName,
-              timeLabel: formatTime(item.item.createdAt, locale),
-            },
-            ...pendingReplyMessages,
-          ]
-        : pendingReplyMessages;
+  const handleSendVideoReviewComment = React.useCallback(
+    (
+      message: TimelineMessage,
+      content: string,
+      mentionPubkeys: string[],
+      mediaTags?: string[][],
+      parentEventId?: string,
+    ) =>
+      onSendReply({
+        content,
+        mediaTags,
+        mentionPubkeys,
+        parentEventId: parentEventId ?? message.id,
+      }),
+    [onSendReply],
+  );
+  const videoReviewPresentation = React.useMemo(
+    () =>
+      buildVideoReviewPresentationByMessageId(
+        {
+          channelId: item?.item.channelId,
+          channelName: contextChannelName ?? item?.channelLabel ?? undefined,
+          channelType: videoReviewChannelType,
+          isSendingVideoReviewComment: isSendingReply,
+          messages: videoReviewMessages,
+          onSendVideoReviewComment: canReply
+            ? handleSendVideoReviewComment
+            : undefined,
+          onToggleReaction,
+          profiles,
+        },
+        hasRenderedVideoAttachment,
+      ),
+    [
+      canReply,
+      contextChannelName,
+      handleSendVideoReviewComment,
+      isSendingReply,
+      item,
+      onToggleReaction,
+      profiles,
+      videoReviewChannelType,
+      videoReviewMessages,
+    ],
+  );
   const { onScroll } = useAnchoredScroll({
     channelId: conversationId,
     contentRef,
@@ -384,6 +486,25 @@ function InboxMessageDetailPane({
 
   const replyTarget =
     displayMessages.find((message) => message.id === replyTargetId) ?? null;
+  const editTarget =
+    displayMessages.find((message) => message.id === editTargetId) ?? null;
+  const editMentionState = editTarget
+    ? buildEditMentionState(
+        editTarget.content,
+        editTarget.tags,
+        profiles,
+        (pubkey) => agentPubkeys?.has(pubkey) === true,
+      )
+    : null;
+  const composerEditTarget = editTarget
+    ? {
+        author: editTarget.authorLabel,
+        body: editTarget.content,
+        id: editTarget.id,
+        imetaMedia: imetaMediaFromTags(editTarget.tags),
+        ...editMentionState,
+      }
+    : null;
   // Explicit sub-message reply wins. Otherwise use the captured default parent
   // (derived from the selected-event anchor at conversation entry), which does
   // not change when a live incoming message advances the representative item.
@@ -431,6 +552,14 @@ function InboxMessageDetailPane({
     setReplyTargetId((currentReplyTargetId) =>
       currentReplyTargetId === message.id ? null : message.id,
     );
+    onEditTargetChange(null);
+    focusComposer();
+  };
+  const handleSelectEditTarget = (message: InboxDisplayMessage) => {
+    onEditTargetChange((currentEditTargetId) =>
+      currentEditTargetId === message.id ? null : message.id,
+    );
+    setReplyTargetId(null);
     focusComposer();
   };
 
@@ -496,7 +625,7 @@ function InboxMessageDetailPane({
                 </div>
               </div>
 
-              <TooltipProvider delayDuration={200}>
+              <TooltipProvider>
                 <div className="flex shrink-0 items-center gap-1">
                   <UpdateIndicator />
                   {canOpenChannel && contextChannelId ? (
@@ -581,6 +710,7 @@ function InboxMessageDetailPane({
               const previousMessage = displayMessages[index - 1];
               const isContinuation =
                 !isAfterSeparator &&
+                !startsNewMessageGroup(message) &&
                 hasSameMessageAuthor(
                   { pubkey: previousMessage?.authorPubkey },
                   { pubkey: message.authorPubkey },
@@ -589,6 +719,24 @@ function InboxMessageDetailPane({
                   previousMessage?.createdAt,
                   message.createdAt,
                 );
+
+              const canManageMessage = canManageMessageForCurrentUser(
+                {
+                  id: message.id,
+                  author: message.authorLabel,
+                  body: message.content,
+                  createdAt: message.createdAt,
+                  depth: message.depth,
+                  kind: message.kind,
+                  pubkey: message.authorPubkey,
+                  time: message.timeLabel ?? message.fullTimestampLabel,
+                },
+                currentPubkey,
+                profiles,
+              );
+
+              const canEditMessage =
+                channel?.archivedAt === null && canManageMessage;
 
               return (
                 <InboxMessageRow
@@ -600,9 +748,21 @@ function InboxMessageDetailPane({
                   isFocusHighlightVisible={isFocusHighlightVisible}
                   key={message.id}
                   message={message}
+                  onDelete={
+                    canEditMessage
+                      ? () => onDeleteMessage(message.id)
+                      : undefined
+                  }
+                  onEdit={canEditMessage ? handleSelectEditTarget : undefined}
                   onSelectReplyTarget={handleSelectReplyTarget}
                   onToggleReaction={onToggleReaction}
                   showUnreadBoundary={hasUnreadBoundary}
+                  videoReviewCommentRootId={videoReviewPresentation.commentRootIdsByMessageId.get(
+                    message.id,
+                  )}
+                  videoReviewContext={videoReviewPresentation.contextsByMessageId.get(
+                    message.id,
+                  )}
                 />
               );
             })}
@@ -641,7 +801,6 @@ function InboxMessageDetailPane({
                   ? null
                   : {
                       type: "thread",
-                      threadRootId: item.conversationId,
                       initialAgentPubkeys,
                     }
               }
@@ -649,16 +808,41 @@ function InboxMessageDetailPane({
               channelName={item.channelLabel ?? "channel"}
               channelType={composerChannelType}
               containerClassName="px-4 pb-4 sm:px-4"
-              disabled={!canReply}
+              disabled={!canReply && !composerEditTarget}
               draftKey={
                 isDirectMessage
                   ? (item.item.channelId ?? item.conversationId)
                   : `thread:${item.conversationId}`
               }
-              isSending={isSendingReply}
+              editTarget={composerEditTarget}
+              isSending={isSendingReply || isEditingMessage}
+              onCancelEdit={
+                composerEditTarget ? () => onEditTargetChange(null) : undefined
+              }
               onCancelReply={
                 composerReplyTarget ? () => setReplyTargetId(null) : undefined
               }
+              onEditSave={async (content, mediaTags, mentionPubkeys) => {
+                if (!composerEditTarget) {
+                  return;
+                }
+                // Empty edits are delete shorthand. Keep edit mode active while
+                // confirmation is open so Cancel returns to the editor.
+                const isEmptyDeletion =
+                  content.trim().length === 0 &&
+                  (mediaTags === undefined || mediaTags.length === 0);
+                if (isEmptyDeletion) {
+                  onRequestEmptyEditDelete(composerEditTarget.id);
+                  return;
+                }
+                await onEditSave({
+                  content,
+                  eventId: composerEditTarget.id,
+                  mediaTags,
+                  mentionPubkeys,
+                });
+                onEditTargetChange(null);
+              }}
               onSend={(content, mentionPubkeys, mediaTags) =>
                 onSendReply({
                   content,

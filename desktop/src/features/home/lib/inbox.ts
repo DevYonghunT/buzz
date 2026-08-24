@@ -18,6 +18,12 @@ import type {
   HomeFeedResponse,
   RelayEvent,
 } from "@/shared/api/types";
+import {
+  formatDayGroupLabel,
+  formatItemTimestamp,
+} from "@/shared/lib/datetime";
+import { formatDateTime } from "@/shared/i18n/formatters";
+import { type AppLocale, FALLBACK_APP_LOCALE } from "@/shared/i18n/locale";
 import { resolveMentionProps } from "@/shared/lib/resolveMentionNames";
 
 export type InboxFilter =
@@ -86,6 +92,7 @@ export type InboxReply = {
    */
   signerPubkey?: string;
   tags?: string[][];
+  /** Clock time only, for the hover gutter on continuation rows. */
   timeLabel?: string;
 };
 
@@ -103,43 +110,13 @@ export type InboxGroup = {
 
 type InboxChannel = Pick<Channel, "channelType" | "id" | "name">;
 
-const listTimeFormatter = new Intl.DateTimeFormat("en-US", {
-  hour: "numeric",
-  minute: "2-digit",
-});
-
-const fullTimeFormatter = new Intl.DateTimeFormat("en-US", {
+const FULL_TIME_OPTIONS: Intl.DateTimeFormatOptions = {
   month: "short",
   day: "numeric",
   year: "numeric",
   hour: "numeric",
   minute: "2-digit",
-});
-
-const shortDateFormatter = new Intl.DateTimeFormat("en-US", {
-  month: "short",
-  day: "numeric",
-});
-
-const shortDateWithYearFormatter = new Intl.DateTimeFormat("en-US", {
-  month: "short",
-  day: "numeric",
-  year: "numeric",
-});
-
-const weekdayFormatter = new Intl.DateTimeFormat("en-US", {
-  weekday: "long",
-});
-
-function startOfDay(value: Date) {
-  return new Date(value.getFullYear(), value.getMonth(), value.getDate());
-}
-
-function diffInDays(from: Date, to: Date) {
-  return Math.round(
-    (startOfDay(from).getTime() - startOfDay(to).getTime()) / 86_400_000,
-  );
-}
+};
 
 function tagValue(item: FeedItem, name: string) {
   return item.tags.find((tag) => tag[0] === name)?.[1]?.trim() || null;
@@ -154,8 +131,8 @@ function projectRootItem(item: FeedItem, groupItems: readonly FeedItem[]) {
 }
 
 function projectTypeLabel(item: FeedItem) {
-  if (item.kind === 1618) return "Pull request";
-  if (item.kind === 1621) return "Issue";
+  if (item.kind === 1618) return "Review";
+  if (item.kind === 1621) return "Task";
   return "Project update";
 }
 
@@ -444,28 +421,22 @@ export function findInboxItemByEventId(
   );
 }
 
-function formatInboxTimestamp(unixSeconds: number) {
-  const date = new Date(unixSeconds * 1_000);
-  const now = new Date();
-  const dayDiff = diffInDays(now, date);
-
-  if (dayDiff === 0) {
-    return listTimeFormatter.format(date);
-  }
-
-  if (dayDiff === 1) {
-    return "Yesterday";
-  }
-
-  if (now.getFullYear() === date.getFullYear()) {
-    return shortDateFormatter.format(date);
-  }
-
-  return shortDateWithYearFormatter.format(date);
+function formatInboxTimestamp(
+  unixSeconds: number,
+  locale: AppLocale = FALLBACK_APP_LOCALE,
+) {
+  return formatItemTimestamp(unixSeconds, { locale });
 }
 
-export function formatInboxFullTimestamp(unixSeconds: number) {
-  return fullTimeFormatter.format(new Date(unixSeconds * 1_000));
+export function formatInboxFullTimestamp(
+  unixSeconds: number,
+  locale: AppLocale = FALLBACK_APP_LOCALE,
+) {
+  return formatDateTime(
+    new Date(unixSeconds * 1_000),
+    locale,
+    FULL_TIME_OPTIONS,
+  );
 }
 
 export function relayEventFromFeedItem(item: FeedItem): RelayEvent {
@@ -480,21 +451,35 @@ export function relayEventFromFeedItem(item: FeedItem): RelayEvent {
   };
 }
 
-export function groupInboxItems(items: InboxItem[]): InboxGroup[] {
+type GroupInboxItemsOptions = {
+  locale?: AppLocale;
+  nowSeconds?: number;
+};
+
+export function groupInboxItems(
+  items: InboxItem[],
+  options?: GroupInboxItemsOptions,
+): InboxGroup[];
+/** @deprecated Pass `{ nowSeconds }` so locale can be supplied alongside it. */
+export function groupInboxItems(
+  items: InboxItem[],
+  nowSeconds?: number,
+): InboxGroup[];
+export function groupInboxItems(
+  items: InboxItem[],
+  options: GroupInboxItemsOptions | number = {},
+): InboxGroup[] {
+  const normalizedOptions: GroupInboxItemsOptions =
+    typeof options === "number" ? { nowSeconds: options } : options;
+  const { locale = FALLBACK_APP_LOCALE, nowSeconds = Date.now() / 1_000 } =
+    normalizedOptions;
   const groups = new Map<string, InboxItem[]>();
-  const now = new Date();
 
   for (const item of items) {
-    const date = new Date(item.latestActivityAt * 1_000);
-    const dayDiff = diffInDays(now, date);
-    const label =
-      dayDiff === 0
-        ? "Today"
-        : dayDiff === 1
-          ? "Yesterday"
-          : dayDiff < 7
-            ? weekdayFormatter.format(date)
-            : shortDateWithYearFormatter.format(date);
+    const label = formatDayGroupLabel(item.latestActivityAt, {
+      locale,
+      nowSeconds,
+    });
 
     const current = groups.get(label) ?? [];
     current.push(item);
@@ -514,6 +499,7 @@ export function buildInboxItems({
   getChannelReadAt,
   getMessageReadAt,
   getThreadReadAt,
+  locale = FALLBACK_APP_LOCALE,
   profiles,
 }: {
   channels?: InboxChannel[];
@@ -525,6 +511,7 @@ export function buildInboxItems({
     rootId: string,
     channelId?: string | null,
   ) => number | null;
+  locale?: AppLocale;
   profiles?: UserProfileLookup;
 }): InboxItem[] {
   if (!feed) {
@@ -658,7 +645,7 @@ export function buildInboxItems({
         categories,
         categoryLabel,
         channelLabel,
-        fullTimestampLabel: formatInboxFullTimestamp(item.createdAt),
+        fullTimestampLabel: formatInboxFullTimestamp(item.createdAt, locale),
         groupItems: group.items,
         isActionRequired: categories.includes("needs_action"),
         latestActivityAt: group.latestActivityAt,
@@ -667,7 +654,7 @@ export function buildInboxItems({
         preview,
         senderLabel,
         subject,
-        timestampLabel: formatInboxTimestamp(group.latestActivityAt),
+        timestampLabel: formatInboxTimestamp(group.latestActivityAt, locale),
         unreadCount: unreadItems.length,
       };
     });

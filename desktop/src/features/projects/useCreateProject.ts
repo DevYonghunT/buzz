@@ -1,134 +1,153 @@
+import * as React from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import {
-  channelsQueryKey,
-  upsertCachedChannel,
-} from "@/features/channels/hooks";
-import {
-  eventToProject,
   fetchProjects,
   type Project,
   projectsQueryKey,
 } from "@/features/projects/hooks";
+import {
+  buildInitialProjectEventTemplates,
+  isUnsupportedProjectKindError,
+} from "@/features/projects/projectCreation";
+import { addProjectToSidebar } from "@/features/projects/lib/projectSidebarMembership";
+import { buildProjectReadModels } from "@/features/projects/projectModels";
 import { resolveProjectRelayBase } from "@/features/projects/projectRelayBase";
 import { relayClient } from "@/shared/api/relayClient";
-import { createChannel, signRelayEvent } from "@/shared/api/tauri";
-import type { Channel, ChannelVisibility } from "@/shared/api/types";
-import { KIND_REPO_ANNOUNCEMENT } from "@/shared/constants/kinds";
+import { signRelayEvent } from "@/shared/api/tauri";
+import { getIdentity } from "@/shared/api/tauriIdentity";
 
 export type CreateProjectInput = {
+  accessChannelId: string;
   name: string;
-  repositoryId: string;
-  visibility: ChannelVisibility;
   description?: string;
+  cloneUrl?: string;
   webUrl?: string;
 };
 
 export type CreateProjectResult = {
-  channel: Channel;
   project: Project;
+  compatibilityWarning?: string;
 };
 
-const PROJECT_REPOSITORY_ID_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
-
-/** Returns the first validation error for a relay-backed repository ID. */
-export function projectRepositoryIdError(value: string): string | null {
-  const repositoryId = value.trim();
-  if (!repositoryId) {
-    return "Repository ID is required.";
-  }
-  if (!PROJECT_REPOSITORY_ID_PATTERN.test(repositoryId)) {
-    return "Repository ID must be 1–64 characters using only letters, numbers, dots, underscores, and hyphens.";
-  }
-  if (repositoryId.startsWith(".")) {
-    return "Repository ID must not start with a dot.";
-  }
-  if (repositoryId.includes("..")) {
-    return "Repository ID must not contain consecutive dots.";
-  }
-  return null;
-}
-
-/** Publishes a NIP-34 repo announcement so the project appears on the relay. */
+/** Publishes a project announcement and its initial NIP-34 repository. */
 async function createProject(
   input: CreateProjectInput,
+  resumableProjectIds: Set<string>,
 ): Promise<CreateProjectResult> {
-  const name = input.name.trim();
-  if (!name) {
-    throw new Error("Project name is required.");
-  }
-  const repositoryId = input.repositoryId.trim();
-  const repositoryIdError = projectRepositoryIdError(repositoryId);
-  if (repositoryIdError) {
-    throw new Error(repositoryIdError);
-  }
-
+  const identity = await getIdentity();
+  const relayOrigin = await resolveProjectRelayBase();
+  const templates = buildInitialProjectEventTemplates({
+    ...input,
+    ownerPubkey: identity.pubkey,
+  });
   const existing = await fetchProjects();
-  if (existing.some((project) => project.dtag === repositoryId)) {
-    throw new Error(`Repository ID "${repositoryId}" is already in use.`);
-  }
-
-  const description = input.description?.trim() ?? "";
-  const channel = await createChannel({
-    channelType: "stream",
-    description: description || undefined,
-    name,
-    visibility: input.visibility,
-  });
-
-  const tags: string[][] = [
-    ["d", repositoryId],
-    ["name", name],
-    ["buzz-channel", channel.id],
-  ];
-  if (description) {
-    tags.push(["description", description]);
-  }
-  const webUrl = input.webUrl?.trim();
-  if (webUrl) {
-    tags.push(["web", webUrl]);
-  }
-
-  const event = await signRelayEvent({
-    kind: KIND_REPO_ANNOUNCEMENT,
-    content: description,
-    tags,
-  });
-
-  await relayClient.publishEvent(
-    event,
-    "Timed out creating project.",
-    "Failed to create project.",
+  const ownerPubkey = identity.pubkey.toLowerCase();
+  const existingProject = existing.find(
+    (project) =>
+      project.owner.toLowerCase() === ownerPubkey &&
+      project.dtag === templates.dtag,
   );
-  const relayBase = await resolveProjectRelayBase();
+  const projectId = `${ownerPubkey}:${templates.dtag}`;
+  const canResume = resumableProjectIds.has(projectId);
+  if (existingProject && !canResume) {
+    throw new Error(`You already have a project named "${templates.dtag}".`);
+  }
+  if (existingProject && !existingProject.legacy) {
+    if (
+      existingProject.repositories.some(
+        (repository) => repository.repoAddress === templates.repositoryAddress,
+      )
+    ) {
+      resumableProjectIds.delete(projectId);
+      return { project: existingProject };
+    }
+    throw new Error(`You already have a project named "${templates.dtag}".`);
+  }
 
-  return {
-    channel,
-    project: eventToProject(event, relayBase),
-  };
+  resumableProjectIds.add(projectId);
+  const projectEvent = await signRelayEvent(templates.project);
+
+  let repositoryEvent = null;
+  if (!existingProject) {
+    repositoryEvent = await signRelayEvent(templates.repository);
+    await relayClient.publishEvent(
+      repositoryEvent,
+      "Timed out creating the initial repository.",
+      "Failed to create the initial repository.",
+    );
+  }
+
+  try {
+    await relayClient.publishEvent(
+      projectEvent,
+      "Timed out creating project.",
+      "Failed to create project.",
+    );
+  } catch (error) {
+    if (!isUnsupportedProjectKindError(error)) throw error;
+
+    const [legacyProject] = existingProject?.legacy
+      ? [existingProject]
+      : buildProjectReadModels({
+          projectEvents: [],
+          repositoryEvents: repositoryEvent ? [repositoryEvent] : [],
+          relayOrigin,
+        });
+    if (!legacyProject) throw error;
+
+    resumableProjectIds.delete(projectId);
+    return {
+      project: legacyProject,
+      compatibilityWarning:
+        "The repository was created, but this relay does not support multi-repository projects yet. It will appear as a standalone project.",
+    };
+  }
+
+  const [project] = repositoryEvent
+    ? buildProjectReadModels({
+        projectEvents: [projectEvent],
+        repositoryEvents: [repositoryEvent],
+        relayOrigin,
+      })
+    : (await fetchProjects()).filter(
+        (candidate) =>
+          candidate.owner.toLowerCase() === ownerPubkey &&
+          candidate.dtag === templates.dtag &&
+          !candidate.legacy,
+      );
+  if (!project) {
+    throw new Error("The project was created but could not be read.");
+  }
+  resumableProjectIds.delete(projectId);
+  return { project };
 }
 
-/** Mutation that creates a project with its stream and updates both caches. */
+/** Mutation that creates a project and inserts it into the projects cache. */
 export function useCreateProjectMutation() {
   const queryClient = useQueryClient();
+  const resumableProjectIdsRef = React.useRef(new Set<string>());
 
   return useMutation({
-    mutationFn: createProject,
-    onSuccess: ({ channel, project }) => {
-      queryClient.setQueryData<Channel[]>(channelsQueryKey, (current) =>
-        upsertCachedChannel(current, channel),
-      );
+    mutationFn: (input: CreateProjectInput) =>
+      createProject(input, resumableProjectIdsRef.current),
+    onSuccess: ({ project }) => {
+      void resolveProjectRelayBase().then((relayOrigin) => {
+        addProjectToSidebar(project.projectAddress, relayOrigin, project.owner);
+      });
       queryClient.setQueryData<Project[]>(projectsQueryKey, (current = []) => [
         project,
-        ...current.filter((candidate) => candidate.id !== project.id),
+        ...current.filter(
+          (candidate) =>
+            candidate.id !== project.id &&
+            !(
+              candidate.legacy &&
+              candidate.owner === project.owner &&
+              candidate.dtag === project.dtag
+            ),
+        ),
       ]);
       void queryClient.invalidateQueries({ queryKey: projectsQueryKey });
-    },
-    onSettled: () => {
-      void queryClient.invalidateQueries({
-        queryKey: channelsQueryKey,
-        refetchType: "none",
-      });
     },
   });
 }

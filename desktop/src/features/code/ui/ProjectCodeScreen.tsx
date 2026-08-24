@@ -15,6 +15,7 @@ import {
   useProjectLocalRepoSnapshotQuery,
   useProjectQuery,
 } from "@/features/projects/hooks";
+import { selectProjectRepository } from "@/features/projects/projectModels";
 import {
   projectTerminalLabel,
   useOpenProjectTerminal,
@@ -90,12 +91,13 @@ export function ProjectCodeScreen({
   const { goProject, goProjects } = useAppNavigation();
   const projectQuery = useProjectQuery(projectId);
   const project = projectQuery.data;
+  const repository = selectProjectRepository(project, null);
   const baseRef =
-    requestedBaseRef?.trim() || project?.defaultBranch?.trim() || "HEAD";
+    requestedBaseRef?.trim() || repository?.defaultBranch.trim() || "HEAD";
   const terminalBranch =
-    baseRef === "HEAD" ? project?.defaultBranch?.trim() || null : baseRef;
+    baseRef === "HEAD" ? repository?.defaultBranch.trim() || null : baseRef;
   const localRepositoryQuery = useProjectLocalRepoSnapshotQuery(
-    project,
+    repository,
     activeCommunity?.reposDir,
     baseRef,
   );
@@ -103,11 +105,11 @@ export function ProjectCodeScreen({
   const [isOpeningTerminal, setIsOpeningTerminal] = React.useState(false);
   const handleOpenProjectTerminal = React.useCallback(
     async (hasLocalCheckout: boolean) => {
-      if (!project || isOpeningTerminal) return;
+      if (!repository || isOpeningTerminal) return;
 
       setIsOpeningTerminal(true);
       try {
-        await openProjectTerminal(project, {
+        await openProjectTerminal(repository, {
           branch: terminalBranch,
           hasLocalCheckout,
         });
@@ -115,7 +117,7 @@ export function ProjectCodeScreen({
         setIsOpeningTerminal(false);
       }
     },
-    [isOpeningTerminal, openProjectTerminal, project, terminalBranch],
+    [isOpeningTerminal, openProjectTerminal, repository, terminalBranch],
   );
   const repositoryRoot = localRepositoryQuery.data?.path ?? "";
   const isEmptyLocalRepository =
@@ -173,7 +175,7 @@ export function ProjectCodeScreen({
     );
   }
 
-  if (!project) {
+  if (!project || !repository) {
     return (
       <CodeBootstrapState
         action={

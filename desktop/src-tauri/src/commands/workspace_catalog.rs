@@ -120,10 +120,12 @@ impl CatalogEffects for RelayEffects<'_> {
     }
 
     async fn list_channels(&self) -> Result<Vec<ChannelRef>, EffectError> {
-        let channels = crate::commands::channels::get_channels(self.state.clone())
+        let channels = crate::commands::channels::get_channels(None, self.state.clone())
             .await
             .map_err(EffectError)?;
         Ok(channels
+            .channels
+            .unwrap_or_default()
             .into_iter()
             .filter_map(|c| {
                 Uuid::parse_str(&c.id)
@@ -400,7 +402,7 @@ fn gate_decision(requires_membership: bool, membership: &serde_json::Value) -> R
 /// 일습을 만드는 것」이다. 설계 근거: docs/schoolx-2/CATALOG_SECURITY.md §3·§4.
 async fn require_community_admin(state: &State<'_, AppState>) -> Result<(), String> {
     let requires_membership =
-        crate::commands::relay_members::relay_requires_membership(state.clone()).await?;
+        crate::commands::relay_members::relay_requires_membership(None, state.clone()).await?;
     // 명부가 존재할 수 있을 때만 조회한다. 오픈 릴레이에서는 왕복이 낭비고,
     // 응답도 언제나 `{"member": null}`이라 판정에 보탤 것이 없다.
     let membership = if requires_membership {

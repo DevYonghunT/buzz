@@ -678,14 +678,20 @@ fresh-install `en-US`→영어, 미지원 `ja-JP`→한국어, 한·영 양방�
 
 | 항목 | 값 |
 |---|---|
-| 마지막 확인 SHA | `b1b283cd4c7f926e12eeee8ae1f38c7471922b16` |
-| 확인 일시 | 2026-08-01 |
-| 받은 커밋 수 | 118 (`3a4bf513`부터) |
-| 병합 전 SchoolX tip | `a90879c8` (`schoolx-pre-upstream-sync-20260801-1014` 브랜치로 보존) |
-| 텍스트 충돌 | 8개 — `Cargo.toml`, `crates/buzz-db/src/migration.rs`, `crates/buzz-relay/src/handlers/ingest.rs`, `desktop/scripts/check-file-sizes.mjs`, `desktop/src-tauri/src/huddle/models.rs`, `desktop/src-tauri/tauri.conf.json`, `desktop/src/app/AppShell.tsx`, `desktop/tests/helpers/bridge.ts` |
-| 병합 커밋 | `5e9e40f3` (후속 `7c6ab8d2`) |
+| 마지막 확인 SHA | `0720f5380ce8a6c050afac159f8462c06cd51ab5` |
+| 확인 일시 | 2026-08-24 |
+| 받은 커밋 수 | 402 (`b1b283cd` 이후) |
+| 병합 전 SchoolX tip | `6ed25456` (`schoolx-pre-upstream-sync-20260824-1459` 브랜치로 보존) |
+| 텍스트 충돌 | 60개 — workspace/lockfile, relay admission·workflow, desktop Code·huddle·managed-agent Rust, Home·Inbox·Projects·Settings React, E2E bridge 범주 |
+| 병합 커밋 | `9165db101` |
 
 다음 동기화 때 이 표의 SHA를 갱신한다.
+
+이번 동기화에서는 자동 병합 결과도 별도로 점검했다. channel find UI를 새
+huddle 레이아웃에 다시 연결하고, Home/Inbox의 locale-aware 시간 형식과
+Project→Repository 선택 경계를 함께 보존했다. relay에서는 workflow agent의
+member-only 채널 가시성과 presence kind import를 복구했으며, desktop Code의
+file-size ratchet은 상한이나 allowlist 변경 없이 sibling module 분리로 복구한다.
 
 ### 롤백 브랜치 이름은 분 단위다
 

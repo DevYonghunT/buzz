@@ -2,7 +2,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import * as React from "react";
 import { toast } from "sonner";
 
-import type { Project } from "@/features/projects/hooks";
+import type { Repository } from "@/features/projects/hooks";
+import { projectCloneErrorPresentation } from "@/features/projects/lib/projectGitError";
 import { openProjectTerminal } from "@/shared/api/projectGit";
 
 export function projectTerminalLabel(hasLocalCheckout: boolean) {
@@ -20,7 +21,7 @@ export function useOpenProjectTerminal(reposDir?: string | null) {
 
   return React.useCallback(
     async (
-      project: Project,
+      project: Repository,
       options: { branch?: string | null; hasLocalCheckout: boolean },
     ) => {
       const toastId = options.hasLocalCheckout
@@ -46,10 +47,17 @@ export function useOpenProjectTerminal(reposDir?: string | null) {
           void queryClient.invalidateQueries({ queryKey: ["projects"] });
         }
       } catch (error) {
-        toast.error(
-          error instanceof Error ? error.message : "Failed to open terminal",
-          { id: toastId },
-        );
+        const presentation = options.hasLocalCheckout
+          ? {
+              title: "Couldn’t open terminal",
+              description:
+                "Buzz could not open this checkout in your configured terminal.",
+            }
+          : projectCloneErrorPresentation(error, project.cloneUrls[0]);
+        toast.error(presentation.title, {
+          description: presentation.description,
+          id: toastId,
+        });
       }
     },
     [queryClient, reposDir],
