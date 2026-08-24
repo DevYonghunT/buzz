@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 840 240" role="img" aria-labelledby="title desc">
+  <title id="title">SchoolX</title>
+  <desc id="desc">SchoolX horizontal brand logo.</desc>
+  <g transform="translate(16 16) scale(.8125)">
+    <path fill="#355649" d="M24 24h42l58 58v43l-28-28V86L24 24Z"/>
+    <path fill="#7F967A" d="M24 232h42l58-58v-43l-28 28v11l-72 62Z"/>
+    <path fill="#B85A3C" d="M232 24h-42l-58 58v43l28-28V86l72-62Z"/>
+    <path fill="#D7A94B" d="M232 232h-42l-58-58v-43l28 28v11l72 62Z"/>
+    <path fill="#F4EDDD" d="m101 94 19 13v51l-19-13V94Zm54 0-19 13v51l19-13V94Z"/>
+    <path fill="#1F2937" d="M125 105h6v56h-6z"/>
+  </g>
+  <text x="252" y="158" fill="#1F2937" font-family="Pretendard Variable, Pretendard, Inter, Arial, sans-serif" font-size="112" font-weight="700" letter-spacing="-4">SchoolX</text>
+</svg>

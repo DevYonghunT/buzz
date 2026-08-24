@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1320 1000" role="img" aria-labelledby="title desc">
+  <title id="title">SchoolX installer background</title>
+  <desc id="desc">SchoolX branded disk image background with a visual drag direction from the app to Applications.</desc>
+  <defs>
+    <linearGradient id="header" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#29483D"/>
+      <stop offset="1" stop-color="#355649"/>
+    </linearGradient>
+    <linearGradient id="canvas" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F4EDDD"/>
+      <stop offset="1" stop-color="#EDE3CF"/>
+    </linearGradient>
+    <filter id="panel-shadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="12" stdDeviation="18" flood-color="#1F2937" flood-opacity=".12"/>
+    </filter>
+  </defs>
+  <rect width="1320" height="1000" fill="url(#canvas)"/>
+  <rect width="1320" height="306" fill="url(#header)"/>
+  <path d="M0 250C180 318 335 286 500 250s325-52 480 6 250 54 340 9v52H0z" fill="#7F967A" opacity=".2"/>
+  <!-- Vector copy of schoolx-logo-reversed.svg so native SVG renderers do not
+       need to resolve an external file while producing the DMG bitmap. -->
+  <g transform="translate(240 34)">
+    <g transform="translate(16 16) scale(.8125)">
+      <path fill="#7F967A" d="M24 24h42l58 58v43l-28-28V86L24 24Z"/>
+      <path fill="#F4EDDD" d="M24 232h42l58-58v-43l-28 28v11l-72 62Z"/>
+      <path fill="#D97958" d="M232 24h-42l-58 58v43l28-28V86l72-62Z"/>
+      <path fill="#D7A94B" d="M232 232h-42l-58-58v-43l28 28v11l72 62Z"/>
+      <path fill="#355649" d="m101 94 19 13v51l-19-13V94Zm54 0-19 13v51l19-13V94Z"/>
+      <path fill="#F4EDDD" d="M125 105h6v56h-6z"/>
+    </g>
+    <text x="252" y="158" fill="#F4EDDD" font-family="Pretendard Variable, Pretendard, Inter, Arial, sans-serif" font-size="112" font-weight="700" letter-spacing="-4">SchoolX</text>
+  </g>
+  <rect x="108" y="338" width="1104" height="592" rx="46" fill="#FFFCF5" stroke="#D7CCB6" stroke-width="3" filter="url(#panel-shadow)"/>
+  <path d="M570 660h172m-34-34 34 34-34 34" fill="none" stroke="#7F967A" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

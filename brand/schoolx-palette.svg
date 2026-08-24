@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 720" role="img" aria-labelledby="title desc">
+  <title id="title">SchoolX color palette</title>
+  <desc id="desc">The six-color SchoolX brand palette with names, hex codes, and intended roles.</desc>
+  <rect width="1400" height="720" fill="#F4EDDD"/>
+  <text x="80" y="104" fill="#1F2937" font-family="Pretendard Variable, Pretendard, Inter, Arial, sans-serif" font-size="52" font-weight="750" letter-spacing="-1">SchoolX Color System</text>
+  <text x="80" y="148" fill="#4A5063" font-family="Pretendard Variable, Pretendard, Inter, Arial, sans-serif" font-size="22">Warm intelligence · Trusted collaboration · Human-centered AI</text>
+  <g font-family="Pretendard Variable, Pretendard, Inter, Arial, sans-serif">
+    <g transform="translate(80 210)">
+      <rect width="380" height="180" rx="28" fill="#355649"/>
+      <text x="28" y="116" fill="#FFFFFF" font-size="34" font-weight="700">Pine</text>
+      <text x="28" y="150" fill="#FFFFFF" font-size="22">#355649 · Primary</text>
+    </g>
+    <g transform="translate(510 210)">
+      <rect width="380" height="180" rx="28" fill="#B85A3C"/>
+      <text x="28" y="116" fill="#FFFFFF" font-size="34" font-weight="700">Terracotta</text>
+      <text x="28" y="150" fill="#FFFFFF" font-size="22">#B85A3C · Action</text>
+    </g>
+    <g transform="translate(940 210)">
+      <rect width="380" height="180" rx="28" fill="#1F2937"/>
+      <text x="28" y="116" fill="#FFFFFF" font-size="34" font-weight="700">Ink</text>
+      <text x="28" y="150" fill="#FFFFFF" font-size="22">#1F2937 · Text</text>
+    </g>
+    <g transform="translate(80 440)">
+      <rect width="380" height="180" rx="28" fill="#F4EDDD" stroke="#C9BBA1" stroke-width="3"/>
+      <text x="28" y="116" fill="#1F2937" font-size="34" font-weight="700">Parchment</text>
+      <text x="28" y="150" fill="#4A5063" font-size="22">#F4EDDD · Canvas</text>
+    </g>
+    <g transform="translate(510 440)">
+      <rect width="380" height="180" rx="28" fill="#D7A94B"/>
+      <text x="28" y="116" fill="#1F2937" font-size="34" font-weight="700">Warm Gold</text>
+      <text x="28" y="150" fill="#1F2937" font-size="22">#D7A94B · Highlight</text>
+    </g>
+    <g transform="translate(940 440)">
+      <rect width="380" height="180" rx="28" fill="#7F967A"/>
+      <text x="28" y="116" fill="#1F2937" font-size="34" font-weight="700">Sage</text>
+      <text x="28" y="150" fill="#1F2937" font-size="22">#7F967A · Support</text>
+    </g>
+  </g>
+</svg>
