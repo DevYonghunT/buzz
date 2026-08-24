@@ -1,6 +1,15 @@
 const GIT_WRITE_SOURCE: &str = include_str!("git_write/git_command.rs");
 const GIT_WRITE_CAPTURE_SOURCE: &str = include_str!("git_write/git_command/capture.rs");
-const PINNED_GIT_SOURCE: &str = include_str!("worktrees.rs");
+const PINNED_GIT_SOURCE: &str = concat!(
+    include_str!("worktrees.rs"),
+    include_str!("worktrees/execution_root.rs"),
+    include_str!("worktrees/git.rs"),
+    include_str!("worktrees/pinned_command.rs"),
+    include_str!("worktrees/pinned_operation.rs"),
+    include_str!("worktrees/pinned_verify.rs"),
+    include_str!("worktrees/process.rs"),
+    include_str!("worktrees/repository.rs"),
+);
 const REMOVAL_GIT_SOURCE: &str = include_str!("bindings/removal/physical/unix.rs");
 const LINUX_LAUNCH_SOURCE: &str = include_str!("git_launch.rs");
 const MACOS_XPC_SOURCE: &str = include_str!("macos_git_xpc.rs");
@@ -33,7 +42,7 @@ fn production_code_git_self_reexec_dispatch_is_absent() {
     assert!(GIT_WRITE_SOURCE
         .contains("#[cfg(all(unix, not(target_os = \"linux\"), test))]\nfn spawn_helper"));
     assert!(PINNED_GIT_SOURCE.contains(
-        "#[cfg(all(unix, not(target_os = \"linux\"), test))]\nfn spawn_pinned_git_path_helper_child"
+        "#[cfg(all(unix, not(target_os = \"linux\"), test))]\npub(super) fn spawn_pinned_git_path_helper_child"
     ));
     assert!(REMOVAL_GIT_SOURCE
         .contains("#[cfg(all(not(target_os = \"linux\"), test))]\n    let mut captured"));
@@ -379,7 +388,7 @@ fn high_level_git_operations_hold_one_explicit_macos_end_fence() {
         "prepare_execution_root_with_merge_target_inner",
         "revalidate_execution_root_with_authority",
         "prove_direct_local_ancestry_with_hook_inner",
-        "#[cfg(not(unix))]\nfn run_git_until(",
+        "#[cfg(not(unix))]\npub(super) fn run_git_until(",
     ] {
         assert!(
             PINNED_GIT_SOURCE.contains(required),

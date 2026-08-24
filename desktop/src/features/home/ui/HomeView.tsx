@@ -3,7 +3,6 @@ import { RefreshCcw } from "lucide-react";
 
 import { useAppShell } from "@/app/AppShellContext";
 import { useAppNavigation } from "@/app/navigation/useAppNavigation";
-import { useKnownAgentPubkeys } from "@/features/agents/useKnownAgentPubkeys";
 import { useChannelsQuery, useOpenDmMutation } from "@/features/channels/hooks";
 import { RightAuxiliaryPane } from "@/features/channels/ui/RightAuxiliaryPane";
 import { ChannelManagementSheet } from "@/features/channels/ui/ChannelManagementSheet";
@@ -17,7 +16,7 @@ import {
 } from "@/features/home/lib/inbox";
 import { useInboxSelectionAnchor } from "@/features/home/useInboxSelectionAnchor";
 import { useInboxEditMessage } from "@/features/home/useInboxEditMessage";
-import { useOwnedAgentPubkeys } from "@/features/home/useOwnedAgentPubkeys";
+import { useHomeInboxProfiles } from "@/features/home/useHomeInboxProfiles";
 import {
   filterInboxItems,
   matchesInboxFilter,
@@ -51,22 +50,18 @@ import {
   useChannelMessagesQuery,
   useToggleReactionMutation,
 } from "@/features/messages/hooks";
-import { collectMessageMentionPubkeys } from "@/features/messages/lib/formatTimelineMessages";
 import { formatTime } from "@/features/messages/lib/dateFormatters";
 import { DeleteMessageConfirmDialog } from "@/features/messages/ui/DeleteMessageConfirmDialog";
 import { splitOutgoingTags } from "@/features/messages/lib/imetaMediaMarkdown";
 import { getThreadReference } from "@/features/messages/lib/threading";
-import { useUsersBatchQuery } from "@/features/profile/hooks";
 import { useRelaySelfQuery } from "@/features/moderation/hooks";
 import { resolveUserLabel } from "@/features/profile/lib/identity";
 import { useRemindLater } from "@/features/reminders/ui/RemindMeLaterProvider";
 import { deleteMessage, sendChannelMessage } from "@/shared/api/tauri";
 import type { Channel, HomeFeedResponse } from "@/shared/api/types";
-import { KIND_REACTION } from "@/shared/constants/kinds";
 import { topChromeInset } from "@/shared/layout/chromeLayout";
 import { useAppLocale } from "@/shared/i18n/useAppLocale";
 import { cn } from "@/shared/lib/cn";
-import { normalizePubkey } from "@/shared/lib/pubkey";
 import { useElementWidth } from "@/shared/hooks/use-mobile";
 import { useThreadPanelWidth } from "@/shared/hooks/useThreadPanelWidth";
 import { AUXILIARY_PANEL_SINGLE_COLUMN_BREAKPOINT_PX } from "@/shared/layout/AuxiliaryPanel";
@@ -320,56 +315,17 @@ export function HomeView({
     threadContext.refreshStructuralEvents,
   );
 
-  const feedProfilePubkeys = React.useMemo(
-    () => [
-      ...new Set([
-        ...feedItems.map((item) => item.pubkey),
-        ...collectMessageMentionPubkeys(feedItems),
-        ...threadContext.events.map((event) => event.pubkey),
-        ...collectMessageMentionPubkeys(threadContext.events),
-        ...(channelMessages ?? [])
-          .filter((event) => event.kind === KIND_REACTION)
-          .map((event) => event.pubkey),
-        ...(currentPubkey ? [currentPubkey] : []),
-      ]),
-    ],
-    [channelMessages, currentPubkey, feedItems, threadContext.events],
-  );
-  const feedProfilesQuery = useUsersBatchQuery(feedProfilePubkeys, {
-    enabled: feedProfilePubkeys.length > 0,
-  });
-  const feedProfiles = feedProfilesQuery.data?.profiles;
-  const ownedAgentPubkeys = useOwnedAgentPubkeys(
-    true,
+  const {
+    feedOwnerProfiles,
     feedProfiles,
+    inboxAgentPubkeys,
+    ownedAgentPubkeys,
+  } = useHomeInboxProfiles({
+    channelMessages,
     currentPubkey,
-  );
-  const feedOwnerPubkeys = React.useMemo(
-    () => [
-      ...new Set(
-        Object.values(feedProfiles ?? {})
-          .map((profile) => profile.ownerPubkey)
-          .filter((pubkey): pubkey is string => Boolean(pubkey)),
-      ),
-    ],
-    [feedProfiles],
-  );
-  const feedOwnerProfilesQuery = useUsersBatchQuery(feedOwnerPubkeys, {
-    enabled: feedOwnerPubkeys.length > 0,
+    feedItems,
+    threadEvents: threadContext.events,
   });
-  const feedOwnerProfiles = feedOwnerProfilesQuery.data?.profiles;
-  const communityAgentPubkeys = useKnownAgentPubkeys();
-  const inboxAgentPubkeys = React.useMemo(() => {
-    const pubkeys = new Set(communityAgentPubkeys);
-
-    for (const [pubkey, profile] of Object.entries(feedProfiles ?? {})) {
-      if (profile.isAgent) {
-        pubkeys.add(normalizePubkey(pubkey));
-      }
-    }
-
-    return pubkeys;
-  }, [feedProfiles, communityAgentPubkeys]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: readStateVersion invalidates the stable getChannelReadAt callback
   const inboxItems = React.useMemo(() => {
     const items = buildInboxItems({
