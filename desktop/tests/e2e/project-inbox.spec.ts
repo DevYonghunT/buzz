@@ -2,9 +2,14 @@ import { expect, test } from "@playwright/test";
 
 import { waitForAnimations } from "../helpers/animations";
 import { installMockBridge, TEST_IDENTITIES } from "../helpers/bridge";
+import { cleanupMockAppRoutes, openMockApp } from "../helpers/mockApp";
 
 const DEFAULT_MOCK_PUBKEY = "deadbeef".repeat(8);
 const BUZZ_REPO_ADDRESS = `30617:${DEFAULT_MOCK_PUBKEY}:buzz`;
+
+test.afterEach(async ({ page }) => {
+  await cleanupMockAppRoutes(page);
+});
 
 test("Buzz Git pull request renders and stays actionable in Inbox", async ({
   page,
@@ -18,7 +23,7 @@ test("Buzz Git pull request renders and stays actionable in Inbox", async ({
   await installMockBridge(page);
   await page.setViewportSize({ width: 1024, height: 720 });
 
-  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await openMockApp(page);
   await page.getByTestId("open-projects-view").click();
   await page.getByRole("button", { name: "Repositories", exact: true }).click();
   await page

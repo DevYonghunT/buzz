@@ -1,7 +1,8 @@
-import { expect, test, type Page, type Route } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 import { waitForAnimations } from "../helpers/animations";
 import { installMockBridge, TEST_IDENTITIES } from "../helpers/bridge";
+import { cleanupMockAppRoutes, openMockApp } from "../helpers/mockApp";
 
 const SHOTS = "test-results/project-commit-detail";
 const ALIGNMENT_TOLERANCE_PX = 2;
@@ -22,38 +23,9 @@ async function enableProjectsFeature(page: Page) {
   });
 }
 
-async function fetchStaticModule(route: Route) {
-  for (let attempt = 0; ; attempt += 1) {
-    try {
-      return await route.fetch({ maxRetries: 2 });
-    } catch (error) {
-      const isBrokenPipe =
-        error instanceof Error && /\bEPIPE\b/.test(error.message);
-      if (!isBrokenPipe || attempt >= 2) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 50 * 2 ** attempt));
-    }
-  }
-}
-
-async function openMockApp(page: Page) {
-  // Python's preview server can reset Vite's cold parallel ESM fan-out.
-  // Serialize built modules while leaving product bootstrap failures visible.
-  let moduleQueue = Promise.resolve();
-  await page.route("http://127.0.0.1:4173/assets/*.js", async (route) => {
-    const response = moduleQueue.then(() => fetchStaticModule(route));
-    moduleQueue = response.then(
-      () => undefined,
-      () => undefined,
-    );
-    await route.fulfill({ response: await response });
-  });
-  await page.goto("/", { waitUntil: "domcontentloaded" });
-  await page.waitForFunction(
-    () => Array.isArray(window.__BUZZ_E2E_COMMANDS__),
-    undefined,
-    { timeout: 15_000 },
-  );
-}
+test.afterEach(async ({ page }) => {
+  await cleanupMockAppRoutes(page);
+});
 
 test("keeps project loading visible and accessible during delayed relay reads", async ({
   page,

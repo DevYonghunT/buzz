@@ -2,11 +2,16 @@ import { expect, test } from "@playwright/test";
 
 import { waitForAnimations } from "../helpers/animations";
 import { installMockBridge, TEST_IDENTITIES } from "../helpers/bridge";
+import { cleanupMockAppRoutes, openMockApp } from "../helpers/mockApp";
 
 const SHOTS = "test-results/project-pr-review";
 const RECOVERY_SHOTS = "test-results/project-pr-conflict-recovery";
 const REVIEWER_AGENT_PUBKEY = "a".repeat(64);
 const DEFAULT_MOCK_PUBKEY = "deadbeef".repeat(8);
+
+test.afterEach(async ({ page }) => {
+  await cleanupMockAppRoutes(page);
+});
 
 // The projects surface is a preview feature — opt in before the app mounts.
 // Must run before installMockBridge so React reads the override on mount.
@@ -20,7 +25,7 @@ async function enableProjectsFeature(page: import("@playwright/test").Page) {
 }
 
 async function openBuzzProject(page: import("@playwright/test").Page) {
-  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await openMockApp(page);
   await page.getByTestId("open-projects-view").click();
   await page.getByRole("button", { name: "Repositories", exact: true }).click();
   const projectEntry = page
@@ -777,7 +782,7 @@ test("project pull requests preserve partial results from batched queries", asyn
     window.__BUZZ_E2E_REJECT_PROJECT_QUERY_KINDS__ = [1619];
   });
   await installMockBridge(page);
-  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await openMockApp(page);
   await page.getByTestId("open-projects-view").click();
   await page
     .getByRole("button", { name: "Pull Requests", exact: true })
@@ -835,7 +840,7 @@ test("project pull requests report aggregate root query failures", async ({
     window.__BUZZ_E2E_REJECT_PROJECT_QUERY_KINDS__ = [1618];
   });
   await installMockBridge(page);
-  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await openMockApp(page);
   await page.getByTestId("open-projects-view").click();
   await page
     .getByRole("button", { name: "Pull Requests", exact: true })
@@ -863,7 +868,7 @@ test("project issues preserve partial results from aggregate queries", async ({
     window.__BUZZ_E2E_REJECT_PROJECT_QUERY_KINDS__ = [1];
   });
   await installMockBridge(page);
-  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await openMockApp(page);
   await page.getByTestId("open-projects-view").click();
   await page.getByRole("button", { name: "Issues", exact: true }).click();
 
@@ -893,7 +898,7 @@ test("project overview reports aggregate work-item failures", async ({
     window.__BUZZ_E2E_REJECT_PROJECT_QUERY_KINDS__ = [1618];
   });
   await installMockBridge(page);
-  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await openMockApp(page);
   await page.getByTestId("open-projects-view").click();
 
   await expect(
@@ -915,7 +920,7 @@ test("project overview does not paint a background behind its cards", async ({
 }) => {
   await enableProjectsFeature(page);
   await installMockBridge(page);
-  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await openMockApp(page);
   await page.getByTestId("open-projects-view").click();
 
   await expect(page.getByTestId("projects-overview-panel")).toHaveCSS(
@@ -950,7 +955,7 @@ test("project subsections do not paint backgrounds behind list or grid items", a
 }) => {
   await enableProjectsFeature(page);
   await installMockBridge(page);
-  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await openMockApp(page);
   await page.getByTestId("open-projects-view").click();
 
   for (const section of ["Repositories", "Pull Requests", "Issues"]) {

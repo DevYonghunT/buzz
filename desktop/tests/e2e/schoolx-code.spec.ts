@@ -1,10 +1,4 @@
-import {
-  expect,
-  test,
-  type Locator,
-  type Page,
-  type Route,
-} from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import type {
   CodeEventBacklog,
@@ -20,6 +14,10 @@ import type {
 } from "../../src/features/code/api/codeGitTypes";
 
 import { installMockBridge } from "../helpers/bridge";
+import {
+  cleanupMockAppRoutes,
+  openMockApp as enterMockApp,
+} from "../helpers/mockApp";
 import {
   SCHOOLX_CODE_SCOPE as SCOPE,
   SCHOOLX_CREATED_THREAD_ID as CREATED_THREAD_ID,
@@ -391,44 +389,9 @@ async function activate(page: Page, target: Locator, keyboardOnly: boolean) {
   await page.keyboard.press("Enter");
 }
 
-async function fetchStaticModule(route: Route) {
-  for (let attempt = 0; ; attempt += 1) {
-    try {
-      return await route.fetch({ maxRetries: 2 });
-    } catch (error) {
-      const isBrokenPipe =
-        error instanceof Error && /\bEPIPE\b/.test(error.message);
-      if (!isBrokenPipe || attempt >= 2) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 50 * 2 ** attempt));
-    }
-  }
-}
-
-async function serializeLocalStaticModuleLoads(page: Page) {
-  let moduleQueue = Promise.resolve();
-
-  await page.route("http://127.0.0.1:4173/assets/*.js", async (route) => {
-    const response = moduleQueue.then(() => fetchStaticModule(route));
-    moduleQueue = response.then(
-      () => undefined,
-      () => undefined,
-    );
-    await route.fulfill({ response: await response });
-  });
-}
-
-async function enterMockApp(page: Page) {
-  // Python's preview server can reset some of Vite's large parallel ESM fan-out
-  // in a cold browser context. Serialize only local built modules and retry
-  // transport resets; product bootstrap/render failures still fail below.
-  await serializeLocalStaticModuleLoads(page);
-  await page.goto("/", { waitUntil: "domcontentloaded" });
-  await page.waitForFunction(
-    () => Array.isArray(window.__BUZZ_E2E_COMMANDS__),
-    undefined,
-    { timeout: 15_000 },
-  );
-}
+test.afterEach(async ({ page }) => {
+  await cleanupMockAppRoutes(page);
+});
 
 function codeRuntimeReadyLabel(page: Page) {
   return page.getByRole("paragraph").filter({ hasText: /^Ready$/ });
