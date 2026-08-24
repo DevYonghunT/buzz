@@ -590,6 +590,14 @@ async function createManagedTask(
   const newTask = page.getByRole("button", { name: "New task", exact: true });
   await expect(newTask).toBeEnabled();
   await newTask.click();
+  const dialog = page.getByRole("dialog", { name: "New Code task" });
+  const managedMode = dialog.getByRole("radio", {
+    name: /Managed worktree/,
+  });
+  const localMode = dialog.getByRole("radio", { name: /Local checkout/ });
+  await expect(managedMode).toBeChecked();
+  await expect(localMode).not.toBeChecked();
+  await dialog.getByRole("button", { name: "Create task" }).click();
 
   await waitForCommand(page, "code_worktree_prepare");
   expect(await commandPayload(page, "code_worktree_prepare")).toEqual({
@@ -960,15 +968,60 @@ test("locks task refresh while a new Codex thread opens without relisting it", a
 }) => {
   await installMockBridge(page, {
     schoolxCodeWorkspace: true,
-    schoolxCodeThreadStartDelayMs: 300,
+    schoolxCodeWorktreePrepareDelayMs: 2_000,
+    schoolxCodeThreadStartDelayMs: 2_000,
   });
   await openCodeWorkspace(page);
 
   const listCount = (await commandPayloads(page, "code_threads_list")).length;
   await page.getByRole("button", { name: "New task", exact: true }).click();
-  await waitForCommand(page, "code_thread_start");
+  const dialog = page.getByRole("dialog", { name: "New Code task" });
+  const create = dialog.getByTestId("code-new-task-submit");
+  await create.evaluate((button) => {
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+  await waitForCommand(page, "code_worktree_prepare");
+  const creationLock = await page.evaluate(() => {
+    const submit = document.querySelector<HTMLButtonElement>(
+      '[data-testid="code-new-task-submit"]',
+    );
+    const refresh = document.querySelector<HTMLButtonElement>(
+      'button[aria-label="Refresh Code tasks"]',
+    );
+    return {
+      refreshDisabled: refresh?.disabled,
+      submitBusy: submit?.getAttribute("aria-busy"),
+      submitDisabled: submit?.disabled,
+    };
+  });
+  expect(creationLock).toEqual({
+    refreshDisabled: true,
+    submitBusy: "true",
+    submitDisabled: true,
+  });
+  expect(await commandPayloads(page, "code_worktree_prepare")).toHaveLength(1);
   const refresh = page.getByRole("button", { name: "Refresh Code tasks" });
-  await expect(refresh).toBeDisabled();
+  await waitForCommand(page, "code_thread_start");
+  const startLock = await page.evaluate(() => {
+    const submit = document.querySelector<HTMLButtonElement>(
+      '[data-testid="code-new-task-submit"]',
+    );
+    const refresh = document.querySelector<HTMLButtonElement>(
+      'button[aria-label="Refresh Code tasks"]',
+    );
+    return {
+      refreshDisabled: refresh?.disabled,
+      submitBusy: submit?.getAttribute("aria-busy"),
+      submitDisabled: submit?.disabled,
+    };
+  });
+  expect(startLock).toEqual({
+    refreshDisabled: true,
+    submitBusy: "true",
+    submitDisabled: true,
+  });
+  expect(await commandPayloads(page, "code_thread_start")).toHaveLength(1);
   expect((await commandPayloads(page, "code_threads_list")).length).toBe(
     listCount,
   );
@@ -1367,6 +1420,285 @@ test("creates and selects a managed-worktree task without resuming its start res
   await openBoundThread(page);
 
   await createManagedTask(page);
+});
+
+test("creates a local-checkout task only after keyboard selection and native state review", async ({
+  page,
+}) => {
+  await installMockBridge(page, {
+    schoolxCodeWorkspace: true,
+    schoolxCodeLocalCheckoutState: {
+      branch: "feature/local-checkout-ui",
+      dirty: true,
+    },
+  });
+  await openBoundThread(page);
+
+  const newTask = page.getByRole("button", { name: "New task", exact: true });
+  await newTask.focus();
+  await page.keyboard.press("Enter");
+  const dialog = page.getByRole("dialog", { name: "New Code task" });
+  const managedMode = dialog.getByRole("radio", {
+    name: /Managed worktree/,
+  });
+  const localMode = dialog.getByRole("radio", { name: /Local checkout/ });
+  await expect(managedMode).toBeChecked();
+  await expect(localMode).not.toBeChecked();
+  await expect(managedMode).toBeFocused();
+
+  await page.keyboard.press("ArrowDown");
+  await expect(localMode).toBeChecked();
+  await expect(localMode).toBeFocused();
+  await expect(dialog.getByTestId("code-local-checkout-warning")).toContainText(
+    "Changes from this task apply directly to your existing checkout.",
+  );
+  expect(await commandPayloads(page, "code_worktree_prepare")).toEqual([]);
+
+  const review = dialog.getByRole("button", {
+    name: "Review local checkout",
+  });
+  await review.focus();
+  await page.keyboard.press("Enter");
+  await waitForCommand(page, "code_worktree_prepare");
+  expect(await commandPayload(page, "code_worktree_prepare")).toEqual({
+    input: {
+      scope: SCOPE,
+      repositoryRoot: "/mock/buzz",
+      baseRef: "main",
+      executionMode: "local",
+    },
+  });
+  await expect(dialog.getByTestId("code-local-checkout-branch")).toHaveText(
+    "feature/local-checkout-ui",
+  );
+  await expect(dialog.getByTestId("code-local-checkout-dirty")).toHaveText(
+    "Uncommitted changes present",
+  );
+  expect(await commandPayloads(page, "code_worktree_status")).toEqual([]);
+  expect(await commandPayloads(page, "code_thread_start")).toEqual([]);
+
+  const confirm = dialog.getByRole("button", {
+    name: "Create task in local checkout",
+  });
+  await confirm.focus();
+  await page.keyboard.press("Enter");
+  await waitForCommand(page, "code_worktree_status");
+  expect(await commandPayload(page, "code_worktree_status")).toEqual({
+    descriptor: {
+      executionMode: "local",
+      repositoryIdentity: SCOPE.repositoryIdentity,
+      executionRoot: "/mock/buzz",
+      baseRef: "main",
+      worktreeId: null,
+    },
+  });
+  await waitForCommand(page, "code_thread_start");
+  expect(await commandPayload(page, "code_thread_start")).toEqual({
+    input: {
+      scope: SCOPE,
+      preparationId: CREATED_PREPARATION_ID,
+      model: "gpt-5.2-codex",
+    },
+  });
+  await expect(page).toHaveURL(new RegExp(`threadId=${CREATED_THREAD_ID}`));
+  const createdThread = page.getByTestId(`code-thread-${CREATED_THREAD_ID}`);
+  await expect(createdThread).toContainText("Local checkout");
+  await expect(
+    page.getByRole("heading", { name: "Local checkout task", exact: true }),
+  ).toBeVisible();
+
+  await newTask.click();
+  const resetDialog = page.getByRole("dialog", { name: "New Code task" });
+  await expect(
+    resetDialog.getByRole("radio", { name: /Managed worktree/ }),
+  ).toBeChecked();
+  await expect(
+    resetDialog.getByRole("radio", { name: /Local checkout/ }),
+  ).not.toBeChecked();
+  await page.keyboard.press("Escape");
+  await expect(resetDialog).toHaveCount(0);
+  await expect(newTask).toBeFocused();
+});
+
+test("keeps a deferred Local preparation behind native state review", async ({
+  page,
+}) => {
+  await installMockBridge(page, {
+    schoolxCodeWorkspace: true,
+    schoolxCodeLocalCheckoutState: { branch: "feature/deferred", dirty: true },
+  });
+  await openBoundThread(page);
+
+  await page.getByRole("button", { name: "New task", exact: true }).click();
+  let dialog = page.getByRole("dialog", { name: "New Code task" });
+  await dialog.getByRole("radio", { name: /Local checkout/ }).click();
+  await dialog.getByRole("button", { name: "Review local checkout" }).click();
+  await expect(dialog.getByTestId("code-local-checkout-branch")).toHaveText(
+    "feature/deferred",
+  );
+  await dialog.getByRole("button", { name: "Continue later" }).click();
+
+  const preparation = page.getByTestId(
+    `code-preparation-${CREATED_PREPARATION_ID}`,
+  );
+  await expect(preparation).toContainText("Prepared task");
+  await preparation.getByRole("button", { name: "Start task" }).click();
+  dialog = page.getByRole("dialog", { name: "New Code task" });
+  const localMode = dialog.getByRole("radio", { name: /Local checkout/ });
+  await expect(localMode).toBeChecked();
+  await expect(localMode).toBeDisabled();
+  await expect(dialog.getByTestId("code-local-checkout-branch")).toHaveCount(0);
+
+  await dialog.getByRole("button", { name: "Review local checkout" }).click();
+  await waitForCommand(page, "code_worktree_status");
+  expect(await commandPayload(page, "code_worktree_status")).toEqual({
+    descriptor: {
+      executionMode: "local",
+      repositoryIdentity: SCOPE.repositoryIdentity,
+      executionRoot: "/mock/buzz",
+      baseRef: "main",
+      worktreeId: null,
+    },
+  });
+  await expect(dialog.getByTestId("code-local-checkout-branch")).toHaveText(
+    "feature/deferred",
+  );
+  await expect(dialog.getByTestId("code-local-checkout-dirty")).toHaveText(
+    "Uncommitted changes present",
+  );
+  expect(await commandPayloads(page, "code_thread_start")).toEqual([]);
+
+  await dialog
+    .getByRole("button", { name: "Create task in local checkout" })
+    .click();
+  await waitForCommandCount(page, "code_worktree_status", 2);
+  await waitForCommand(page, "code_thread_start");
+  expect(await commandPayload(page, "code_thread_start")).toEqual({
+    input: {
+      scope: SCOPE,
+      preparationId: CREATED_PREPARATION_ID,
+      model: "gpt-5.2-codex",
+    },
+  });
+});
+
+test("shows native preparation, revalidation, and uncertain-start failures beside the Local action", async ({
+  page,
+}) => {
+  const preparationError =
+    "Native preparation refused the checkout after its dirty-state inspection.";
+  const revalidationError =
+    "Native revalidation found that the local checkout authority drifted.";
+  const uncertainStartError =
+    "Native could not determine whether the Local task started.";
+  await installMockBridge(page, {
+    schoolxCodeWorkspace: true,
+    schoolxCodeWorktreePrepareErrors: [preparationError, null],
+    schoolxCodeWorktreeStatusErrors: [revalidationError, null],
+    schoolxCodeThreadStartErrors: [
+      { code: "threadStartUncertain", message: uncertainStartError },
+    ],
+  });
+  await openBoundThread(page);
+
+  await page.getByRole("button", { name: "New task", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "New Code task" });
+  await dialog.getByRole("radio", { name: /Local checkout/ }).click();
+  await dialog.getByRole("button", { name: "Review local checkout" }).click();
+  await expect(dialog.getByTestId("code-task-creation-error")).toContainText(
+    preparationError,
+  );
+  expect(await commandPayloads(page, "code_worktree_prepare")).toHaveLength(1);
+  expect(await commandPayloads(page, "code_thread_start")).toEqual([]);
+
+  await dialog.getByRole("button", { name: "Review local checkout" }).click();
+  await waitForCommandCount(page, "code_worktree_prepare", 2);
+  await expect(dialog.getByTestId("code-local-checkout-branch")).toHaveText(
+    "main",
+  );
+  await dialog
+    .getByRole("button", { name: "Create task in local checkout" })
+    .click();
+  await expect(dialog.getByTestId("code-task-creation-error")).toContainText(
+    revalidationError,
+  );
+  expect(await commandPayloads(page, "code_worktree_status")).toHaveLength(1);
+  expect(await commandPayloads(page, "code_thread_start")).toEqual([]);
+
+  await dialog
+    .getByRole("button", { name: "Create task in local checkout" })
+    .click();
+  await waitForCommandCount(page, "code_worktree_status", 2);
+  await waitForCommand(page, "code_thread_start");
+  await expect(dialog.getByTestId("code-task-creation-error")).toContainText(
+    uncertainStartError,
+  );
+  await expect(dialog.getByTestId("code-task-creation-error")).toContainText(
+    "continue from Unfinished",
+  );
+  await expect(dialog.getByTestId("code-new-task-submit")).toBeDisabled();
+  expect(await commandPayloads(page, "code_thread_start")).toHaveLength(1);
+
+  await dialog.getByRole("button", { name: "Continue later" }).click();
+  const recovery = page.getByTestId(
+    `code-preparation-${CREATED_PREPARATION_ID}`,
+  );
+  await expect(recovery).toContainText("Needs recovery");
+  await recovery.getByRole("button", { name: "Recover task" }).click();
+  await waitForCommand(page, "code_thread_binding_recover");
+  expect(await commandPayload(page, "code_thread_binding_recover")).toEqual({
+    input: {
+      scope: SCOPE,
+      preparationId: CREATED_PREPARATION_ID,
+      model: null,
+    },
+  });
+  expect(await commandPayloads(page, "code_thread_start")).toHaveLength(1);
+});
+
+test("requires another Local confirmation after native branch or dirty-state drift", async ({
+  page,
+}) => {
+  await installMockBridge(page, {
+    schoolxCodeWorkspace: true,
+    schoolxCodeLocalCheckoutState: { branch: "main", dirty: false },
+    schoolxCodeWorktreeStatusStates: [
+      { branch: "feature/drifted", dirty: true },
+    ],
+  });
+  await openBoundThread(page);
+
+  await page.getByRole("button", { name: "New task", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "New Code task" });
+  await dialog.getByRole("radio", { name: /Local checkout/ }).click();
+  await dialog.getByRole("button", { name: "Review local checkout" }).click();
+  await expect(dialog.getByTestId("code-local-checkout-branch")).toHaveText(
+    "main",
+  );
+  await expect(dialog.getByTestId("code-local-checkout-dirty")).toHaveText(
+    "Clean",
+  );
+
+  await dialog
+    .getByRole("button", { name: "Create task in local checkout" })
+    .click();
+  await waitForCommand(page, "code_worktree_status");
+  await expect(dialog.getByTestId("code-local-checkout-drift")).toBeVisible();
+  await expect(dialog.getByTestId("code-local-checkout-branch")).toHaveText(
+    "feature/drifted",
+  );
+  await expect(dialog.getByTestId("code-local-checkout-dirty")).toHaveText(
+    "Uncommitted changes present",
+  );
+  expect(await commandPayloads(page, "code_thread_start")).toEqual([]);
+
+  await dialog
+    .getByRole("button", { name: "Create task in local checkout" })
+    .click();
+  await waitForCommandCount(page, "code_worktree_status", 2);
+  await waitForCommand(page, "code_thread_start");
+  expect(await commandPayloads(page, "code_worktree_status")).toHaveLength(2);
+  expect(await commandPayloads(page, "code_thread_start")).toHaveLength(1);
 });
 
 test("persists model and reasoning selection into exact start and turn payloads", async ({

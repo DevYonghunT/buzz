@@ -222,6 +222,27 @@ type E2eConfig = {
     schoolxCodeTerminalError?: string;
     /** Error returned by the native Code repository inspection boundary. */
     schoolxCodeRepositoryInspectError?: string;
+    /** Native branch/dirty state returned by a newly prepared local checkout. */
+    schoolxCodeLocalCheckoutState?: {
+      branch: string | null;
+      dirty: boolean;
+    };
+    /** Sequenced native worktree-preparation failures; null allows the call. */
+    schoolxCodeWorktreePrepareErrors?: Array<string | null>;
+    /** Delay native execution-root preparation for duplicate-action coverage. */
+    schoolxCodeWorktreePrepareDelayMs?: number;
+    /** Native branch/dirty states returned by successive status revalidations. */
+    schoolxCodeWorktreeStatusStates?: Array<{
+      branch: string | null;
+      dirty: boolean;
+    }>;
+    /** Sequenced native execution-root status failures; null allows the call. */
+    schoolxCodeWorktreeStatusErrors?: Array<string | null>;
+    /** Sequenced typed native thread-start failures; null allows the call. */
+    schoolxCodeThreadStartErrors?: Array<{
+      code: string;
+      message: string;
+    } | null>;
     /** Successive native replay snapshots returned to the Code event adapter. */
     schoolxCodeEventBacklogs?: CodeEventBacklog[];
     /** Successive strict Changes snapshots returned for a selected Code thread. */
@@ -10395,6 +10416,8 @@ export function maybeInstallE2eTauriMocks() {
   const createMockCodeOpenResult = (
     prepared: CodePreparedWorktree,
   ): CodeBoundThreadOpenResult => {
+    const localCheckout =
+      prepared.worktree.descriptor.executionMode === "local";
     const binding = {
       ...prepared.scope,
       codexThreadId: mockCodeCreatedThreadId,
@@ -10407,13 +10430,15 @@ export function maybeInstallE2eTauriMocks() {
         sessionId: "session-e2e-new",
         forkedFromId: null,
         parentThreadId: null,
-        preview: "Continue the managed-worktree task",
+        preview: localCheckout
+          ? "Continue the local-checkout task"
+          : "Continue the managed-worktree task",
         ephemeral: false,
         modelProvider: "openai",
         createdAt: 1_723_600_020,
         updatedAt: 1_723_600_020,
         cwd: binding.executionRoot,
-        name: "Managed worktree task",
+        name: localCheckout ? "Local checkout task" : "Managed worktree task",
         status: { type: "idle" },
         turns: [],
       },
@@ -10472,11 +10497,17 @@ export function maybeInstallE2eTauriMocks() {
     if (!persisted) return null;
     try {
       const opened = JSON.parse(persisted) as CodeBoundThreadOpenResult;
+      const executionRootMatchesMode =
+        (opened.binding.executionMode === "worktree" &&
+          opened.binding.worktreeId !== null) ||
+        (opened.binding.executionMode === "local" &&
+          opened.binding.worktreeId === null &&
+          opened.binding.executionRoot === mockCodeRepository.repositoryRoot);
       if (
         opened.binding.codexThreadId !== mockCodeCreatedThreadId ||
         opened.thread.id !== mockCodeCreatedThreadId ||
         opened.thread.cwd !== opened.binding.executionRoot ||
-        opened.binding.executionMode !== "worktree" ||
+        !executionRootMatchesMode ||
         !mockCodeScopesMatch(opened.binding, mockCodeScope)
       ) {
         throw new Error("Invalid persisted SchoolX Code mock thread");
@@ -10509,6 +10540,9 @@ export function maybeInstallE2eTauriMocks() {
   let mockCodeForkCallCount = 0;
   let mockCodeRemovalCallCount = 0;
   let mockCodeThreadListCallCount = 0;
+  let mockCodeWorktreePrepareCallCount = 0;
+  let mockCodeWorktreeStatusCallCount = 0;
+  let mockCodeThreadStartCallCount = 0;
   let mockCodeWorktreeInventoryError: string | null = null;
   const mockCodeRemovalReceipts = new Map<string, CodeWorktreeRemovalReceipt>();
   const mockCodeRemovalInFlight = new Map<
@@ -11800,6 +11834,24 @@ export function maybeInstallE2eTauriMocks() {
             };
           }
         ).input;
+        const callIndex = mockCodeWorktreePrepareCallCount;
+        mockCodeWorktreePrepareCallCount += 1;
+        const delayMs =
+          activeConfig?.mock?.schoolxCodeWorktreePrepareDelayMs ?? 0;
+        if (delayMs > 0) {
+          await new Promise((resolve) =>
+            globalThis.setTimeout(resolve, delayMs),
+          );
+        }
+        const configuredError =
+          activeConfig?.mock?.schoolxCodeWorktreePrepareErrors?.[callIndex] ??
+          null;
+        if (configuredError) throw new Error(configuredError);
+        const localCheckoutState = activeConfig?.mock
+          ?.schoolxCodeLocalCheckoutState ?? {
+          branch: "main",
+          dirty: false,
+        };
         const descriptor = {
           executionMode: input.executionMode,
           repositoryIdentity: mockCodeRepositoryIdentity,
@@ -11820,8 +11872,14 @@ export function maybeInstallE2eTauriMocks() {
             repository: structuredClone(mockCodeRepository),
             descriptor,
             headCommit: "0123456789abcdef0123456789abcdef01234567",
-            branch: input.executionMode === "local" ? "main" : null,
-            dirty: false,
+            branch:
+              input.executionMode === "local"
+                ? localCheckoutState.branch
+                : null,
+            dirty:
+              input.executionMode === "local"
+                ? localCheckoutState.dirty
+                : false,
           },
         } satisfies CodePreparedWorktree;
         mockCodePreparedWorktree = prepared;
@@ -11848,11 +11906,36 @@ export function maybeInstallE2eTauriMocks() {
             };
           }
         ).descriptor;
+        const callIndex = mockCodeWorktreeStatusCallCount;
+        mockCodeWorktreeStatusCallCount += 1;
+        const configuredError =
+          activeConfig?.mock?.schoolxCodeWorktreeStatusErrors?.[callIndex] ??
+          null;
+        if (configuredError) throw new Error(configuredError);
+        const configuredStates =
+          activeConfig?.mock?.schoolxCodeWorktreeStatusStates;
+        const configuredState =
+          configuredStates && configuredStates.length > 0
+            ? (configuredStates[
+                Math.min(callIndex, configuredStates.length - 1)
+              ] ?? null)
+            : null;
+        const localCheckoutState = configuredState ??
+          activeConfig?.mock?.schoolxCodeLocalCheckoutState ?? {
+            branch: "main",
+            dirty: false,
+          };
         return {
           descriptor,
           headCommit: "0123456789abcdef0123456789abcdef01234567",
-          branch: descriptor.executionMode === "local" ? "main" : null,
-          dirty: false,
+          branch:
+            descriptor.executionMode === "local"
+              ? localCheckoutState.branch
+              : null,
+          dirty:
+            descriptor.executionMode === "local"
+              ? localCheckoutState.dirty
+              : false,
         };
       }
       case "code_worktrees_list": {
@@ -12077,10 +12160,33 @@ export function maybeInstallE2eTauriMocks() {
       case "code_thread_start": {
         requireSchoolxCodeWorkspace();
         const input = (payload as { input: CodeThreadStartInput }).input;
+        const callIndex = mockCodeThreadStartCallCount;
+        mockCodeThreadStartCallCount += 1;
         const delayMs = activeConfig?.mock?.schoolxCodeThreadStartDelayMs ?? 0;
         if (delayMs > 0) {
           await new Promise((resolve) =>
             globalThis.setTimeout(resolve, delayMs),
+          );
+        }
+        const configuredError =
+          activeConfig?.mock?.schoolxCodeThreadStartErrors?.[callIndex] ?? null;
+        if (configuredError) {
+          if (
+            [
+              "threadStartUncertain",
+              "startRollbackFailed",
+              "bindingCommitFailed",
+            ].includes(configuredError.code) &&
+            mockCodeNewPreparation?.preparationId === input.preparationId
+          ) {
+            mockCodeNewPreparation = {
+              ...mockCodeNewPreparation,
+              state: "starting",
+            };
+          }
+          throw mockCodeStartError(
+            configuredError.code,
+            configuredError.message,
           );
         }
         if (
@@ -12113,6 +12219,25 @@ export function maybeInstallE2eTauriMocks() {
           mockCodeScopesMatch(mockCodeNewPreparation, input.scope)
         ) {
           return completeMockCodeFork(mockCodeNewPreparation);
+        }
+        if (
+          mockCodeNewPreparation?.operation === "start" &&
+          mockCodeNewPreparation.state === "starting" &&
+          mockCodeNewPreparation.preparationId === input.preparationId &&
+          mockCodePreparedWorktree?.preparationId === input.preparationId &&
+          mockCodeScopesMatch(mockCodeNewPreparation, input.scope)
+        ) {
+          mockCodeCreatedOpenResult = createMockCodeOpenResult(
+            mockCodePreparedWorktree,
+          );
+          mockCodeThreadLifecycles.set(mockCodeCreatedThreadId, "active");
+          mockCodePreparedWorktree = null;
+          mockCodeNewPreparation = null;
+          window.sessionStorage.setItem(
+            MOCK_CODE_WORKSPACE_STORAGE_KEY,
+            JSON.stringify(mockCodeCreatedOpenResult),
+          );
+          return structuredClone(mockCodeCreatedOpenResult);
         }
         return structuredClone(mockCodeOpenResult);
       }

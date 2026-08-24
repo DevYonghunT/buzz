@@ -39,12 +39,14 @@ import {
   type CodePendingTurn,
   useCodeSelectedTurn,
 } from "../state/useCodeSelectedTurn";
+import { useCodeTaskCreation } from "../state/useCodeTaskCreation";
 import { useCodeThreadLifecycleSync } from "../state/useCodeThreadLifecycleSync";
 import { useCodeThreadMutations } from "../state/useCodeThreadMutations";
 import { useCodeWorkspaceGitHandoff } from "../state/useCodeWorkspaceGitHandoff";
 import { useCodeWorkspaceListRefresh } from "../state/useCodeWorkspaceListRefresh";
 import { CodeChangesPanel } from "./CodeChangesPanel";
 import { CodeComposer } from "./CodeComposer";
+import { CodeNewTaskDialog } from "./CodeNewTaskDialog";
 import { CodeRuntimeStatus } from "./CodeRuntimeStatus";
 import { CodeTerminalDrawer } from "./CodeTerminalDrawer";
 import { CodeThreadSidebar } from "./CodeThreadSidebar";
@@ -107,7 +109,6 @@ export function CodeWorkspaceScreen({
   const [resumingThreadId, setResumingThreadId] = React.useState<string | null>(
     null,
   );
-  const [creating, setCreating] = React.useState(false);
   const [actionPendingId, setActionPendingId] = React.useState<string | null>(
     null,
   );
@@ -279,6 +280,35 @@ export function CodeWorkspaceScreen({
   const taskActionPending =
     threadMutations.pendingForkThreadId !== null ||
     threadMutations.pendingLifecycleThreadId !== null;
+  const completeCreatedTask = React.useCallback(
+    (
+      opened: CodeBoundThreadOpenResult,
+      pendingSelection: CodeModelSelection | null,
+    ) => {
+      retainOpenedThread(opened, pendingSelection);
+      onSelectedThreadIdChange(opened.thread.id);
+      refreshAfterThreadOpen();
+    },
+    [onSelectedThreadIdChange, refreshAfterThreadOpen, retainOpenedThread],
+  );
+  const taskCreation = useCodeTaskCreation({
+    baseRef,
+    enabled:
+      interactionReady &&
+      threadListReady &&
+      !taskActionPending &&
+      actionPendingId === null &&
+      !modelSelection.saving &&
+      !listRefreshPending,
+    modelSelection: modelSelection.newThreadSelection,
+    onCreated: completeCreatedTask,
+    onRefreshLists: refreshLists,
+    onThreadStartRejected: modelSelection.revalidateCatalog,
+    repositoryRoot: repository.repositoryRoot,
+    runtimeGeneration: session.state.runtimeGeneration,
+    scope,
+  });
+  const creating = taskCreation.pending;
   const sidebarBusy =
     taskActionPending ||
     creating ||
@@ -508,6 +538,14 @@ export function CodeWorkspaceScreen({
   const openPreparation = React.useCallback(
     async (preparation: CodeThreadPreparation) => {
       if (
+        preparation.executionMode === "local" &&
+        preparation.operation === "start" &&
+        preparation.state === "prepared"
+      ) {
+        taskCreation.openPersistedLocalPreparation(preparation);
+        return;
+      }
+      if (
         !interactionReady ||
         !threadListReady ||
         creating ||
@@ -568,6 +606,7 @@ export function CodeWorkspaceScreen({
       refreshAfterThreadOpen,
       retainOpenedThread,
       scope,
+      taskCreation.openPersistedLocalPreparation,
       threadListReady,
     ],
   );
@@ -593,75 +632,6 @@ export function CodeWorkspaceScreen({
       threadMutations.forkThread,
     ],
   );
-
-  const createTask = React.useCallback(async () => {
-    if (
-      !interactionReady ||
-      !threadListReady ||
-      creating ||
-      actionPendingId !== null ||
-      modelSelection.saving
-    )
-      return;
-    const runtimeGeneration = runtimeGenerationRef.current;
-    if (runtimeGeneration === null) return;
-    setCreating(true);
-    setActionError(null);
-    const pendingSelection = modelSelection.newThreadSelection;
-    let threadStartAttempted = false;
-    try {
-      const prepared = await codeWorkspaceApi.prepareCodeWorktree({
-        scope,
-        repositoryRoot: repository.repositoryRoot,
-        baseRef,
-        executionMode: "worktree",
-      });
-      if (
-        !mountedRef.current ||
-        runtimeGenerationRef.current !== runtimeGeneration
-      ) {
-        return;
-      }
-      threadStartAttempted = true;
-      const opened = await codeWorkspaceApi.startCodeThread({
-        scope,
-        preparationId: prepared.preparationId,
-        model: pendingSelection?.model ?? null,
-      });
-      threadStartAttempted = false;
-      if (
-        !mountedRef.current ||
-        runtimeGenerationRef.current !== runtimeGeneration
-      ) {
-        return;
-      }
-      retainOpenedThread(opened, pendingSelection);
-      onSelectedThreadIdChange(opened.thread.id);
-      refreshAfterThreadOpen();
-    } catch (error) {
-      if (!mountedRef.current) return;
-      if (threadStartAttempted) modelSelection.revalidateCatalog();
-      setActionError(errorMessage(error));
-      await refreshLists();
-    } finally {
-      if (mountedRef.current) setCreating(false);
-    }
-  }, [
-    baseRef,
-    creating,
-    actionPendingId,
-    interactionReady,
-    modelSelection.newThreadSelection,
-    modelSelection.revalidateCatalog,
-    modelSelection.saving,
-    onSelectedThreadIdChange,
-    refreshLists,
-    refreshAfterThreadOpen,
-    repository.repositoryRoot,
-    retainOpenedThread,
-    scope,
-    threadListReady,
-  ]);
 
   const selectedThreadEvents = React.useMemo(
     () =>
@@ -837,6 +807,22 @@ export function CodeWorkspaceScreen({
         status={session.state.runtimeStatus}
         subscriptionError={session.subscriptionError}
       />
+      <CodeNewTaskDialog
+        enabled={taskCreation.enabled}
+        error={taskCreation.error}
+        executionMode={taskCreation.executionMode}
+        localSnapshot={taskCreation.localSnapshot}
+        localSnapshotChanged={taskCreation.localSnapshotChanged}
+        onExecutionModeChange={taskCreation.selectExecutionMode}
+        onOpenChange={taskCreation.setDialogOpen}
+        onRestoreFocus={taskCreation.restoreDialogTriggerFocus}
+        onSubmit={() => void taskCreation.submit()}
+        open={taskCreation.open}
+        pending={taskCreation.pending}
+        phase={taskCreation.phase}
+        preparationReady={taskCreation.preparationReady}
+        recoveryRequired={taskCreation.recoveryRequired}
+      />
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
         {sidebarOpen ? (
           <CodeThreadSidebar
@@ -852,7 +838,7 @@ export function CodeWorkspaceScreen({
               threadsQuery.isFetching
             }
             onArchiveThread={threadMutations.archiveThread}
-            onCreate={() => void createTask()}
+            onCreate={taskCreation.openDialog}
             onForkThread={forkThread}
             onOpenPreparation={(preparation) =>
               void openPreparation(preparation)

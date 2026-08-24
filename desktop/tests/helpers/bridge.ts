@@ -192,6 +192,27 @@ type MockBridgeOptions = {
   schoolxCodeTerminalError?: string;
   /** Error returned by the native Code repository inspection boundary. */
   schoolxCodeRepositoryInspectError?: string;
+  /** Native branch/dirty state returned by a newly prepared local checkout. */
+  schoolxCodeLocalCheckoutState?: {
+    branch: string | null;
+    dirty: boolean;
+  };
+  /** Sequenced native worktree-preparation failures; null allows the call. */
+  schoolxCodeWorktreePrepareErrors?: Array<string | null>;
+  /** Delay native execution-root preparation for duplicate-action coverage. */
+  schoolxCodeWorktreePrepareDelayMs?: number;
+  /** Native branch/dirty states returned by successive status revalidations. */
+  schoolxCodeWorktreeStatusStates?: Array<{
+    branch: string | null;
+    dirty: boolean;
+  }>;
+  /** Sequenced native execution-root status failures; null allows the call. */
+  schoolxCodeWorktreeStatusErrors?: Array<string | null>;
+  /** Sequenced typed native thread-start failures; null allows the call. */
+  schoolxCodeThreadStartErrors?: Array<{
+    code: string;
+    message: string;
+  } | null>;
   /** Successive native replay snapshots returned to the Code event adapter. */
   schoolxCodeEventBacklogs?: CodeEventBacklog[];
   /** Successive strict Changes snapshots returned for a selected Code thread. */

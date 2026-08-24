@@ -647,6 +647,27 @@ test("strict frontend input decoders consume the native fixtures", () => {
       unknown: true,
     }),
   );
+  assert.equal(
+    CodeWorktreePrepareInputSchema.parse({
+      ...inputs.worktreePrepare,
+      executionMode: "local",
+    }).executionMode,
+    "local",
+  );
+  for (const [field, value] of [
+    ["path", "/caller/substitution"],
+    ["headCommit", "f".repeat(40)],
+    ["ref", "refs/heads/caller"],
+    ["argv", ["git", "clean", "-fd"]],
+    ["dirty", true],
+  ]) {
+    assert.throws(() =>
+      CodeWorktreePrepareInputSchema.parse({
+        ...inputs.worktreePrepare,
+        [field]: value,
+      }),
+    );
+  }
   assert.throws(() =>
     CodeThreadStartInputSchema.parse({ ...inputs.threadStart, unknown: true }),
   );
