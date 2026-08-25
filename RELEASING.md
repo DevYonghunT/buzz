@@ -231,14 +231,17 @@ Mesa 25+ / GLib 2.88 distros; see
 and re-signs the artifact. As a result the AppImage relies on the
 host's Wayland/GStreamer/graphics stack. The `release-linux` job builds inside
 the digest-pinned Ubuntu 24.04 container recorded in `.github/workflows/release.yml`.
-The 2026-08-25 release-readiness build observed `GLIBC_2.39` as the highest
-required symbol version across the desktop executable and bundled sidecars, and
-Ubuntu 24.04 is the oldest distro on which that package was validated. In other
-words, the observed ABI requirement is glibc >= 2.39; these observations do not
-by themselves establish a general distro compatibility floor or compatibility
-with Ubuntu 22.04. Broader support claims require building against an explicitly
-pinned sysroot and runtime-smoke-testing every packaged executable on each
-claimed target.
+The 2026-08-25 release-readiness diagnostic build used Ubuntu 24.04 amd64
+userspace under emulation on Apple Silicon and observed `GLIBC_2.39` as the
+highest required symbol version across the desktop executable and bundled
+sidecars. This is build-environment and static ABI evidence, not native x86_64
+clean-install validation, and it does not establish Ubuntu 24.04 as the oldest
+supported or validated distro. For those exact bytes, glibc 2.39 is a necessary
+observed symbol floor, not a sufficient distro compatibility floor. Broader
+support claims require building against an explicitly pinned sysroot, then
+clean-installing or extracting the final packages on native instances of every
+claimed target and runtime-smoke-testing the desktop executable and all bundled
+sidecars.
 
 Tauri CLI 2.11.2 otherwise downloads five AppImage build helpers from its own
 release and mutable upstream locations. Linux release builds must run
