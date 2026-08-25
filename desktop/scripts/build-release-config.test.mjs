@@ -32,6 +32,12 @@ test("non-Linux release configs do not change their tool cache location", () => 
   }
 });
 
+test("macOS release config preserves the 10.15 application floor", () => {
+  const config = createReleaseConfig({ ...input, platform: "darwin" });
+
+  assert.equal(config.bundle.macOS?.minimumSystemVersion, "10.15");
+});
+
 test("AppImage tool lock stays coupled to Tauri CLI 2.11.2", () => {
   const pnpmLock = readFileSync(
     resolve(scriptsDir, "../../pnpm-lock.yaml"),

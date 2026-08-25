@@ -94,10 +94,106 @@ function readMachOArchitectures(path) {
   return architectures;
 }
 
+function canonicalMacOSVersion(value) {
+  const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)(?:\.(0|[1-9]\d*))?$/.exec(value);
+  if (!match) {
+    throw new Error(`invalid macOS deployment target ${JSON.stringify(value)}`);
+  }
+  const patch = Number(match[3] ?? "0");
+  return `${Number(match[1])}.${Number(match[2])}${patch === 0 ? "" : `.${patch}`}`;
+}
+
+export function parseMacOSDeploymentTarget(loadCommands) {
+  const records = [];
+  const commandBlocks = loadCommands
+    .split(/^\s*Load command \d+\s*$/m)
+    .slice(1);
+
+  for (const block of commandBlocks) {
+    const commandMatches = [
+      ...block.matchAll(
+        /^\s*cmd\s+(LC_BUILD_VERSION|LC_VERSION_MIN_MACOSX)\s*$/gm,
+      ),
+    ];
+    if (commandMatches.length === 0) continue;
+    if (commandMatches.length !== 1) {
+      throw new Error("otool reported an ambiguous macOS deployment command");
+    }
+
+    const command = commandMatches[0][1];
+    if (command === "LC_BUILD_VERSION") {
+      const platformMatches = [...block.matchAll(/^\s*platform\s+(\S+)\s*$/gm)];
+      if (platformMatches.length === 0) {
+        throw new Error("LC_BUILD_VERSION did not report platform");
+      }
+      if (platformMatches.length !== 1) {
+        throw new Error("LC_BUILD_VERSION reported ambiguous platform values");
+      }
+      if (platformMatches[0][1] !== "1") {
+        throw new Error(
+          `LC_BUILD_VERSION must target macOS platform 1; found ${platformMatches[0][1]}`,
+        );
+      }
+    }
+    const field = command === "LC_BUILD_VERSION" ? "minos" : "version";
+    const valueMatches = [
+      ...block.matchAll(new RegExp(`^\\s*${field}\\s+(\\S+)\\s*$`, "gm")),
+    ];
+    if (valueMatches.length === 0) {
+      throw new Error(`${command} did not report ${field}`);
+    }
+    if (valueMatches.length !== 1) {
+      throw new Error(`${command} reported ambiguous ${field} values`);
+    }
+    records.push({
+      command,
+      version: canonicalMacOSVersion(valueMatches[0][1]),
+    });
+  }
+
+  if (records.length === 0) {
+    throw new Error("otool reported no macOS deployment target");
+  }
+  if (records.length !== 1) {
+    const versions = new Set(records.map(({ version }) => version));
+    if (versions.size !== 1) {
+      throw new Error(
+        `otool reported conflicting macOS deployment targets: ${records
+          .map(({ command, version }) => `${command}=${version}`)
+          .join(", ")}`,
+      );
+    }
+    throw new Error(
+      `otool reported an ambiguous macOS deployment target ${records[0].version} in ${records.length} load commands`,
+    );
+  }
+
+  return records[0].version;
+}
+
+function readMachODeploymentTarget(path) {
+  const result = spawnSync("/usr/bin/otool", ["-l", path], {
+    encoding: "utf8",
+    env: { PATH: "/usr/bin:/bin" },
+  });
+  if (result.error) {
+    throw new Error(
+      `could not inspect ${path} with otool: ${result.error.message}`,
+    );
+  }
+  if (result.status !== 0) {
+    throw new Error(
+      `otool rejected ${path}: ${(result.stderr || result.stdout).trim()}`,
+    );
+  }
+  return parseMacOSDeploymentTarget(result.stdout);
+}
+
 export function resolveBuildContext({
   env,
   tauriDir,
   readArchitectures = readMachOArchitectures,
+  readDeploymentTarget = readMachODeploymentTarget,
 }) {
   const target = requiredEnvironment(env, "TAURI_ENV_TARGET_TRIPLE");
   const platform = requiredEnvironment(env, "TAURI_ENV_PLATFORM");
@@ -110,14 +206,15 @@ export function resolveBuildContext({
   }
 
   const architectureByTarget = new Map([
-    ["aarch64-apple-darwin", ["aarch64", "arm64"]],
-    ["x86_64-apple-darwin", ["x86_64", "x86_64"]],
+    ["aarch64-apple-darwin", ["aarch64", "arm64", "11.0"]],
+    ["x86_64-apple-darwin", ["x86_64", "x86_64", "10.15"]],
   ]);
   const expected = architectureByTarget.get(target);
   if (!expected) {
     throw new Error(`unsupported macOS target triple ${target}`);
   }
-  const [expectedHookArch, expectedMachOArch] = expected;
+  const [expectedHookArch, expectedMachOArch, expectedDeploymentTarget] =
+    expected;
   if (arch !== expectedHookArch) {
     throw new Error(
       `Tauri hook arch ${arch} does not match target triple ${target}`,
@@ -153,7 +250,16 @@ export function resolveBuildContext({
     );
   }
 
-  return { binaryPath: matching[0], profile, target };
+  const deploymentTarget = canonicalMacOSVersion(
+    readDeploymentTarget(matching[0]),
+  );
+  if (deploymentTarget !== expectedDeploymentTarget) {
+    throw new Error(
+      `${target} SchoolX Code Git XPC must target macOS ${expectedDeploymentTarget}; ${matching[0]} targets macOS ${deploymentTarget}`,
+    );
+  }
+
+  return { binaryPath: matching[0], deploymentTarget, profile, target };
 }
 
 function xpcInfoPlist(version) {

@@ -7,17 +7,21 @@ release_workflow="$repo_root/.github/workflows/release.yml"
 canary_workflow="$repo_root/.github/workflows/signed-macos-canary.yml"
 verifier='desktop/scripts/verify-code-git-xpc-signature.sh'
 release_verifier='desktop/scripts/verify-signed-macos-release.sh'
+runtime_verifier='desktop/scripts/verify-macos-runtime-compatibility.sh'
 
 node --test "$repo_root/desktop/scripts/stage-code-git-xpc.test.mjs"
+node --test "$repo_root/desktop/scripts/verify-macos-runtime-compatibility.test.mjs"
 
 node - "$config" "$release_workflow" "$canary_workflow" \
-  "$repo_root/$verifier" "$repo_root/$release_verifier" <<'NODE'
+  "$repo_root/$verifier" "$repo_root/$release_verifier" \
+  "$repo_root/$runtime_verifier" <<'NODE'
 const fs = require("node:fs");
 const config = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 const releaseWorkflow = fs.readFileSync(process.argv[3], "utf8");
 const canaryWorkflow = fs.readFileSync(process.argv[4], "utf8");
 const verifierPath = process.argv[5];
 const releaseVerifierPath = process.argv[6];
+const runtimeVerifierPath = process.argv[7];
 const releaseVerifier = "desktop/scripts/verify-signed-macos-release.sh";
 const identifier = "io.github.schoolx520.app.schoolx-code-git";
 const bundle = `${identifier}.xpc`;
@@ -36,6 +40,9 @@ if (
 const source = config.bundle?.macOS?.files?.[`XPCServices/${bundle}`];
 if (source !== `generated/code-git-xpc/${bundle}`) {
   throw new Error("Tauri macOS.files no longer embeds the fixed Code Git XPC bundle");
+}
+if (config.bundle?.macOS?.minimumSystemVersion !== "10.15") {
+  throw new Error("base Tauri config must pin macOS minimumSystemVersion 10.15");
 }
 
 function jobBlock(workflow, jobName) {
@@ -155,9 +162,28 @@ for (const required of [
   'verify_app "$mount_dir/SchoolX.app"',
   "/usr/bin/tar -xzf",
   'verify_app "$extract_dir/SchoolX.app"',
+  "verify-macos-runtime-compatibility.sh",
 ]) {
   if (!releaseVerifierSource.includes(required)) {
     throw new Error(`final macOS release verifier is missing: ${required}`);
+  }
+}
+
+const runtimeVerifierSource = fs.readFileSync(runtimeVerifierPath, "utf8");
+for (const required of [
+  "LSMinimumSystemVersion",
+  "LC_BUILD_VERSION",
+  "LC_VERSION_MIN_MACOSX",
+  "parse_macho_deployment_target",
+  "parse_otool_install_names",
+  "system_swift_rpath_in_load_commands",
+  "swift_dependency_kind",
+  "^/usr/lib/swift/libswift",
+  "^@rpath/libswift",
+  "LC_RPATH /usr/lib/swift",
+]) {
+  if (!runtimeVerifierSource.includes(required)) {
+    throw new Error(`macOS runtime verifier is missing: ${required}`);
   }
 }
 if (/spctl[^\n]*--verbose/.test(releaseVerifierSource)) {

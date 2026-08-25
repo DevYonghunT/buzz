@@ -71,6 +71,7 @@
       "icons/icon.ico"
     ],
     "macOS": {
+      "minimumSystemVersion": "10.15",
       "files": {
         "XPCServices/io.github.schoolx520.app.schoolx-code-git.xpc": "generated/code-git-xpc/io.github.schoolx520.app.schoolx-code-git.xpc"
       },

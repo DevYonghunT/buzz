@@ -86,6 +86,10 @@ verify_app() {
   verify_thin_architecture "$app_executable" "$label executable"
   require_regular_bundle "$xpc_path" "$label Code Git XPC"
   verify_thin_architecture "$xpc_executable" "$label Code Git XPC executable"
+  if ! "$script_dir/verify-macos-runtime-compatibility.sh" \
+    "$candidate_app" "$expected_arch"; then
+    fail "$label failed the macOS deployment-target or Swift runtime contract"
+  fi
 
   if ! /usr/bin/codesign --verify --deep --strict --all-architectures \
     "$candidate_app" >/dev/null 2>&1; then
