@@ -216,9 +216,12 @@ class WorkflowWiringTests(unittest.TestCase):
                     f"SCHOOLX_LAUNCHER_CONTAINER_IMAGE: {PINNED_CONTAINER_IMAGE}",
                     source,
                 )
-                self.assertIn(
-                    "desktop/scripts/verify-linux-git-launcher-runtime.sh",
+                self.assertRegex(
                     source,
+                    r"(?m)^\s+- name: Verify non-root release-profile descriptor launcher\n"
+                    r"\s+env:\n"
+                    r"\s+SCHOOLX_LAUNCHER_RUNNER_ARCH: \$\{\{ runner\.arch \}\}\n"
+                    r"\s+run: desktop/scripts/verify-linux-git-launcher-runtime\.sh ",
                 )
                 self.assertIn("linux-git-launcher-evidence", source)
                 self.assertRegex(source, r"(?m)^\s+strace \\\s*$")
@@ -246,6 +249,19 @@ class WorkflowWiringTests(unittest.TestCase):
             runtime_gate,
             r"file\s+-Lb\s+[^\n|]+\|\s*grep\s+[^\n]*-q",
             "pipefail must not turn grep -q's early exit into a file failure",
+        )
+        self.assertIn(
+            '[[ "${SCHOOLX_LAUNCHER_RUNNER_ARCH:-}" == "$EXPECTED_RUNNER_ARCH" ]]',
+            runtime_gate,
+        )
+        self.assertIn('readonly EXPECTED_RUNNER_ARCH="X64"', runtime_gate)
+        self.assertIn(
+            "printf 'workflow_runner_arch=%s\\n' \"$SCHOOLX_LAUNCHER_RUNNER_ARCH\"",
+            runtime_gate,
+        )
+        self.assertIn(
+            'SCHOOLX_LAUNCHER_RUNNER_ARCH="$SCHOOLX_LAUNCHER_RUNNER_ARCH"',
+            runtime_gate,
         )
 
 

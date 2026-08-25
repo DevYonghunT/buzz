@@ -159,6 +159,8 @@ jobs:
           cd src-tauri && cargo update --workspace
 
       - name: Verify non-root release-profile descriptor launcher
+        env:
+          SCHOOLX_LAUNCHER_RUNNER_ARCH: ${{ runner.arch }}
         run: desktop/scripts/verify-linux-git-launcher-runtime.sh "$RUNNER_TEMP/linux-git-launcher-evidence"
 
       - name: Upload Linux Git launcher evidence

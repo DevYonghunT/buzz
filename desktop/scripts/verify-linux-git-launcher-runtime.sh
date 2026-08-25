@@ -4,6 +4,7 @@
 set -euo pipefail
 
 readonly PINNED_CONTAINER_IMAGE="ubuntu:24.04@sha256:4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90"
+readonly EXPECTED_RUNNER_ARCH="X64"
 readonly EXPECTED_RUST_RELEASE="1.95.0"
 readonly EXPECTED_GLIBC="glibc 2.39"
 readonly NONROOT_UID="${SCHOOLX_LAUNCHER_TEST_UID:-10001}"
@@ -26,8 +27,14 @@ require_command() {
 
 require_pinned_tuple() {
   local rust_version
-  [[ "$(uname -s)" == "Linux" ]] || fail "requires native Linux"
-  [[ "$(uname -m)" == "x86_64" ]] || fail "requires native x86_64; got $(uname -m)"
+  [[ "$(uname -s)" == "Linux" ]] || fail "requires Linux"
+  # runner.arch is workflow provenance that prevents an accidental ARM64
+  # runner selection. It does not attest physical hardware or absence of
+  # emulation, so retain the independent runtime and binary-format checks.
+  [[ "${SCHOOLX_LAUNCHER_RUNNER_ARCH:-}" == "$EXPECTED_RUNNER_ARCH" ]] ||
+    fail "SCHOOLX_LAUNCHER_RUNNER_ARCH must be workflow-provided runner.arch $EXPECTED_RUNNER_ARCH"
+  [[ "$(uname -m)" == "x86_64" ]] ||
+    fail "requires uname architecture x86_64; got $(uname -m)"
   [[ -r /etc/os-release ]] || fail "/etc/os-release is unavailable"
   # shellcheck disable=SC1091
   source /etc/os-release
@@ -73,10 +80,10 @@ run_nonroot_gate() {
   test_binary_file="$(file -Lb "$test_binary")" ||
     fail "could not inspect release test binary"
   grep -Eq 'ELF 64-bit LSB.*x86-64' <<<"$test_binary_file" ||
-    fail "release test binary is not native x86-64 ELF"
+    fail "release test binary is not x86-64 ELF"
   system_git_file="$(file -Lb /usr/bin/git)" || fail "could not inspect /usr/bin/git"
   grep -Eq 'ELF 64-bit LSB.*x86-64' <<<"$system_git_file" ||
-    fail "/usr/bin/git is not native x86-64 ELF"
+    fail "/usr/bin/git is not x86-64 ELF"
   [[ "$test_binary" == */release/deps/* ]] ||
     fail "test executable did not come from a release profile: $test_binary"
 
@@ -86,6 +93,7 @@ run_nonroot_gate() {
 
   {
     printf 'container_image=%s\n' "$SCHOOLX_LAUNCHER_CONTAINER_IMAGE"
+    printf 'workflow_runner_arch=%s\n' "$SCHOOLX_LAUNCHER_RUNNER_ARCH"
     printf 'uid=%s\n' "$(id -u)"
     printf 'gid=%s\n' "$(id -g)"
     printf 'uname=%s\n' "$(uname -srm)"
@@ -214,6 +222,7 @@ if [[ "$(id -u)" -eq 0 ]]; then
     env HOME="$evidence_dir/home" \
       HERMIT_STATE_DIR="$parent_hermit_state_dir" \
       SCHOOLX_LAUNCHER_CONTAINER_IMAGE="$SCHOOLX_LAUNCHER_CONTAINER_IMAGE" \
+      SCHOOLX_LAUNCHER_RUNNER_ARCH="$SCHOOLX_LAUNCHER_RUNNER_ARCH" \
       PATH="$PATH" \
       "$script_dir/verify-linux-git-launcher-runtime.sh" \
       --run-nonroot "$test_binary" "$evidence_dir"
