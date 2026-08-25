@@ -55,6 +55,11 @@ jobs:
               - 'pnpm-lock.yaml'
             desktop-rust:
               - 'desktop/src-tauri/**'
+              - 'desktop/scripts/linux_git_launcher_trace.py'
+              - 'desktop/scripts/test_linux_git_launcher_trace.py'
+              - 'desktop/scripts/verify-linux-git-launcher-runtime.sh'
+              - '.github/workflows/linux-canary.yml'
+              - '.github/workflows/release.yml'
             web:
               - 'scripts/check-file-sizes-core.mjs'
               - 'scripts/check-file-sizes-core.test.mjs'
@@ -86,6 +91,8 @@ jobs:
         run: scripts/test-mobile-worktree-overrides.sh
       - name: File size ratchet unit tests
         run: node --test scripts/check-file-sizes-core.test.mjs
+      - name: Linux Git launcher trace verifier unit tests
+        run: python3 desktop/scripts/test_linux_git_launcher_trace.py
 
   rust-lint:
     name: Rust Lint
@@ -229,6 +236,74 @@ jobs:
         with:
           path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
           key: pnpm-${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml') }}
+
+  linux-git-launcher-release-gate:
+    name: Linux Git Launcher Release Gate
+    runs-on: ubuntu-latest
+    container: ubuntu:24.04@sha256:4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90
+    timeout-minutes: 60
+    needs: [changes]
+    if: github.event_name == 'push' || needs.changes.outputs.desktop-rust == 'true' || needs.changes.outputs.rust == 'true'
+    permissions:
+      contents: read
+    env:
+      SCHOOLX_LAUNCHER_CONTAINER_IMAGE: ubuntu:24.04@sha256:4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Install pinned-tuple build and trace dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          apt-get update \
+            -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30
+          apt-get install -y --no-install-recommends \
+            -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30 \
+            -o DPkg::Lock::Timeout=120 \
+            build-essential \
+            ca-certificates \
+            curl \
+            file \
+            git \
+            libasound2-dev \
+            libayatana-appindicator3-dev \
+            libgtk-3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            libxdo-dev \
+            patchelf \
+            pkg-config \
+            python3 \
+            strace \
+            util-linux \
+            wget
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+      - name: Mark workspace safe for git (containerized job)
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - uses: cashapp/activate-hermit@cea9af7913204a965fd488637a8d1811bba2e616 # v1
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: desktop/src-tauri
+          shared-key: linux-git-launcher-release
+          save-if: ${{ github.event_name != 'pull_request' }}
+      - name: Verify non-root release-profile descriptor launcher
+        run: desktop/scripts/verify-linux-git-launcher-runtime.sh "$RUNNER_TEMP/linux-git-launcher-evidence"
+      - name: Upload Linux Git launcher evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: linux-git-launcher-evidence-ci-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/linux-git-launcher-evidence
+          if-no-files-found: warn
+          retention-days: 7
 
   desktop-smoke-e2e:
     name: Desktop Smoke E2E (${{ matrix.shard }})

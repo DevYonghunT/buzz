@@ -29,6 +29,7 @@ jobs:
       # AppImage tools are themselves AppImages; containers lack FUSE so we
       # must use the extract-and-run fallback.
       APPIMAGE_EXTRACT_AND_RUN: "1"
+      SCHOOLX_LAUNCHER_CONTAINER_IMAGE: ubuntu:24.04@sha256:4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90
     defaults:
       run:
         shell: bash
@@ -70,7 +71,10 @@ jobs:
             libxdo-dev \
             patchelf \
             pkg-config \
+            python3 \
             squashfs-tools \
+            strace \
+            util-linux \
             wget \
             xdg-utils
 
@@ -153,6 +157,18 @@ jobs:
         run: |
           cd desktop && node scripts/set-version-from-tag.mjs "$VERSION"
           cd src-tauri && cargo update --workspace
+
+      - name: Verify non-root release-profile descriptor launcher
+        run: desktop/scripts/verify-linux-git-launcher-runtime.sh "$RUNNER_TEMP/linux-git-launcher-evidence"
+
+      - name: Upload Linux Git launcher evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: linux-git-launcher-evidence-canary-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/linux-git-launcher-evidence
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Generate non-updating bundle config
         run: |
