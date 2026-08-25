@@ -5,6 +5,14 @@
 [`DEVELOPMENT_PLAN.md`](DEVELOPMENT_PLAN.md), 재현 가능한 검증 상태는
 [`BASELINE.md`](BASELINE.md)를 기준으로 한다.
 
+> **현재성 주의 (2026-08-25):** 아래의 「진행 중인 세션」과 구현 snapshot은
+> 2026-08-05 SchoolX foundation 당시의 역사적 상태다. SchoolX Code의 현재
+> Codex 계약과 다음 기능 decision gate는
+> [`SESSION_HANDOFF_20260825_CODEX_0_149_AND_NEXT_SLICE_DECISION.md`](SESSION_HANDOFF_20260825_CODEX_0_149_AND_NEXT_SLICE_DECISION.md),
+> artifact별 release 판정은
+> [`SESSION_HANDOFF_20260825_CODE_RELEASE_READINESS.md`](SESSION_HANDOFF_20260825_CODE_RELEASE_READINESS.md)를
+> 우선한다. 아래 기록은 당시 handoff를 보존하기 위해 소급 갱신하지 않는다.
+
 ## 기본 원칙
 
 - 구조, 권한, 프로토콜, 배포 설정을 바꾸는 작업은 높은 추론으로 수행한다.
@@ -16,7 +24,7 @@
 
 ## 진행 중인 세션의 인계
 
-가장 최근 세션의 「지금 열려 있는 것」과 그 세션에서 발견한 함정은
+이 foundation snapshot에서 가장 최근 세션의 「지금 열려 있는 것」과 그 세션에서 발견한 함정은
 [`SESSION_HANDOFF_20260805.md`](SESSION_HANDOFF_20260805.md)에 있다. 이
 문서는 프로젝트 전반의 상시 사실을 담고, 저쪽은 「다음에 무엇을 집을까」를
 담는다.

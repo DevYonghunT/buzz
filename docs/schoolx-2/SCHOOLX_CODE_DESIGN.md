@@ -1,14 +1,16 @@
 # SchoolX Code — Codex형 로컬 개발 환경 설계
 
-상태: 구현 기준안 v0.1
+상태: 구현 기준안 v0.2
 작성일: 2026-08-13
+최종 갱신일: 2026-08-25
 대상: SchoolX 데스크톱(Tauri 2 + React 19)
 
 구현 현황: Phase 0 runtime부터 Phase 1D typed adapter/pure reducer, Phase 1E UI
 수직 슬라이스를 거쳐 Phase 1F normalized event/recovery E2E와 exact bound-thread
-Changes inspector, Phase 1F.1 freshness closure, Codex 0.145 permission 보완,
-실제 managed-worktree Changes 회귀, UI lifecycle/exact E2E bridge와 pinned 0.145
-app-server manual boundary, Git replacement-object immutable-base 차단과 native runtime
+Changes inspector, Phase 1F.1 freshness closure, 역사적 Codex 0.145 permission 보완,
+실제 managed-worktree Changes 회귀, UI lifecycle/exact E2E bridge와 최초 0.145
+app-server manual boundary, 현재 exact 0.149.0 schema/wire snapshot과 recovery 호환성,
+Git replacement-object immutable-base 차단과 native runtime
 diagnostic egress redaction, cross-platform descendant cleanup, permission display/authority
 분리, authoritative runtime checkpoint, generation Changes/prompt reconciliation과
 Changes completeness/status closure, Phase 2 exact bound-thread PTY terminal과 exact-bound
@@ -18,7 +20,11 @@ runtime-generation model/reasoning selector와 Phase 3 Git write public contract
 owned-lock/CAS/startup recovery, Native admission gate와 remount-safe frontend recovery UX까지 구현했다.
 Crash/response-loss 행렬과 전체 Native/frontend/fresh-build E2E 회귀도 통과했다. 세 native Git helper의
 process-launch authority도 선택 B(signed unprivileged macOS XPC + Linux pinned direct spawn)로 구현했다.
-지원 범위, fault 결과와 남은 release artifact gate는
+현재 Codex 계약, 제품 진입점, 운영 증거와 다음 Phase 3 decision gate는
+[`SESSION_HANDOFF_20260825_CODEX_0_149_AND_NEXT_SLICE_DECISION.md`](SESSION_HANDOFF_20260825_CODEX_0_149_AND_NEXT_SLICE_DECISION.md)를
+우선한다. Artifact별 최신 검증과 canonical release 잔여 gate는
+[`SESSION_HANDOFF_20260825_CODE_RELEASE_READINESS.md`](SESSION_HANDOFF_20260825_CODE_RELEASE_READINESS.md)를
+기준으로 한다. Launch authority의 원래 지원 범위, fault 결과와 residual은
 [`SESSION_HANDOFF_20260821_CODE_HELPER_LAUNCH_AUTHORITY_DECISION.md`](SESSION_HANDOFF_20260821_CODE_HELPER_LAUNCH_AUTHORITY_DECISION.md)를
 기준으로 하고, 원래 착수 조건은
 [`SESSION_HANDOFF_20260821_CODE_HELPER_LAUNCH_AUTHORITY.md`](SESSION_HANDOFF_20260821_CODE_HELPER_LAUNCH_AUTHORITY.md),
@@ -64,9 +70,11 @@ SchoolX 안에 Codex와 유사한 개발 환경을 구현할 수 있다. 현재 
   체크아웃에서 실행하는 것은 명시적으로 선택한 경우뿐이다.
 
 이 설계는 OpenAI의 `app-server`가 rich client를 위해 제공하는 스레드, 턴,
-승인, 스트리밍 이벤트, 인증 계약을 사용한다. 현재 개발 노트북에서 확인한
-설치본은 `codex-cli 0.145.0`이며 `codex app-server`, `generate-ts`,
-`generate-json-schema`를 제공한다.
+승인, 스트리밍 이벤트, 인증 계약을 사용한다. 현재 exact schema/wire와 설치
+동작을 검증한 버전은 `codex-cli 0.149.0`이며 `codex app-server`, `generate-ts`,
+`generate-json-schema`를 제공한다. `0.145.0`은 최초 역사적 baseline으로 보존되고
+runtime gate도 두 audited minor의 numeric patch를 호환 범위로 유지하지만, 최신
+exact 증명 snapshot은 `0.149.0`이다.
 
 ## 2. 제품 구조와 이름
 
@@ -120,7 +128,7 @@ localStorage 내부 키는 이 기능 때문에 이름을 바꾸지 않는다. �
 
 | 현재 기능 | 위치 | SchoolX Code에서의 역할 |
 |---|---|---|
-| 프로젝트 상세 탭 | `features/projects/ui/ProjectWorkspaceTabs.tsx` | Code 진입점과 기존 Project 문맥 유지 |
+| 프로젝트 카드/목록과 상세 탭 | `features/projects/ui/ProjectCards.tsx`, `ProjectWorkspaceTabs.tsx` | 두 Code 진입점과 기존 Project 문맥 유지 |
 | 로컬/원격 파일 탐색 | `ProjectRepositoryPanel.tsx` | 파일 트리와 읽기 전용 preview |
 | Git snapshot/diff/branch/push | `commands/project_git*`, `shared/api/projectGit.ts` | 변경 검토와 Git handoff |
 | PR files/inline comment | `ProjectPullRequestFilesChangedPanel.tsx` | 검토 UI 패턴 재사용 |
@@ -137,7 +145,8 @@ localStorage 내부 키는 이 기능 때문에 이름을 바꾸지 않는다. �
 
 ### 5.1 정보 구조
 
-SchoolX Code는 프로젝트 상세에서 열리며 다음 네 영역을 사용한다.
+SchoolX Code는 프로젝트 카드/목록의 직접 action이나 프로젝트 상세 action에서
+열리며 다음 네 영역을 사용한다.
 
 ```text
 ┌ 작업 사이드바 ┬──────── 대화·실행 타임라인 ────────┬ 변경/파일 검사기 ┐
@@ -303,7 +312,7 @@ Ready → Stopping → Stopped
 | app-server 1회성 command(통합 터미널과 별도) | `command/exec`, `/write`, `/resize`, `/terminate` |
 | 승인 | `item/commandExecution/requestApproval`, `item/fileChange/requestApproval`, `item/permissions/requestApproval` |
 
-현재 pinned 0.145 수직 슬라이스는 `thread/name/set`, `thread/archive`,
+현재 audited 0.145/0.149 수직 슬라이스는 `thread/name/set`, `thread/archive`,
 `thread/unarchive`, `thread/fork`, `model/list`를 활성화한다. `command/exec` 계열은 아직
 활성화하지 않는다. 통합 터미널은 app-server RPC가 아니라 native가 소유하는 별도 OS shell
 PTY다.
@@ -340,8 +349,10 @@ server request는 자동 허용하지 않고 `method not supported`로 fail clos
    재생한다.
 5. 새 Codex 버전은 compatibility test를 통과한 뒤 지원 목록에 추가한다.
 
-현재 확인 버전 `0.145.0`을 최초 fixture 기준으로 쓰되, 이것을 영구 API로
-가정하지 않는다.
+`0.145.0`은 최초 fixture이자 역사적 compatibility baseline으로 보존한다.
+현재 최신 exact fixture는 `0.149.0`이다. Runtime은 `0.145.<numeric patch>`와
+`0.149.<numeric patch>`를 admit하지만, 모든 patch의 schema가 동일하다는 뜻은
+아니다. 두 exact snapshot 모두 영구 API로 가정하지 않는다.
 
 ## 8. 로컬 데이터와 relay 데이터
 
@@ -395,8 +406,8 @@ CodeThreadBinding {
 - versioned binding index와 미완료 preparation journal은 Tauri app data의
   `code/thread-bindings.json`에 함께 저장한다.
 - native가 canonicalize한 절대 경로만 Codex `cwd`와 turn
-  `sandboxPolicy.writableRoots`에 전달한다. 현재 stable Codex app-server
-  0.145 계약에 없는 top-level `runtimeWorkspaceRoots`는 보내지 않는다.
+  `sandboxPolicy.writableRoots`에 전달한다. Audited Codex app-server 0.145/0.149
+  계약에 없는 top-level `runtimeWorkspaceRoots`는 보내지 않는다.
 - symlink를 따라간 최종 경로가 허용 root 밖이면 거부한다.
 - 같은 worktree를 두 active thread가 동시에 쓰지 못한다.
 - 실제 삭제는 clean/merged 여부를 확인한 별도 사용자 action으로만 수행하며,
@@ -488,7 +499,7 @@ desktop/src-tauri/src/
 │   ├── approvals.rs        # pending approval gate
 │   ├── paths.rs            # executable/workspace canonicalization
 │   ├── bindings.rs         # versioned binding/preparation persistence
-│   ├── discovery.rs        # executable/version discovery와 0.145.x gate
+│   ├── discovery.rs        # executable/version discovery와 0.145.x/0.149.x gate
 │   ├── model_catalog.rs    # generation-bound model catalog와 최근 선택
 │   ├── worktrees.rs        # git identity와 descriptor-bound worktree 준비
 │   └── terminal.rs         # exact bound-thread PTY session actor/ownership
@@ -653,19 +664,19 @@ response/crash round-trip이 통과한다.
 cross-platform app-server child-tree ownership, permission display/authority 분리와 generation
 전환의 Changes/prompt 정합성, Changes의 complete manifest/status/binary/bounded patch와
 drift retry까지 포함한다. Phase 2의 exact bound-thread terminal과 로컬 bound-result 검색,
-pinned 0.145 `thread/name/set` 이름 변경, leaf-only archive/unarchive lifecycle authority도
+audited 0.145/0.149 `thread/name/set` 이름 변경, leaf-only archive/unarchive lifecycle authority도
 완료했다. clean managed-source의 전체 persisted history를 fresh destination worktree로
 분기하는 fork와 exact-scope managed-worktree inventory도 완료했다. Native proof-based eligibility,
 strict public remove command/receipt, explicit confirmation과 response-loss-safe authoritative reconciliation을
 포함한 safe worktree removal 수직 슬라이스도 완료했다. Runtime-generation-bound catalog,
 model/reasoning selector, installation-global recent preference와 thread-open authority 복구까지
-완료했으며 Git write handoff만 이후 범위다.
+완료했고 Phase 3의 whole-file stage/unstage와 staged-only commit handoff도 완료했다.
 
 ### Phase 2 — 터미널과 작업 관리
 
 - 첫 수직 슬라이스: exact bound-thread PTY session ownership과 terminal drawer
 - typed terminal resize/stdin/terminate와 `⌘J` lifecycle
-- exact-scope bound-result 로컬 검색과 pinned 0.145 thread 이름 변경
+- exact-scope bound-result 로컬 검색과 audited 0.145/0.149 thread 이름 변경
 - persisted lifecycle authority와 leaf-only thread archive/unarchive
 - fresh destination worktree를 사용하는 thread fork
 - worktree 목록, 보존, 안전한 제거
@@ -704,7 +715,7 @@ authority와 exact pending/reserved approval을 RPC 전에 검사한다.
 
 Pinned archive가 spawned descendant까지 연쇄 archive할 수 있으므로 native는 authoritative
 thread graph에서 target의 descendant 부재를 증명한 leaf thread만 허용한다. 증명은 cwd
-filter 없이 active와 archived 양쪽을 pinned 0.145의 모든
+filter 없이 active와 archived 양쪽을 audited 0.145/0.149의 모든
 `ThreadSourceKind`(`cli`, `vscode`, `exec`, `appServer`, `subAgent`, `subAgentReview`,
 `subAgentCompact`, `subAgentThreadSpawn`, `subAgentOther`, `unknown`)로 cursor 끝까지 조회하고
 `parentThreadId`/`forkedFromId` ancestry를 검사해야 한다. default interactive-source 또는
@@ -717,7 +728,7 @@ rollback하며 response loss, conflicting notification, stable commit failure는
 
 Fork도 부모의 managed root를 공유하지 않는다. lifecycle-clean stable `active` managed binding,
 idle thread, clean source worktree만 허용하고 source의 current immutable HEAD에서 detached clean
-destination을 먼저 만든다. Public input은 exact `{scope, threadId}`뿐이며 0.145 wire는
+destination을 먼저 만든다. Public input은 exact `{scope, threadId}`뿐이며 audited 0.145/0.149 request는
 `threadId`, native destination `cwd`, `approvalPolicy`, `sandbox`, preparation-derived
 `threadSource` 다섯 필드만 사용한다. 첫 수직 슬라이스는 `lastTurnId`를 노출하지 않고 전체
 persisted history를 복사한다.
@@ -728,8 +739,14 @@ direct-local `mergeTargetRef`를 저장한다.
 non-ephemeral flag, app-server source와 preparation marker를 모두 검증하고 source lifecycle/activity
 proof를 다시 확인한 뒤에만 새 binding을 atomic commit한다. Definitely-not-sent만 같은 preparation과
 destination을 `prepared`로 rollback하고, byte admission 이후 response loss나 4 MiB line cap 초과는
-`starting`으로 sticky하게 남긴다. Recovery는 재-fork하지 않고 `thread/list`와
-`thread/read(includeTurns:false)`의 exact marker/ancestry/root를 검증해 한 child만 bind한다.
+`starting`으로 sticky하게 남긴다. Recovery는 재-fork하지 않는다. Active/archived
+`thread/list`와 `thread/loaded/list`를 bounded pagination한 뒤, list에 없고 loaded-only인
+ID는 exact bound/deferred target 또는 pending fork expectation일 때만
+`thread/read(includeTurns:false)`로 hydrate한다. 이 read의 ID, SchoolX marker, ancestry,
+canonical root, quiescence와 empty-turn 조건을 검증해 한 child만 bind한다. 실제 0.149
+recovery wire에서 관측한 `vscode`와 schema/0.145 spelling인 `appServer`는 이 recovery
+경로에서만 동등하게 admit하며, unrelated source나 marker 없는 row는 fail closed한다.
+이를 모든 app-server flow의 source가 동등하다는 주장으로 확장하지 않는다.
 Source의 dirty patch 복사와 worktree 자동 삭제는 Git handoff 전에는 지원하지 않는다. Codex
 app-server가 실행하는 command와 사용자 OS shell PTY는 계속 별도 process/session authority로
 유지한다.
@@ -869,6 +886,11 @@ write, hunk/stage-all, branch/push/PR과 Talk 공유는 후속 slice다. 상세 
 [`SESSION_HANDOFF_20260820_CODE_PHASE3_GIT_WRITE.md`](SESSION_HANDOFF_20260820_CODE_PHASE3_GIT_WRITE.md)에 있고,
 현재 완료 구현과 명시적 후속 hardening 경계는
 [`SESSION_HANDOFF_20260821_CODE_PHASE3_GIT_WRITE_IMPLEMENTATION.md`](SESSION_HANDOFF_20260821_CODE_PHASE3_GIT_WRITE_IMPLEMENTATION.md)에 있다.
+다음 독립 slice는 아직 승인되지 않았다. 2026-08-25 후보 비교와 권장
+`inline diff note -> 다음 idle turn context`의 decision gate, public contract, fault matrix와
+UI/E2E 완료 기준은
+[`SESSION_HANDOFF_20260825_CODEX_0_149_AND_NEXT_SLICE_DECISION.md`](SESSION_HANDOFF_20260825_CODEX_0_149_AND_NEXT_SLICE_DECISION.md)에
+있으며 사용자 승인 전에는 구현하지 않는다.
 
 ### Phase 4 — 편집기 평가
 
@@ -973,7 +995,7 @@ E2E build는 저장소 규칙대로 반드시 `pnpm build:e2e` 경로를 사용�
 - `AppState`에 runtime state 등록
 - `commands/mod.rs`, `lib.rs`에 command/event wiring
 - 새 `desktop/src/features/code/**`
-- 프로젝트 상세에 Code workspace 진입점 한 곳
+- 프로젝트 카드/목록과 상세에 Code workspace 진입점
 - mock bridge + unit/E2E fixture
 - semantic brand token 보완
 
