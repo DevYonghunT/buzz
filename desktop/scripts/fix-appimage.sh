@@ -42,8 +42,8 @@
 #     wrong -- spawning nothing, dying on unresolved bundled libs, or spawning
 #     the system helpers -- and the window never appears.
 #
-# Fix: (a) remove the offending libs so the app uses the system copies (newer and
-# ABI-compatible on any distro shipping glib >= 2.72 / Ubuntu 22.04+), and
+# Fix: (a) remove the offending libs so the app uses compatible system copies
+# (the complete release currently has a separately verified glibc 2.39 floor), and
 # (b) install a launcher shim in front of the app binary that strips the
 # bundle-pointing GST_PLUGIN_* overrides AppRun.wrapped injects, letting the host
 # GStreamer resolve plugins via its own default path (correct on Debian, Arch, and

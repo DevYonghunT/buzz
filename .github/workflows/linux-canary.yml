@@ -175,7 +175,8 @@ jobs:
           cat > desktop/src-tauri/tauri.canary.conf.json <<'JSON'
           {
             "bundle": {
-              "createUpdaterArtifacts": false
+              "createUpdaterArtifacts": false,
+              "useLocalToolsDir": true
             }
           }
           JSON
@@ -185,10 +186,16 @@ jobs:
           cargo build --release -p buzz-acp -p buzz-agent -p buzz-dev-mcp -p git-credential-nostr -p buzz-cli
           ./scripts/bundle-sidecars.sh
 
+      - name: Install pinned Tauri AppImage bundler tools
+        run: desktop/scripts/install-tauri-appimage-tools.sh
+
       - name: Build Linux Tauri app
         run: cd desktop && pnpm tauri build --ci --bundles deb,appimage --config src-tauri/tauri.canary.conf.json
         env:
           CMAKE_POLICY_VERSION_MINIMUM: "3.5"
+
+      - name: Verify pinned Tauri AppImage tools after bundling
+        run: desktop/scripts/install-tauri-appimage-tools.sh --verify-only
 
       - name: Fix AppImage (remove infra libs, symlink system GStreamer)
         # fix-appimage.sh checks for TAURI_SIGNING_PRIVATE_KEY and skips

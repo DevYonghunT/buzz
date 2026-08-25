@@ -602,6 +602,9 @@ jobs:
           BUZZ_UPDATER_PUBLIC_KEY: ${{ secrets.BUZZ_UPDATER_PUBLIC_KEY || secrets.SPROUT_UPDATER_PUBLIC_KEY }}
           BUZZ_UPDATER_ENDPOINT: https://github.com/block/buzz/releases/download/buzz-desktop-latest/latest.json
 
+      - name: Install pinned Tauri AppImage bundler tools
+        run: desktop/scripts/install-tauri-appimage-tools.sh
+
       - name: Build Linux Tauri app
         run: cd desktop && pnpm tauri build --verbose --ci --bundles deb,appimage --config src-tauri/tauri.release.conf.json
         env:
@@ -610,6 +613,9 @@ jobs:
           CMAKE_POLICY_VERSION_MINIMUM: "3.5"
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+      - name: Verify pinned Tauri AppImage tools after bundling
+        run: desktop/scripts/install-tauri-appimage-tools.sh --verify-only
 
       - name: Fix AppImage (remove infra libs, shim host GStreamer)
         run: |

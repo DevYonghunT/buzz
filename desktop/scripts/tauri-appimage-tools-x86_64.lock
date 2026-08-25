@@ -1,0 +1,14 @@
+# Tauri CLI 2.11.2 uses tauri-bundler 2.9.2 from source commit
+# 499df79be65ef8c0670abc0207cd9e37b55d8491.
+#
+# Columns:
+#   download_sha256 accepted_cache_sha256 filename url
+#
+# tauri-bundler overwrites bytes 8..10 of linuxdeploy with zeroes so desktop
+# integration tools do not detect it. The second hash records exactly that
+# deterministic post-prepare_tools form; all other cache mutations fail.
+f30140a43a0a59e46db21bdefdf749b9e9f2c6946e92afabbacf98b8ae73fb4f f30140a43a0a59e46db21bdefdf749b9e9f2c6946e92afabbacf98b8ae73fb4f AppRun-x86_64 https://github.com/tauri-apps/binary-releases/releases/download/apprun-old/AppRun-x86_64
+e762bea85c8eb0d4b3508d46e5c1f037f717d0f9303ae3b4aafc8b04991fa1ef 20eebde3c18ae2e44279bd624fc72482503aece216d5d77f10932235342f71c1 linuxdeploy-x86_64.AppImage https://github.com/tauri-apps/binary-releases/releases/download/linuxdeploy/linuxdeploy-x86_64.AppImage
+06a56df39e65806170ebae570e593ea14ad9aecf97f668694c343f461482b4c4 06a56df39e65806170ebae570e593ea14ad9aecf97f668694c343f461482b4c4 linuxdeploy-plugin-gtk.sh https://raw.githubusercontent.com/tauri-apps/tauri/499df79be65ef8c0670abc0207cd9e37b55d8491/crates/tauri-bundler/src/bundle/linux/appimage/linuxdeploy-plugin-gtk.sh
+2a15ce9da8de6e20159e1ab27861a7a5ef8758c81a6278ba4ab30cefa1d74c9f 2a15ce9da8de6e20159e1ab27861a7a5ef8758c81a6278ba4ab30cefa1d74c9f linuxdeploy-plugin-gstreamer.sh https://raw.githubusercontent.com/tauri-apps/tauri/499df79be65ef8c0670abc0207cd9e37b55d8491/crates/tauri-bundler/src/bundle/linux/appimage/linuxdeploy-plugin-gstreamer.sh
+a45d3e227bc7f397e9cf6bfa4c9507494efa2293357b6e86690a3de2ca992e79 a45d3e227bc7f397e9cf6bfa4c9507494efa2293357b6e86690a3de2ca992e79 linuxdeploy-plugin-appimage.AppImage https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/continuous/linuxdeploy-plugin-appimage-x86_64.AppImage
