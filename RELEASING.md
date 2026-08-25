@@ -5,7 +5,7 @@ Mobile uses immutable release-candidate tags cut directly from remote `main`:
 
 | Lane | Entry point | Artifact |
 |------|-------------|----------|
-| Desktop | `just release-desktop <version>` | Packaged desktop app (signed/notarized macOS, unsigned Windows, and Linux) |
+| Desktop | `just release-desktop <version>` | Packaged desktop app (signing-gated macOS, unsigned Windows, and Linux) |
 | Relay | `just release-relay` | `ghcr.io/block/buzz` container image |
 | Mobile | `scripts/mobile-release.sh candidate X.Y.Z` | Exact `mobile-vX.Y.Z-rc.N` source identity |
 
@@ -210,18 +210,43 @@ The release workflow builds **two separate macOS DMGs**: Apple
 Silicon (`darwin-aarch64`, the `release` job) and Intel
 (`darwin-x86_64`, the `release-macos-x64` job), an unsigned Windows x64
 NSIS installer (its filename includes `_alpha-unsigned`), and Linux `.deb` and
-`.AppImage` packages. Both macOS DMGs are codesigned, notarized, and attached
-to the same `desktop-v<version>` release. Intel users
-download the `_x64.dmg`.
+`.AppImage` packages. Both macOS DMGs must be codesigned, notarized, stapled,
+and pass the final verifier before they are attached to the same
+`desktop-v<version>` release. Intel users download the `_x64.dmg`.
+
+The final DMG bytes must pass `desktop/scripts/verify-signed-macos-release.sh`
+before publication. The currently pinned `block/apple-codesign-action` v1.1.0
+signs/notarizes the app extracted from a DMG, then swaps that app into a locally
+rebuilt DMG; its `signed-dmg-path` output is not itself signed, submitted for
+notarization, or stapled. Consequently the release remains deliberately blocked
+at the final-DMG gate until that action contract returns a codesigned,
+notarized, stapled DMG (or an authorized equivalent final-DMG signing lane is
+provided). Do not weaken the verifier or describe the rebuilt output as a
+notarized DMG.
 
 The Linux AppImage is post-processed by `desktop/scripts/fix-appimage.sh`,
 which strips infra libraries over-bundled by linuxdeploy (they crash on
 Mesa 25+ / GLib 2.88 distros; see
 [tauri-apps/tauri#15665](https://github.com/tauri-apps/tauri/issues/15665))
 and re-signs the artifact. As a result the AppImage relies on the
-host's Wayland/GStreamer/graphics stack and requires GLib >= 2.72
-(Ubuntu 22.04 or newer). The `release-linux` job builds inside a
-`ubuntu:22.04` container for broad GLIBC compatibility.
+host's Wayland/GStreamer/graphics stack. The `release-linux` job builds inside
+the digest-pinned Ubuntu 24.04 container recorded in `.github/workflows/release.yml`.
+The 2026-08-25 release-readiness build observed `GLIBC_2.39` as the highest
+required symbol version across the desktop executable and bundled sidecars, and
+Ubuntu 24.04 is the oldest distro on which that package was validated. In other
+words, the observed ABI requirement is glibc >= 2.39; these observations do not
+by themselves establish a general distro compatibility floor or compatibility
+with Ubuntu 22.04. Broader support claims require building against an explicitly
+pinned sysroot and runtime-smoke-testing every packaged executable on each
+claimed target.
+
+Tauri CLI 2.11.2 otherwise downloads five AppImage build helpers from its own
+release and mutable upstream locations. Linux release builds must run
+`desktop/scripts/install-tauri-appimage-tools.sh` before Tauri and use an
+effective config with `bundle.useLocalToolsDir: true`. The script derives the
+cache directory from `cargo metadata`, pre-seeds all five helpers from
+`desktop/scripts/tauri-appimage-tools-x86_64.lock`, and fails closed on any
+SHA-256 mismatch.
 
 ---
 
