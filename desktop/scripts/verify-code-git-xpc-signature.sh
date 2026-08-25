@@ -7,6 +7,7 @@ set -euo pipefail
 app_path=${1:?usage: verify-code-git-xpc-signature.sh /path/to/SchoolX.app}
 app_identifier=io.github.schoolx520.app
 xpc_identifier=io.github.schoolx520.app.schoolx-code-git
+expected_team_identifier=3WPS7QNZV5
 xpc_path="$app_path/Contents/XPCServices/${xpc_identifier}.xpc"
 xpc_executable="$xpc_path/Contents/MacOS/schoolx-code-git"
 
@@ -23,7 +24,7 @@ if [[ ! -f "$xpc_executable" || -L "$xpc_executable" || ! -x "$xpc_executable" ]
   exit 1
 fi
 
-/usr/bin/codesign --verify --strict --verbose=2 "$xpc_path"
+/usr/bin/codesign --verify --strict --all-architectures --verbose=2 "$xpc_path"
 
 signature_metadata() {
   /usr/bin/codesign --display --verbose=4 "$1" 2>&1
@@ -55,8 +56,8 @@ if [[ "$signed_xpc_identifier" != "$xpc_identifier" ]]; then
   echo "unexpected signed Code Git XPC identifier: $signed_xpc_identifier" >&2
   exit 1
 fi
-if [[ ! "$app_team" =~ ^[0-9A-Za-z]+$ || ! "$xpc_team" =~ ^[0-9A-Za-z]+$ || "$app_team" != "$xpc_team" ]]; then
-  echo "app and Code Git XPC require the same non-empty TeamIdentifier" >&2
+if [[ "$app_team" != "$expected_team_identifier" || "$xpc_team" != "$expected_team_identifier" ]]; then
+  echo "app and Code Git XPC must use expected TeamIdentifier $expected_team_identifier" >&2
   exit 1
 fi
 
@@ -68,12 +69,21 @@ developer_id_requirement() {
 
 app_requirement=$(developer_id_requirement "$app_identifier" "$app_team")
 xpc_requirement=$(developer_id_requirement "$xpc_identifier" "$xpc_team")
-/usr/bin/codesign --verify --strict --verbose=2 -R="$app_requirement" "$app_path"
-/usr/bin/codesign --verify --strict --verbose=2 -R="$xpc_requirement" "$xpc_path"
+/usr/bin/codesign --verify --strict --all-architectures --verbose=2 \
+  -R="$app_requirement" "$app_path"
+/usr/bin/codesign --verify --strict --all-architectures --verbose=2 \
+  -R="$xpc_requirement" "$xpc_path"
 
 plist_identifier=$(
   /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$xpc_path/Contents/Info.plist"
 )
+app_plist_identifier=$(
+  /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app_path/Contents/Info.plist"
+)
+if [[ "$app_plist_identifier" != "$app_identifier" ]]; then
+  echo "unexpected app Info.plist identifier: $app_plist_identifier" >&2
+  exit 1
+fi
 if [[ "$plist_identifier" != "$xpc_identifier" ]]; then
   echo "unexpected Code Git XPC Info.plist identifier: $plist_identifier" >&2
   exit 1

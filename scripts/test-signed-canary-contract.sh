@@ -15,7 +15,9 @@ grep -Fq 'block/apple-codesign-action@' "$workflow"
 grep -Fq 'actions/upload-artifact@' "$workflow"
 grep -Fq 'retention-days: 7' "$workflow"
 grep -Fq '"createUpdaterArtifacts": false' "$workflow"
-grep -Fq 'desktop/scripts/verify-code-git-xpc-signature.sh' "$workflow"
+grep -Fq 'desktop/scripts/verify-signed-macos-release.sh' "$workflow"
+grep -Fq 'REBUILT_DMG: ${{ steps.codesign.outputs.signed-dmg-path }}' "$workflow"
+grep -Fq 'FINAL_DMG: ${{ steps.artifact.outputs.path }}' "$workflow"
 
 if grep -Eq 'contents: write|gh release|buzz-desktop-latest|latest\.json|TAURI_SIGNING_PRIVATE_KEY|verify-release-ref\.sh|refs/tags/' "$workflow"; then
   echo "signed canary workflow gained a release or publishing capability" >&2

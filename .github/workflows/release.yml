@@ -170,7 +170,7 @@ jobs:
       - name: Stage signing entitlements
         run: cp desktop/src-tauri/Entitlements.plist "${RUNNER_TEMP}/entitlements.plist"
 
-      - name: Codesign and Notarize
+      - name: Codesign and notarize app
         id: codesign
         uses: block/apple-codesign-action@679535d1ab7c5a7c18e6f9afcba3464512cc3dde # v1.1.0
         with:
@@ -182,7 +182,7 @@ jobs:
 
       - name: Replace DMG and rebuild updater archive
         env:
-          SIGNED_DMG: ${{ steps.codesign.outputs.signed-dmg-path }}
+          REBUILT_DMG: ${{ steps.codesign.outputs.signed-dmg-path }}
           SIGNED_APP_ZIP: ${{ steps.codesign.outputs.signed-artifact-path }}
           UNSIGNED_DMG: ${{ steps.unsigned.outputs.dmg }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -192,8 +192,10 @@ jobs:
           BUNDLE_DIR="desktop/src-tauri/target/release/bundle"
           APP_DIR="${BUNDLE_DIR}/macos"
 
-          # Replace unsigned DMG with the signed/notarized one.
-          cp "$SIGNED_DMG" "$UNSIGNED_DMG"
+          # The pinned action rebuilds this candidate locally after swapping in
+          # the signed app; the final verifier must reject it until the action
+          # also signs, submits, and staples the rebuilt DMG bytes.
+          cp "$REBUILT_DMG" "$UNSIGNED_DMG"
 
           # Swap the unsigned .app for the signed .app extracted from the action's zip.
           EXTRACT_DIR="${RUNNER_TEMP}/signed-app-extract"
@@ -208,16 +210,17 @@ jobs:
           TARBALL_ABS="$(pwd)/${APP_DIR}/SchoolX.app.tar.gz"
           (cd desktop && pnpm tauri signer sign "$TARBALL_ABS")
 
-      - name: Verify code signature
+      - name: Verify signed app, updater archive, and final DMG
+        # The pinned signing action currently swaps a signed app into a locally
+        # rebuilt DMG without signing/notarizing/stapling those final DMG bytes.
+        # Keep this hard gate: the action contract must be fixed before release.
+        env:
+          FINAL_DMG: ${{ steps.unsigned.outputs.dmg }}
+          UPDATER_ARCHIVE: desktop/src-tauri/target/release/bundle/macos/SchoolX.app.tar.gz
         run: |
-          codesign --verify --deep --strict --verbose=2 \
-            desktop/src-tauri/target/release/bundle/macos/SchoolX.app
-          spctl --assess --type execute --verbose=4 \
-            desktop/src-tauri/target/release/bundle/macos/SchoolX.app
-          desktop/scripts/verify-macos-entitlements.sh \
-            desktop/src-tauri/target/release/bundle/macos/SchoolX.app
-          desktop/scripts/verify-code-git-xpc-signature.sh \
-            desktop/src-tauri/target/release/bundle/macos/SchoolX.app
+          desktop/scripts/verify-signed-macos-release.sh arm64 \
+            desktop/src-tauri/target/release/bundle/macos/SchoolX.app \
+            "$FINAL_DMG" "$UPDATER_ARCHIVE"
 
       - name: Locate build artifacts
         id: artifacts
@@ -347,7 +350,7 @@ jobs:
       - name: Stage signing entitlements
         run: cp desktop/src-tauri/Entitlements.plist "${RUNNER_TEMP}/entitlements.plist"
 
-      - name: Codesign and Notarize
+      - name: Codesign and notarize app
         id: codesign
         uses: block/apple-codesign-action@679535d1ab7c5a7c18e6f9afcba3464512cc3dde # v1.1.0
         with:
@@ -359,7 +362,7 @@ jobs:
 
       - name: Replace DMG and rebuild updater archive
         env:
-          SIGNED_DMG: ${{ steps.codesign.outputs.signed-dmg-path }}
+          REBUILT_DMG: ${{ steps.codesign.outputs.signed-dmg-path }}
           SIGNED_APP_ZIP: ${{ steps.codesign.outputs.signed-artifact-path }}
           UNSIGNED_DMG: ${{ steps.unsigned.outputs.dmg }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -368,8 +371,10 @@ jobs:
           set -euo pipefail
           APP_DIR="desktop/src-tauri/target/${TARGET}/release/bundle/macos"
 
-          # Replace the unsigned DMG with the signed/notarized one.
-          cp "$SIGNED_DMG" "$UNSIGNED_DMG"
+          # The pinned action rebuilds this candidate locally after swapping in
+          # the signed app; the final verifier must reject it until the action
+          # also signs, submits, and staples the rebuilt DMG bytes.
+          cp "$REBUILT_DMG" "$UNSIGNED_DMG"
 
           # Swap the unsigned .app for the signed .app from the action's zip.
           EXTRACT_DIR="${RUNNER_TEMP}/signed-app-extract-x64"
@@ -384,13 +389,17 @@ jobs:
           TARBALL_ABS="$(pwd)/${APP_DIR}/SchoolX.app.tar.gz"
           (cd desktop && pnpm tauri signer sign "$TARBALL_ABS")
 
-      - name: Verify code signature
+      - name: Verify signed app, updater archive, and final DMG
+        # The pinned signing action currently swaps a signed app into a locally
+        # rebuilt DMG without signing/notarizing/stapling those final DMG bytes.
+        # Keep this hard gate: the action contract must be fixed before release.
+        env:
+          FINAL_DMG: ${{ steps.unsigned.outputs.dmg }}
+          UPDATER_ARCHIVE: desktop/src-tauri/target/x86_64-apple-darwin/release/bundle/macos/SchoolX.app.tar.gz
         run: |
           APP_DIR="desktop/src-tauri/target/${TARGET}/release/bundle/macos/SchoolX.app"
-          codesign --verify --deep --strict --verbose=2 "$APP_DIR"
-          spctl --assess --type execute --verbose=4 "$APP_DIR"
-          desktop/scripts/verify-macos-entitlements.sh "$APP_DIR"
-          desktop/scripts/verify-code-git-xpc-signature.sh "$APP_DIR"
+          desktop/scripts/verify-signed-macos-release.sh \
+            x86_64 "$APP_DIR" "$FINAL_DMG" "$UPDATER_ARCHIVE"
 
       - name: Locate updater archive
         id: artifacts

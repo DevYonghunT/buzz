@@ -1,8 +1,8 @@
 name: Signed macOS Canary
 
-# Produces a signed and notarized Apple Silicon DMG from main without creating
-# a tag, GitHub Release, or auto-updater artifact. The DMG is available only as
-# a short-lived GitHub Actions artifact for explicit testing.
+# Attempts the Apple Silicon signing contract from main without creating a tag,
+# GitHub Release, or auto-updater artifact. It uploads a short-lived DMG only
+# after the final bytes pass explicit signing, notarization, and stapling gates.
 on:
   workflow_dispatch:
 
@@ -169,7 +169,7 @@ jobs:
       - name: Stage signing entitlements
         run: cp desktop/src-tauri/Entitlements.plist "${RUNNER_TEMP}/entitlements.plist"
 
-      - name: Codesign and notarize
+      - name: Codesign and notarize app
         id: codesign
         uses: block/apple-codesign-action@679535d1ab7c5a7c18e6f9afcba3464512cc3dde # v1.1.0
         with:
@@ -179,30 +179,31 @@ jobs:
           entitlements-plist-path: ${{ runner.temp }}/entitlements.plist
           artifact-name: buzz-canary-${{ github.sha }}-${{ github.run_id }}-arm64
 
-      - name: Verify signed app
+      - name: Stage rebuilt DMG candidate
+        id: artifact
+        env:
+          REBUILT_DMG: ${{ steps.codesign.outputs.signed-dmg-path }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          NAME="Buzz_${VERSION}_aarch64-dmg-candidate.dmg"
+          cp "$REBUILT_DMG" "$RUNNER_TEMP/$NAME"
+          echo "path=$RUNNER_TEMP/$NAME" >> "$GITHUB_OUTPUT"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Verify signed app and final DMG candidate
+        # v1.1.0 only swaps the signed app into a locally rebuilt DMG. This gate
+        # intentionally blocks until the final DMG is signed/notarized/stapled.
         env:
           SIGNED_APP_ZIP: ${{ steps.codesign.outputs.signed-artifact-path }}
+          FINAL_DMG: ${{ steps.artifact.outputs.path }}
         run: |
           set -euo pipefail
           EXTRACT_DIR="${RUNNER_TEMP}/signed-app-extract"
           rm -rf "$EXTRACT_DIR" && mkdir -p "$EXTRACT_DIR"
           ditto -x -k "$SIGNED_APP_ZIP" "$EXTRACT_DIR"
-          codesign --verify --deep --strict --verbose=2 "$EXTRACT_DIR/SchoolX.app"
-          spctl --assess --type execute --verbose=4 "$EXTRACT_DIR/SchoolX.app"
-          desktop/scripts/verify-macos-entitlements.sh "$EXTRACT_DIR/SchoolX.app"
-          desktop/scripts/verify-code-git-xpc-signature.sh "$EXTRACT_DIR/SchoolX.app"
-
-      - name: Stage signed DMG
-        id: artifact
-        env:
-          SIGNED_DMG: ${{ steps.codesign.outputs.signed-dmg-path }}
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          set -euo pipefail
-          NAME="Buzz_${VERSION}_aarch64-signed.dmg"
-          cp "$SIGNED_DMG" "$RUNNER_TEMP/$NAME"
-          echo "path=$RUNNER_TEMP/$NAME" >> "$GITHUB_OUTPUT"
-          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          desktop/scripts/verify-signed-macos-release.sh \
+            arm64 "$EXTRACT_DIR/SchoolX.app" "$FINAL_DMG"
 
       - name: Upload signed canary
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
