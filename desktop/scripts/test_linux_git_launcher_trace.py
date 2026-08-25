@@ -237,6 +237,16 @@ class WorkflowWiringTests(unittest.TestCase):
             'HERMIT_STATE_DIR="$parent_hermit_state_dir"', runtime_gate
         )
         self.assertNotIn('env HOME="$HOME"', runtime_gate)
+        self.assertNotRegex(
+            runtime_gate,
+            r"rustc\s+-vV\s*\|\s*grep\s+[^\n]*-q",
+            "pipefail must not turn grep -q's early exit into a rustc failure",
+        )
+        self.assertNotRegex(
+            runtime_gate,
+            r"file\s+-Lb\s+[^\n|]+\|\s*grep\s+[^\n]*-q",
+            "pipefail must not turn grep -q's early exit into a file failure",
+        )
 
 
 if __name__ == "__main__":

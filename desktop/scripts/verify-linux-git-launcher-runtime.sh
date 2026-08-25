@@ -25,6 +25,7 @@ require_command() {
 }
 
 require_pinned_tuple() {
+  local rust_version
   [[ "$(uname -s)" == "Linux" ]] || fail "requires native Linux"
   [[ "$(uname -m)" == "x86_64" ]] || fail "requires native x86_64; got $(uname -m)"
   [[ -r /etc/os-release ]] || fail "/etc/os-release is unavailable"
@@ -36,9 +37,10 @@ require_pinned_tuple() {
     fail "requires dpkg architecture amd64"
   [[ "$(getconf GNU_LIBC_VERSION)" == "$EXPECTED_GLIBC" ]] ||
     fail "requires $EXPECTED_GLIBC; got $(getconf GNU_LIBC_VERSION)"
-  rustc -vV | grep -Fxq "release: $EXPECTED_RUST_RELEASE" ||
+  rust_version="$(rustc -vV)" || fail "could not inspect the Rust toolchain"
+  grep -Fxq "release: $EXPECTED_RUST_RELEASE" <<<"$rust_version" ||
     fail "requires Rust $EXPECTED_RUST_RELEASE"
-  rustc -vV | grep -Fxq "host: x86_64-unknown-linux-gnu" ||
+  grep -Fxq "host: x86_64-unknown-linux-gnu" <<<"$rust_version" ||
     fail "Rust host is not x86_64-unknown-linux-gnu"
   [[ "${SCHOOLX_LAUNCHER_CONTAINER_IMAGE:-}" == "$PINNED_CONTAINER_IMAGE" ]] ||
     fail "SCHOOLX_LAUNCHER_CONTAINER_IMAGE must name the pinned Ubuntu image"
@@ -52,7 +54,7 @@ record_hash() {
 }
 
 run_nonroot_gate() {
-  local test_binary="$1"
+  local test_binary="$1" test_binary_file system_git_file
   evidence_dir="$2"
 
   [[ "$(id -u)" -ne 0 ]] || fail "runtime/strace gate must not run as root"
@@ -68,9 +70,12 @@ run_nonroot_gate() {
   require_command strace
   require_pinned_tuple
 
-  file -Lb "$test_binary" | grep -Eq 'ELF 64-bit LSB.*x86-64' ||
+  test_binary_file="$(file -Lb "$test_binary")" ||
+    fail "could not inspect release test binary"
+  grep -Eq 'ELF 64-bit LSB.*x86-64' <<<"$test_binary_file" ||
     fail "release test binary is not native x86-64 ELF"
-  file -Lb /usr/bin/git | grep -Eq 'ELF 64-bit LSB.*x86-64' ||
+  system_git_file="$(file -Lb /usr/bin/git)" || fail "could not inspect /usr/bin/git"
+  grep -Eq 'ELF 64-bit LSB.*x86-64' <<<"$system_git_file" ||
     fail "/usr/bin/git is not native x86-64 ELF"
   [[ "$test_binary" == */release/deps/* ]] ||
     fail "test executable did not come from a release profile: $test_binary"
