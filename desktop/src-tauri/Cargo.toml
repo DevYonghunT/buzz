@@ -80,7 +80,10 @@ infer = "0.19"
 hex = "0.4"
 ed25519-dalek = "=3.0.0-rc.0"
 tokio = { version = "1", features = ["fs", "sync", "rt", "macros", "time", "net", "io-util"] }
-tokio-tungstenite = { version = "0.29", features = ["rustls-tls-webpki-roots"] }
+# Trust roots installed by the operating system as well as the bundled public
+# roots. School and enterprise networks commonly terminate TLS with a locally
+# managed CA that browsers and native HTTP clients already trust.
+tokio-tungstenite = { version = "0.29", features = ["rustls-tls-native-roots", "rustls-tls-webpki-roots"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 bytes = "1"
 futures-util = "0.3"
