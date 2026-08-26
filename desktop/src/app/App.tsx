@@ -18,7 +18,6 @@ import {
   replaceCommunityDestinationRoute,
 } from "@/app/communityViewTransition";
 import { deriveShellRoute } from "@/app/AppShell.helpers";
-import { ThemeGrainientBackground } from "@/app/ThemeGrainientBackground";
 import { useReloadShortcut } from "@/app/useReloadShortcut";
 import { KnownAgentPubkeysProvider } from "@/features/agents/useKnownAgentPubkeys";
 import { useAppOnboardingState } from "@/features/onboarding/hooks";
@@ -66,15 +65,13 @@ import {
   listenForDeepLinks,
 } from "@/shared/deep-link";
 import { cn } from "@/shared/lib/cn";
-import { BuzzMark } from "@/shared/ui/buzz-logo/BuzzMark";
-import { FlappingBee } from "@/shared/ui/buzz-logo/FlappingBee";
-import { FuzzyLogo } from "@/shared/ui/buzz-logo/FuzzyLogo";
+import { SchoolXMark } from "@/shared/ui/schoolx-brand/SchoolXMark";
 import { StartupWindowDragRegion } from "@/shared/ui/StartupWindowDragRegion";
 
 // Minimum time the cold-boot splash stays on screen. A real boot resolves the
 // community in well under 100ms, and the native window setup plus first paint
-// can take longer than that — without a hold, the bee is unmounted before it is
-// ever visible. The hold runs as an overlay above the already-mounted app, so
+// can take longer than that — without a hold, the mark is unmounted before it
+// is ever visible. The hold runs as an overlay above the already-mounted app, so
 // time-to-interactive is unchanged; only the reveal waits.
 const BOOT_SPLASH_MIN_VISIBLE_MS = 1_200;
 const BOOT_SPLASH_FADE_MS = 200;
@@ -130,51 +127,21 @@ function useBootSplashHold(): BootSplashPhase {
   return phase;
 }
 
-// Animated Buzz mark for the loading gates. The static BuzzMark renders in
-// normal flow and sizes the box — it's plain SVG (no JS/SMIL), so it paints on
-// the very first frame even before scripting starts, avoiding a blank flash on
-// hard reload. The animated FuzzyLogo is layered on top and takes over once it
-// begins playing.
-function BeeLoader({
-  ariaLabel,
-  className,
-  tintClassName = "text-foreground",
-}: {
-  ariaLabel: string;
-  className?: string;
-  tintClassName?: string;
-}) {
-  return (
-    <div className={cn("relative", tintClassName, className)}>
-      <BuzzMark className="block h-auto w-full" />
-      <FuzzyLogo
-        ariaLabel={ariaLabel}
-        className="absolute inset-0 h-full! w-full! [&>svg]:h-full [&>svg]:w-full [&>svg]:max-w-full"
-        fuzz
-        loop
-        loopRestSeconds={0}
-      />
-    </div>
-  );
-}
-
-// Cold boot gate: the theme-adaptive grainient background with a single
-// centered Buzz bee flying over it — the same static mark as before, now with
-// its wings flapping (ported from the Buzz website's wing-flap). Replaces the
-// old "Setting up your community" text, which stays as an sr-only caption.
+// Cold boot and blocking-load gate. The canonical product mark is deliberately
+// static: loading state remains available to assistive technology through the
+// existing status text without introducing decorative brand motion.
 function AppLoadingGate() {
   const { t } = useTranslation();
 
   return (
     <div
-      className="buzz-setup-loading-shell flex min-h-dvh flex-col items-center justify-center overflow-hidden px-6 py-10"
+      className="buzz-setup-loading-shell flex min-h-dvh flex-col items-center justify-center overflow-hidden bg-background px-6 py-10"
       data-testid="app-loading-gate"
       role="status"
     >
       <StartupWindowDragRegion />
-      <ThemeGrainientBackground />
       <span className="sr-only">{t("app.loading.settingUpCommunity")}</span>
-      <FlappingBee className="relative z-10 h-auto w-28" />
+      <SchoolXMark className="h-auto w-28" decorative />
     </div>
   );
 }
@@ -199,13 +166,7 @@ function CommunitySwitchGate() {
     >
       <StartupWindowDragRegion />
       <span className="sr-only">{switchingCommunityText}</span>
-      {showSpinner ? (
-        <BeeLoader
-          ariaLabel={switchingCommunityText}
-          className="h-auto w-20"
-          tintClassName="text-muted-foreground"
-        />
-      ) : null}
+      {showSpinner ? <SchoolXMark className="h-auto w-20" decorative /> : null}
     </div>
   );
 }
@@ -502,7 +463,7 @@ function CommunityApp({
   const isEnteringCurtain = transaction?.stage === "entering";
 
   // The app mounts (and starts loading data) beneath the splash overlay; the
-  // overlay just keeps the bee on screen long enough to be seen, then fades.
+  // overlay keeps the static mark on screen long enough to be seen, then fades.
   // Community switches keep their quiet gate.
   const showBootSplashOverlay =
     bootSplashPhase !== "done" && !isCommunitySwitch;
@@ -558,7 +519,7 @@ function CommunityApp({
           <div
             aria-hidden="true"
             className={cn(
-              "fixed inset-0 z-50 transition-opacity",
+              "fixed inset-0 z-50 transition-opacity motion-reduce:transition-none",
               bootSplashPhase === "fading" ? "opacity-0" : "opacity-100",
             )}
             data-testid="boot-splash-overlay"

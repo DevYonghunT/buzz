@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 import { installMockBridge } from "../helpers/bridge";
 import { FEATURE_OVERRIDES_STORAGE_KEY } from "../helpers/features";
@@ -17,6 +17,49 @@ const COMMUNITY_B = {
   relayUrl: "ws://localhost:3001",
   addedAt: "2026-01-02T00:00:00.000Z",
 };
+
+async function seedFixedSchoolXDarkAppearance(page: Page) {
+  await page.addInitScript(() => {
+    window.localStorage.setItem("buzz-theme", "buzz-dark");
+    window.localStorage.setItem("buzz-follow-system", "false");
+    // First-party themes own their semantic accent, but the user's stored
+    // third-party accent preference must still survive a community remount.
+    window.localStorage.setItem("buzz-accent-color", "#ef4444");
+  });
+}
+
+async function readAppearanceState(page: Page) {
+  return page.evaluate(() => {
+    const root = document.documentElement;
+    const styles = getComputedStyle(root);
+    return {
+      accent: window.localStorage.getItem("buzz-accent-color"),
+      background: styles.getPropertyValue("--background").trim(),
+      followSystem: window.localStorage.getItem("buzz-follow-system"),
+      isDark: root.classList.contains("dark"),
+      primary: styles.getPropertyValue("--primary").trim(),
+      storedTheme: window.localStorage.getItem("buzz-theme"),
+      theme: root.getAttribute("data-buzz-theme"),
+      translucent: root.hasAttribute("data-buzz-translucent"),
+    };
+  });
+}
+
+async function expectStaticSchoolXMark(scope: Locator) {
+  const mark = scope.getByTestId("schoolx-mark");
+  await expect(mark).toBeVisible();
+  await expect(mark).toHaveAttribute("src", "/brand/schoolx-mark.svg");
+  await expect(mark).toHaveAttribute("alt", "");
+  await expect(mark).toHaveAttribute("aria-hidden", "true");
+  expect(
+    await mark.evaluate(
+      (element) =>
+        element
+          .getAnimations({ subtree: true })
+          .filter((animation) => animation.playState === "running").length,
+    ),
+  ).toBe(0);
+}
 
 async function seedCommunities(
   page: import("@playwright/test").Page,
@@ -577,10 +620,11 @@ test.describe("community rail", () => {
   test("shows the quiet switch gate, not the boot splash, while switching", async ({
     page,
   }) => {
+    await seedFixedSchoolXDarkAppearance(page);
     // Slow down apply_workspace so the loading phase is observable.
     await installMockBridge(
       page,
-      { applyCommunityDelayMs: 800 },
+      { applyCommunityDelayMs: 2_000 },
       { skipCommunitySeed: true },
     );
     await seedCommunities(page, [COMMUNITY_A, COMMUNITY_B], COMMUNITY_A.id);
@@ -590,16 +634,38 @@ test.describe("community rail", () => {
     await expect(page.getByTestId("app-loading-gate")).toBeVisible();
     const buttonB = page.getByTestId(`community-rail-button-${COMMUNITY_B.id}`);
     await expect(buttonB).toBeVisible();
+    await expect
+      .poll(() => readAppearanceState(page))
+      .toEqual(
+        expect.objectContaining({
+          accent: "#ef4444",
+          followSystem: "false",
+          isDark: true,
+          storedTheme: "buzz-dark",
+          theme: "buzz-dark",
+          translucent: false,
+        }),
+      );
+    const appearanceBeforeSwitch = await readAppearanceState(page);
+    expect(appearanceBeforeSwitch.background).not.toBe("");
+    expect(appearanceBeforeSwitch.primary).not.toBe("");
 
     await buttonB.click();
 
     // The switch renders the quiet gate; the "Setting up your community"
     // splash must not reappear.
-    await expect(page.getByTestId("community-switch-gate")).toBeVisible();
+    const switchGate = page.getByTestId("community-switch-gate");
+    await expect(switchGate).toBeVisible();
+    await expect(switchGate).toHaveAttribute("role", "status");
+    await expect(switchGate).toContainText("Switching community…");
+    await expectStaticSchoolXMark(switchGate);
     await expect(page.getByTestId("app-loading-gate")).toHaveCount(0);
 
     // The app settles into the new community once apply completes.
     await expect(buttonB).toHaveAttribute("aria-current", "true");
+    await expect
+      .poll(() => readAppearanceState(page))
+      .toEqual(appearanceBeforeSwitch);
   });
 
   test("hides the rail with a single community", async ({ page }) => {

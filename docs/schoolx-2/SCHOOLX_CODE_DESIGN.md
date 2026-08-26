@@ -24,7 +24,9 @@ process-launch authority도 선택 B(signed unprivileged macOS XPC + Linux pinne
 [`SESSION_HANDOFF_20260825_CODEX_0_149_AND_NEXT_SLICE_DECISION.md`](SESSION_HANDOFF_20260825_CODEX_0_149_AND_NEXT_SLICE_DECISION.md)를
 우선한다. Artifact별 최신 검증과 canonical release 잔여 gate는
 [`SESSION_HANDOFF_20260825_CODE_RELEASE_READINESS.md`](SESSION_HANDOFF_20260825_CODE_RELEASE_READINESS.md)를
-기준으로 한다. Launch authority의 원래 지원 범위, fault 결과와 residual은
+기준으로 한다. 내부 SchoolX 시각 체계의 적용/미적용 경계와 다음 구현 slice는
+[`SESSION_HANDOFF_20260825_SCHOOLX_VISUAL_SYSTEM_V1.md`](SESSION_HANDOFF_20260825_SCHOOLX_VISUAL_SYSTEM_V1.md)를
+우선한다. Launch authority의 원래 지원 범위, fault 결과와 residual은
 [`SESSION_HANDOFF_20260821_CODE_HELPER_LAUNCH_AUTHORITY_DECISION.md`](SESSION_HANDOFF_20260821_CODE_HELPER_LAUNCH_AUTHORITY_DECISION.md)를
 기준으로 하고, 원래 착수 조건은
 [`SESSION_HANDOFF_20260821_CODE_HELPER_LAUNCH_AUTHORITY.md`](SESSION_HANDOFF_20260821_CODE_HELPER_LAUNCH_AUTHORITY.md),
@@ -227,6 +229,14 @@ raw JSON은 기본 화면에 노출하지 않고 개발자 진단 메뉴에서�
 
 브랜드 원본은 `brand/` 폴더를 단일 출처로 사용한다.
 
+> **현재 구현 상태 (2026-08-26):** Dock/app bundle, tray, DMG에 이어 webview의
+> first-party theme, Appearance preview/label, flat·opaque core shell, boot와
+> community-switch mark, favicon, Nostr bind/Mobile QR app icon이 SchoolX V1을
+> 사용한다. internal ID와 third-party theme 호환/cache/E2E 계약은
+> [`SESSION_HANDOFF_20260825_SCHOOLX_VISUAL_SYSTEM_V1.md`](SESSION_HANDOFF_20260825_SCHOOLX_VISUAL_SYSTEM_V1.md)를
+> 따른다. V1은 core shell까지이며 first-run onboarding과 일부 legacy branded
+> status surface의 재설계는 후속이다.
+
 | 토큰 | 원본 | Light 역할 | Dark 역할 |
 |---|---|---|---|
 | Parchment | `#F4EDDD` | 전체 canvas의 가장 큰 비율 | 주요 text/밝은 강조 |
@@ -240,7 +250,8 @@ raw JSON은 기본 화면에 노출하지 않고 개발자 진단 메뉴에서�
 Ink/Pine 같은 어두운 색 면적은 최소화한다. Dark mode에서는 Ink를 canvas로
 사용하되 순수 검정은 쓰지 않고, Terracotta는 action과 경고에만 제한한다.
 
-컴포넌트에 hex를 직접 쓰지 않는다. `desktop/src/index.css`의 의미 토큰으로
+컴포넌트에 hex를 직접 쓰지 않는다. 실제 전역 theme entry인
+`desktop/src/shared/styles/globals/theme.css`와 theme resolver의 의미 토큰으로
 매핑하고 기존 `bg-background`, `text-foreground`, `border-border`,
 `bg-primary` 계열을 통해 사용한다. 코드/터미널만 SF Mono 또는 시스템
 monospace를 사용하고 일반 UI는 현재 글꼴 체계를 유지한다.

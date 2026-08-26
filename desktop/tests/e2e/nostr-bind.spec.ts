@@ -65,6 +65,7 @@ async function openNostrBind(
         }
       ).__BUZZ_E2E_INVOKE_MOCK_COMMAND__ === "function",
   );
+  await expect(page.getByTestId("home-inbox-list")).toBeVisible();
   await emitNostrBind(page, payload);
   await expect(page.getByTestId("nostr-bind-page")).toBeVisible();
 }
@@ -142,6 +143,22 @@ async function installShakeCounter(page: Page) {
   });
 }
 
+async function loadLocalImageMetadata(page: Page, src: string) {
+  return page.evaluate(async (imageSrc) => {
+    const url = new URL(imageSrc, window.location.href);
+    const image = new Image();
+    image.src = url.href;
+    await image.decode();
+    return {
+      naturalHeight: image.naturalHeight,
+      naturalWidth: image.naturalWidth,
+      origin: url.origin,
+      pageOrigin: window.location.origin,
+      pathname: url.pathname,
+    };
+  }, src);
+}
+
 async function shakeCount(page: Page): Promise<number> {
   return page.evaluate(
     () =>
@@ -152,6 +169,35 @@ async function shakeCount(page: Page): Promise<number> {
       ).__BUZZ_E2E_CODE_SHAKE_CALLS__ ?? 0,
   );
 }
+
+test("shows the local SchoolX product icon", async ({ page }) => {
+  await openNostrBind(page);
+
+  const icon = page.getByRole("img", { name: "SchoolX", exact: true });
+  await expect(icon).toBeVisible();
+  await expect(icon).toHaveAttribute("src", "/app-icon@2x.png");
+  await expect(icon).toHaveAttribute(
+    "srcset",
+    "/app-icon@2x.png 1x, /app-icon@3x.png 2x",
+  );
+
+  const [twoX, threeX] = await Promise.all([
+    loadLocalImageMetadata(page, "/app-icon@2x.png"),
+    loadLocalImageMetadata(page, "/app-icon@3x.png"),
+  ]);
+  expect(twoX.origin).toBe(twoX.pageOrigin);
+  expect(threeX.origin).toBe(threeX.pageOrigin);
+  expect(twoX).toMatchObject({
+    naturalHeight: 112,
+    naturalWidth: 112,
+    pathname: "/app-icon@2x.png",
+  });
+  expect(threeX).toMatchObject({
+    naturalHeight: 168,
+    naturalWidth: 168,
+    pathname: "/app-icon@3x.png",
+  });
+});
 
 test("supports OTP entry and navigation without signing incomplete input", async ({
   page,
@@ -459,7 +505,7 @@ test("keeps the signed response available when clipboard access fails", async ({
   await expect(
     page
       .getByTestId("nostr-bind-manual-fallback-content")
-      .getByText("Buzz couldn't access the clipboard. Try again."),
+      .getByText("SchoolX couldn't access the clipboard. Try again."),
   ).toBeVisible();
   await expect(page.getByTestId("nostr-bind-signed-response")).toContainText(
     "e2e-signed-nostr-binding",

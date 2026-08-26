@@ -2,55 +2,265 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/buzz.svg?v=20260610" />
+    <link rel="icon" type="image/svg+xml" href="/brand/schoolx-mark.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title></title>
     <!--
       Boot background: the document must be painted before the app bundle (and
       its stylesheets) load so cold boot never flashes ahead of the loading
-      gate. The window itself is also painted pre-document via `backgroundColor`
-      in tauri.conf.json. The body paints its own themed background once the app
-      CSS loads, so this never shows through after boot.
+      gate. The body paints its own themed background once the app CSS loads,
+      so this never shows through after boot.
 
       The inline script below reads the cached theme background (same
       `buzz-theme-cache` entry ThemeProvider writes) and applies it synchronously
       so the boot color matches the themed loading gate — no black flash on light
-      themes. On the first-ever launch (no cache yet) it seeds the light/dark
-      class from the OS color scheme, matching the Buzz theme in System mode
-      that ThemeProvider applies moments later — no wrong-scheme flash before
-      it loads.
+      themes. First-party cache entries are revisioned: an old Buzz/GitHub
+      palette is never copied onto the root during an upgrade. On the
+      first-ever launch (or after rejecting a stale cache), the SchoolX
+      Parchment/Ink backing follows the effective first-party mode.
     -->
     <style>
       html {
-        background-color: #000;
+        background-color: #1f2937;
+      }
+
+      body {
+        background-color: inherit;
       }
     </style>
     <script>
       (() => {
-        var cached, bg, parsed;
+        var SCHOOLX_THEME_CACHE_REVISION = "schoolx-v1";
+        var SCHOOLX_THEME_CACHE_FINGERPRINTS = {
+          buzz: "bba1c602",
+          "buzz-dark": "02a3c6f3",
+        };
+        var SUPPORTED_THEME_NAMES = new Set([
+          "buzz",
+          "buzz-dark",
+          "andromeeda",
+          "aurora-x",
+          "ayu-dark",
+          "catppuccin-frappe",
+          "catppuccin-latte",
+          "catppuccin-macchiato",
+          "catppuccin-mocha",
+          "dark-plus",
+          "dracula",
+          "dracula-soft",
+          "everforest-dark",
+          "everforest-light",
+          "github-dark",
+          "github-dark-default",
+          "github-dark-dimmed",
+          "github-dark-high-contrast",
+          "github-light",
+          "github-light-default",
+          "github-light-high-contrast",
+          "gruvbox-dark-hard",
+          "gruvbox-dark-medium",
+          "gruvbox-dark-soft",
+          "gruvbox-light-hard",
+          "gruvbox-light-medium",
+          "gruvbox-light-soft",
+          "houston",
+          "kanagawa-dragon",
+          "kanagawa-lotus",
+          "kanagawa-wave",
+          "laserwave",
+          "light-plus",
+          "material-theme",
+          "material-theme-darker",
+          "material-theme-lighter",
+          "material-theme-ocean",
+          "material-theme-palenight",
+          "min-dark",
+          "min-light",
+          "monokai",
+          "night-owl",
+          "nord",
+          "one-dark-pro",
+          "one-light",
+          "plastic",
+          "poimandres",
+          "red",
+          "rose-pine",
+          "rose-pine-dawn",
+          "rose-pine-moon",
+          "slack-dark",
+          "slack-ochin",
+          "snazzy-light",
+          "solarized-dark",
+          "solarized-light",
+          "synthwave-84",
+          "tokyo-night",
+          "vesper",
+          "vitesse-black",
+          "vitesse-dark",
+          "vitesse-light",
+        ]);
+        var cached, parsed, storedTheme, storedFollow, systemIsDark;
+        var root, background;
+
+        function isFirstParty(themeName) {
+          return themeName === "buzz" || themeName === "buzz-dark";
+        }
+
+        function paintSchoolXFallback(themeName) {
+          var dark = themeName === "buzz-dark";
+          root = document.documentElement;
+          root.classList.remove("light", "dark");
+          root.classList.add(dark ? "dark" : "light");
+          root.setAttribute("data-buzz-sidebar", "");
+          root.setAttribute("data-buzz-theme", themeName);
+          // These two boot anchors keep the body from repainting the default
+          // stylesheet palette before ThemeProvider installs the complete
+          // SchoolX semantic map synchronously.
+          root.style.setProperty(
+            "--background",
+            dark ? "215.0 27.91% 16.9%" : "41.7 51.11% 91.2%",
+          );
+          root.style.setProperty(
+            "--foreground",
+            dark ? "41.7 51.11% 91.2%" : "215.0 27.91% 16.9%",
+          );
+          root.style.backgroundColor = dark ? "#1f2937" : "#f4eddd";
+        }
+
+        function expectedFirstPartyTheme() {
+          var selectedTheme = storedTheme;
+          if (selectedTheme === "light") selectedTheme = "catppuccin-latte";
+          if (selectedTheme === "dark" || selectedTheme === "system") {
+            selectedTheme = "houston";
+          }
+          if (
+            selectedTheme !== null &&
+            !SUPPORTED_THEME_NAMES.has(selectedTheme)
+          ) {
+            selectedTheme = "buzz";
+          }
+          if (selectedTheme !== null && !isFirstParty(selectedTheme)) {
+            return null;
+          }
+
+          var followsSystem =
+            storedFollow === null
+              ? storedTheme === null
+              : storedFollow === "true";
+          if (followsSystem) return systemIsDark ? "buzz-dark" : "buzz";
+          return selectedTheme === "buzz-dark" ? "buzz-dark" : "buzz";
+        }
+
+        function isCacheShape(value) {
+          if (!value || typeof value !== "object") return false;
+          if (typeof value.themeName !== "string") return false;
+          if (typeof value.isDark !== "boolean") return false;
+          if (
+            !value.vars ||
+            typeof value.vars !== "object" ||
+            Array.isArray(value.vars)
+          ) {
+            return false;
+          }
+          return Object.entries(value.vars).every(
+            ([key, variable]) =>
+              key.startsWith("--") && typeof variable === "string",
+          );
+        }
+
+        function hasSchoolXCacheAnchors(value) {
+          return [
+            "--background",
+            "--foreground",
+            "--card",
+            "--card-foreground",
+            "--primary",
+            "--primary-foreground",
+            "--ring",
+            "--sidebar-background",
+            "--sidebar-foreground",
+            "--sidebar-active",
+            "--sidebar-active-foreground",
+            "--schoolx-action",
+            "--schoolx-action-foreground",
+            "--schoolx-highlight",
+            "--schoolx-highlight-foreground",
+            "--schoolx-nav-active",
+            "--schoolx-nav-active-border",
+            "--schoolx-nav-active-foreground",
+            "--schoolx-success",
+            "--schoolx-success-foreground",
+          ].every((key) => typeof value.vars[key] === "string");
+        }
+
+        function fingerprintThemeVars(variables) {
+          var index;
+          var serialized = Object.keys(variables)
+            .sort()
+            .map((key) => `${key}\0${variables[key]}\0`)
+            .join("");
+          var hash = 0x811c9dc5;
+          for (index = 0; index < serialized.length; index += 1) {
+            hash ^= serialized.charCodeAt(index);
+            hash = Math.imul(hash, 0x01000193);
+          }
+          return (hash >>> 0).toString(16).padStart(8, "0");
+        }
+
+        systemIsDark = window.matchMedia(
+          "(prefers-color-scheme: dark)",
+        ).matches;
+        storedTheme = window.localStorage.getItem("buzz-theme");
+        storedFollow = window.localStorage.getItem("buzz-follow-system");
+        var expectedFirstParty = expectedFirstPartyTheme();
         try {
           cached = window.localStorage.getItem("buzz-theme-cache");
           if (!cached) {
-            // No stored theme: the default is Buzz following the OS scheme,
-            // so seed the matching class (and backdrop) now. Otherwise the
-            // setup gate would paint the wrong scheme until ThemeProvider
-            // loads asynchronously.
-            if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
-              document.documentElement.classList.add("dark");
-            } else {
-              document.documentElement.classList.add("light");
-              document.documentElement.style.backgroundColor = "#fff";
-            }
+            paintSchoolXFallback(
+              expectedFirstParty ?? (systemIsDark ? "buzz-dark" : "buzz"),
+            );
             return;
           }
           parsed = JSON.parse(cached);
-          bg = parsed.vars["--background"];
-          if (bg) document.documentElement.style.backgroundColor = `hsl(${bg})`;
-          // Match the cached light/dark class so themed vars resolve correctly
-          // before ThemeProvider mounts.
-          document.documentElement.classList.add(parsed.isDark ? "dark" : "light");
+          if (!isCacheShape(parsed)) throw new Error("invalid theme cache");
+
+          if (isFirstParty(parsed.themeName)) {
+            if (
+              parsed.revision !== SCHOOLX_THEME_CACHE_REVISION ||
+              expectedFirstParty !== parsed.themeName ||
+              parsed.isDark !== (parsed.themeName === "buzz-dark") ||
+              !hasSchoolXCacheAnchors(parsed) ||
+              fingerprintThemeVars(parsed.vars) !==
+                SCHOOLX_THEME_CACHE_FINGERPRINTS[parsed.themeName]
+            ) {
+              paintSchoolXFallback(
+                expectedFirstParty ?? (systemIsDark ? "buzz-dark" : "buzz"),
+              );
+              return;
+            }
+          } else if (expectedFirstParty !== null) {
+            // A first-party selection must not prepaint a stale third-party
+            // cache. Third-party pair resolution otherwise remains unchanged.
+            paintSchoolXFallback(expectedFirstParty);
+            return;
+          }
+
+          root = document.documentElement;
+          for (var entry of Object.entries(parsed.vars)) {
+            root.style.setProperty(entry[0], entry[1]);
+          }
+          root.classList.remove("light", "dark");
+          root.classList.add(parsed.isDark ? "dark" : "light");
+          if (isFirstParty(parsed.themeName)) {
+            root.setAttribute("data-buzz-sidebar", "");
+            root.setAttribute("data-buzz-theme", parsed.themeName);
+          }
+          background = parsed.vars["--background"];
+          if (background) root.style.backgroundColor = `hsl(${background})`;
         } catch {
-          /* fall back to the black default above */
+          paintSchoolXFallback(
+            expectedFirstParty ?? (systemIsDark ? "buzz-dark" : "buzz"),
+          );
         }
       })();
     </script>

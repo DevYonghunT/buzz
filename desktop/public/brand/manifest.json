@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "generatedBy": "desktop/scripts/generate-schoolx-brand-assets.sh",
+  "source": {
+    "path": "brand/schoolx-mark.svg",
+    "sha256": "3e12926eb2e7525589b7dd5bfbc61348f8e739ca73f697f46898d6a060ea3d80",
+    "bytes": 657
+  },
+  "assets": {
+    "brand/schoolx-mark.svg": {
+      "mediaType": "image/svg+xml",
+      "sha256": "3e12926eb2e7525589b7dd5bfbc61348f8e739ca73f697f46898d6a060ea3d80",
+      "bytes": 657
+    },
+    "app-icon@2x.png": {
+      "mediaType": "image/png",
+      "sha256": "687eeb41d1df9cd94993afebeb7902adb9416d261d50954f17f0f80312d8b0da",
+      "bytes": 2049,
+      "width": 112,
+      "height": 112,
+      "opaque": true
+    },
+    "app-icon@3x.png": {
+      "mediaType": "image/png",
+      "sha256": "92f6752d74104968b1386346f26d2cad6f9a822ee55812cefc28c0d40f533c6c",
+      "bytes": 2694,
+      "width": 168,
+      "height": 168,
+      "opaque": true
+    }
+  }
+}

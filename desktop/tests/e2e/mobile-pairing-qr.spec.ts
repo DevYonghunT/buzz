@@ -5,6 +5,7 @@ import { installMockBridge } from "../helpers/bridge";
 import { waitForAnimations } from "../helpers/animations";
 
 const SCREENSHOT_DIR = "test-results/mobile-pairing-qr";
+const SCHOOLX_THEME_SCREENSHOT_DIR = "test-results/schoolx-theme";
 
 test.beforeEach(async ({ page }) => {
   await installMockBridge(page, { pairingStartDelayMs: 300 });
@@ -35,6 +36,22 @@ async function emitPairingEvent(page: Page, event: string, payload?: unknown) {
   );
 }
 
+async function loadLocalImageMetadata(page: Page, src: string) {
+  return page.evaluate(async (imageSrc) => {
+    const url = new URL(imageSrc, window.location.href);
+    const image = new Image();
+    image.src = url.href;
+    await image.decode();
+    return {
+      naturalHeight: image.naturalHeight,
+      naturalWidth: image.naturalWidth,
+      origin: url.origin,
+      pageOrigin: window.location.origin,
+      pathname: url.pathname,
+    };
+  }, src);
+}
+
 test("mobile pairing starts on demand and reveals the QR code", async ({
   page,
 }) => {
@@ -44,6 +61,7 @@ test("mobile pairing starts on demand and reveals the QR code", async ({
   await page.getByTestId("settings-nav-mobile").click();
 
   mkdirSync(SCREENSHOT_DIR, { recursive: true });
+  mkdirSync(SCHOOLX_THEME_SCREENSHOT_DIR, { recursive: true });
 
   const section = page.getByTestId("settings-mobile");
   const card = page.getByTestId("mobile-pairing-card");
@@ -111,10 +129,19 @@ test("mobile pairing starts on demand and reveals the QR code", async ({
   ).toHaveCSS("animation-delay", "0.189s");
   await expect(copyButton).toHaveCSS("animation-name", "enter");
   await expect(copyButton).toHaveCSS("animation-duration", "0.25s");
-  await expect(qrCode.locator("image")).toHaveAttribute(
-    "href",
+  const centerImage = qrCode.locator("image");
+  await expect(centerImage).toHaveCount(1);
+  await expect(centerImage).toHaveAttribute("href", "/app-icon@2x.png");
+  const centerImageMetadata = await loadLocalImageMetadata(
+    page,
     "/app-icon@2x.png",
   );
+  expect(centerImageMetadata.origin).toBe(centerImageMetadata.pageOrigin);
+  expect(centerImageMetadata).toMatchObject({
+    naturalHeight: 112,
+    naturalWidth: 112,
+    pathname: "/app-icon@2x.png",
+  });
   await waitForAnimations(page);
   const qrBox = await qrContainer.boundingBox();
   const copyBox = await copyButton.boundingBox();
@@ -154,7 +181,10 @@ test("mobile pairing starts on demand and reveals the QR code", async ({
   ).toBe(2);
 
   await waitForAnimations(page);
-  await card.screenshot({ path: `${SCREENSHOT_DIR}/pairing-card.png` });
+  await card.screenshot({
+    path: `${SCHOOLX_THEME_SCREENSHOT_DIR}/07-mobile-pairing-card.png`,
+  });
+  await waitForAnimations(page);
   await qrCode.screenshot({ path: `${SCREENSHOT_DIR}/pairing-qr.png` });
 });
 

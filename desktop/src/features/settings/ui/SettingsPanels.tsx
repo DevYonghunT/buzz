@@ -61,11 +61,11 @@ import {
   getThemePair,
 } from "@/shared/theme/theme-loader";
 import {
-  BUZZ_GRADIENT_STOPS,
   SystemPreferencePreviewFrame,
   ThemePreviewFrame,
   type ThemePreviewVars,
 } from "@/shared/theme/ThemePreviewFrame";
+import { getSchoolXThemeDisplayName } from "@/shared/theme/schoolx-theme";
 import {
   getThemeFallbackPreviewVars,
   useThemePreviewVars,
@@ -266,6 +266,8 @@ export const settingsSections: SettingsSectionDescriptor[] = [
 ];
 
 function formatThemeLabel(name: string): string {
+  const schoolXLabel = getSchoolXThemeDisplayName(name);
+  if (schoolXLabel) return schoolXLabel;
   return name
     .split("-")
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
@@ -275,10 +277,11 @@ function formatThemeLabel(name: string): string {
 /**
  * Derive a display label for a paired theme from its light variant name.
  * Strips mode-specific tokens (light, latte, dawn, lotus, ochin, lighter, plus)
- * from any position, handling names like "github-light-default", "light-plus",
- * "material-theme-lighter", and "gruvbox-light-soft".
+ * from any position, including "github-light-default" and "gruvbox-light-soft".
  */
 function pairedThemeLabel(lightName: string): string {
+  const schoolXLabel = getSchoolXThemeDisplayName(lightName);
+  if (schoolXLabel) return schoolXLabel;
   const modeTokens = new Set([
     "light",
     "latte",
@@ -353,7 +356,6 @@ function PairedThemeTile({
   darkVars: ThemePreviewVars | null;
   onSelect: () => void;
 }) {
-  const darkName = getThemePair(lightName);
   return (
     <button
       aria-pressed={isActive}
@@ -364,14 +366,12 @@ function PairedThemeTile({
     >
       <SystemPreferencePreviewFrame
         className={cn(
-          "h-[112px] w-[168px] transition-shadow",
+          "h-[112px] w-[168px] transition-shadow group-focus-visible:ring-2 group-focus-visible:ring-ring group-focus-visible:ring-offset-2 group-focus-visible:ring-offset-background",
           isActive
             ? "ring-2 ring-primary ring-offset-2 ring-offset-background"
             : "group-hover:ring-2 group-hover:ring-border",
         )}
-        darkGradient={darkName ? BUZZ_GRADIENT_STOPS[darkName] : undefined}
         darkVars={darkVars}
-        lightGradient={BUZZ_GRADIENT_STOPS[lightName]}
         lightVars={lightVars}
       />
       <span
@@ -407,12 +407,11 @@ function SingleThemeTile({
     >
       <ThemePreviewFrame
         className={cn(
-          "h-[112px] w-[168px] transition-shadow",
+          "h-[112px] w-[168px] transition-shadow group-focus-visible:ring-2 group-focus-visible:ring-ring group-focus-visible:ring-offset-2 group-focus-visible:ring-offset-background",
           isActive
             ? "ring-2 ring-primary ring-offset-2 ring-offset-background"
             : "group-hover:ring-2 group-hover:ring-border",
         )}
-        sidebarGradient={BUZZ_GRADIENT_STOPS[name]}
         vars={vars}
       />
       <span
@@ -476,6 +475,7 @@ function ThemeSettingsCard() {
     withAccentPreviewVars(
       previewVarsByTheme[name] ?? getThemeFallbackPreviewVars(name),
       accentColor,
+      name,
     );
 
   // All light themes (paired light + light-only)

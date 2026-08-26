@@ -10,7 +10,6 @@ import {
 import { isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { invokeTauri } from "@/shared/api/tauri";
-import { isMacPlatform } from "@/shared/lib/platform";
 import { createThemeVars, hexToHsl } from "./adaptive-theme";
 import {
   SYNTAX_THEMES,
@@ -20,6 +19,17 @@ import {
   loadThemeData,
   resolveSystemTheme,
 } from "./theme-loader";
+import {
+  SCHOOLX_PALETTE,
+  SCHOOLX_THEME_CACHE_REVISION,
+  SCHOOLX_THEME_ONLY_VAR_NAMES,
+  canApplyThemeCache,
+  createSchoolXTheme,
+  isSchoolXThemeName,
+  parseThemeCachePayload,
+  resolveStoredFollowSystem,
+  resolveStoredThemeName,
+} from "./schoolx-theme";
 
 export const THEME_STORAGE_KEY = "buzz-theme";
 const CACHE_KEY = "buzz-theme-cache";
@@ -74,13 +84,11 @@ function isValidThemeName(name: string): name is SyntaxThemeName {
 /** Read stored theme, migrating legacy "light"/"dark"/"system" values. */
 function readStoredTheme(fallback: SyntaxThemeName): SyntaxThemeName {
   const stored = window.localStorage.getItem(THEME_STORAGE_KEY);
-  if (!stored) return fallback;
-
-  // Migrate legacy values
-  if (stored === "light") return "catppuccin-latte";
-  if (stored === "dark" || stored === "system") return "houston";
-
-  return isValidThemeName(stored) ? stored : fallback;
+  return resolveStoredThemeName(
+    stored,
+    fallback,
+    isValidThemeName,
+  ) as SyntaxThemeName;
 }
 
 function getContrastColor(hex: string): string {
@@ -170,7 +178,7 @@ function rgbToHex({ r, g, b }: Rgb): string {
     .join("")}`;
 }
 
-function applyAccentColor(value: string) {
+function applyThirdPartyAccentColor(value: string) {
   const root = document.documentElement;
   if (value === NEUTRAL_ACCENT) {
     const styles = window.getComputedStyle(root);
@@ -212,211 +220,113 @@ function applyAccentColor(value: string) {
 }
 
 /**
- * The Buzz themes ship with a fixed neutral accent (the GitHub black/white
- * foreground) rather than a user-selectable accent color. When a Buzz theme is
- * active we force `NEUTRAL_ACCENT` regardless of the stored preference, and the
- * appearance panel hides the accent picker. The user's chosen accent is left
- * untouched in storage so it returns when they switch back to another theme.
+ * The internal Buzz compatibility IDs select the fixed SchoolX palette. The
+ * stored third-party accent stays untouched so it returns with that theme.
  */
 export function isBuzzTheme(themeName: string): boolean {
-  return themeName === "buzz" || themeName === "buzz-dark";
+  return isSchoolXThemeName(themeName);
 }
 
-/**
- * Resolve the accent to actually apply for a theme: Buzz themes are pinned to
- * the neutral accent; every other theme uses the stored/selected accent.
- */
-function resolveEffectiveAccent(
-  themeName: string,
-  accentColor: string,
-): string {
-  return isBuzzTheme(themeName) ? NEUTRAL_ACCENT : accentColor;
+function applyEffectiveAccent(themeName: string, accentColor: string) {
+  if (!isSchoolXThemeName(themeName)) {
+    applyThirdPartyAccentColor(accentColor);
+    return;
+  }
+
+  const root = document.documentElement;
+  const { vars } = createSchoolXTheme(themeName);
+  const primary = vars["--primary"];
+  const primaryForeground = vars["--primary-foreground"];
+  root.style.setProperty("--buzz-selected-accent", primary);
+  root.style.setProperty("--buzz-video-review-accent", primary);
+  root.style.setProperty(
+    "--buzz-video-review-accent-foreground",
+    getReviewAccentForeground(
+      themeName === "buzz-dark"
+        ? SCHOOLX_PALETTE.terracottaDark
+        : SCHOOLX_PALETTE.pine,
+    ),
+  );
+  root.style.setProperty("--primary", primary);
+  root.style.setProperty("--primary-foreground", primaryForeground);
+  root.style.setProperty("--sidebar-primary", vars["--sidebar-primary"]);
+  root.style.setProperty(
+    "--sidebar-primary-foreground",
+    vars["--sidebar-primary-foreground"],
+  );
+  root.style.setProperty("--sidebar-active", vars["--sidebar-active"]);
+  root.style.setProperty(
+    "--sidebar-active-foreground",
+    vars["--sidebar-active-foreground"],
+  );
 }
 
-/**
- * Toggle the opaque Buzz sidebar-gradient marker. This is always safe to apply
- * synchronously: `data-buzz-sidebar` paints solid gradient colors, so it never
- * makes the window see-through. The *translucent* treatment (transparent
- * root/body) is handled separately via {@link setBuzzTranslucent} because it
- * must be sequenced against the native vibrancy layer — see
- * {@link applyBuzzVibrancy}.
- */
+/** Preserve the existing first-party DOM markers while keeping V1 opaque. */
 function applyBuzzSidebar(themeName: string) {
   const root = document.documentElement;
+  root.removeAttribute("data-buzz-translucent");
   if (isBuzzTheme(themeName)) {
     root.setAttribute("data-buzz-sidebar", "");
-    // Keep the concrete Buzz variant on the root as well as the generic
-    // marker. The gradient stylesheet matches this attribute directly, which
-    // makes WKWebView invalidate the painted background when light/dark mode
-    // changes instead of relying only on a custom-property dependency update.
     root.setAttribute("data-buzz-theme", themeName);
   } else {
     root.removeAttribute("data-buzz-sidebar");
     root.removeAttribute("data-buzz-theme");
-    // Leaving Buzz: drop translucency synchronously here too. Going *opaque*
-    // never shows desktop/prior content through, so there's no ordering risk
-    // on the way out — only on the way in.
-    setBuzzTranslucent(false);
   }
 }
 
-/**
- * Toggle the translucent (see-through) treatment: transparent root/body so the
- * native macOS vibrancy layer shows through behind the sidebar glass. The
- * transparent root/body themselves are driven by the `data-buzz-translucent`
- * CSS rule (theme.css), so we only flip the attribute here — no inline styles.
- *
- * IMPORTANT: enabling translucency exposes whatever the compositor paints
- * behind the webview. Only enable it once the native `NSVisualEffectView`
- * vibrancy layer is confirmed installed, otherwise there's a frame where the
- * transparent webview reveals the content behind it (the "main app nav
- * underneath" flicker). {@link applyBuzzVibrancy} owns that sequencing.
- */
-function setBuzzTranslucent(enabled: boolean) {
-  const root = document.documentElement;
-  if (enabled) {
-    root.setAttribute("data-buzz-translucent", "");
-  } else {
-    root.removeAttribute("data-buzz-translucent");
-  }
-}
-
-/**
- * Monotonic token identifying the most recent vibrancy request. Because
- * {@link applyBuzzVibrancy} awaits the native `set_window_vibrancy` IPC, a rapid
- * Buzz → non-Buzz toggle can fire two overlapping calls whose awaits resolve out
- * of order. Each call captures the token before awaiting and re-checks it after;
- * a stale continuation (superseded by a newer request) bails without touching
- * translucency — otherwise the earlier Buzz call could re-add
- * `data-buzz-translucent` after the later non-Buzz call already cleared it,
- * leaving the window transparent under a non-Buzz theme.
- */
-let buzzVibrancyRequest = 0;
-
-/**
- * Whether the native vibrancy layer is confirmed installed for a Buzz theme.
- * Set true only after `set_window_vibrancy(true)` resolves; cleared as soon as a
- * new vibrancy request is issued (its outcome is not yet known).
- */
-let buzzVibrancyReady = false;
-
-/** The native layer does not need rebuilding when Buzz only changes mode. */
-let buzzVibrancyEnabled = false;
-
-/**
- * Enable the CSS translucency treatment, but only once BOTH prerequisites for
- * the current request are in place:
- *
- *  1. the native vibrancy layer is installed ({@link buzzVibrancyReady}), and
- *  2. the Buzz sidebar marker + gradient vars are applied (`data-buzz-sidebar`,
- *     set synchronously by {@link applyBuzzSidebar} inside {@link applyTheme}).
- *
- * Translucency clears the body/sidebar surfaces so the vibrancy layer shows
- * through; enabling it before the Buzz gradient vars are installed would flash a
- * transparent/unstyled sidebar. `applyTheme` (theme vars) and
- * `applyBuzzVibrancy` (native layer) are independent async effects that can win
- * their race in either order, so each calls this after its own step completes —
- * whichever lands last flips translucency on. The token check drops stale
- * continuations superseded by a newer theme switch.
- */
-function maybeEnableBuzzTranslucent(themeName: string, requestToken: number) {
-  if (requestToken !== buzzVibrancyRequest) return;
-  if (!isBuzzTheme(themeName) || !isMacPlatform()) return;
-  if (!buzzVibrancyReady) return;
-  if (!document.documentElement.hasAttribute("data-buzz-sidebar")) return;
-  setBuzzTranslucent(true);
-}
-
-/**
- * Sequence the native vibrancy layer and the CSS translucency so they land in
- * the right order and never leave a transparent webview with nothing painted
- * behind it:
- *
- * - Entering Buzz (macOS): install the vibrancy layer first (await the IPC),
- *   *then* flip on translucency. This closes the frame-gap where the root was
- *   transparent before the vibrancy view existed — the flicker.
- * - Leaving Buzz: translucency was already removed synchronously in
- *   `applyBuzzSidebar` (safe — opaque never shows through), so here we just
- *   clear the native layer.
- *
- * On non-macOS `set_window_vibrancy` is a no-op and translucency stays off, so
- * these platforms fall back to the opaque Buzz gradient.
- *
- * Overlapping calls are guarded by {@link buzzVibrancyRequest} so a stale async
- * continuation can't re-enable translucency after a newer theme superseded it.
- */
-async function applyBuzzVibrancy(themeName: string) {
-  const buzz = isBuzzTheme(themeName);
-  const requestToken = ++buzzVibrancyRequest;
-
-  // Buzz Light and Buzz Dark use the same native material. Rebuilding the
-  // NSVisualEffectView on every mode change briefly clears the layer behind
-  // the webview and makes the new CSS theme appear late. Keep the installed
-  // layer and let applyTheme swap only the color tokens.
-  if (buzz && buzzVibrancyEnabled && buzzVibrancyReady) {
-    maybeEnableBuzzTranslucent(themeName, requestToken);
-    return;
-  }
-
-  // A new request is in flight — the vibrancy layer's readiness for it is not
-  // yet known, so any stale "ready" from a prior request must not gate this one.
-  buzzVibrancyReady = false;
-
-  if (!isTauri()) {
-    // Web/dev preview: no native vibrancy layer exists, so translucency would
-    // show raw page background. Keep it off; the opaque gradient stands in.
-    setBuzzTranslucent(false);
-    return;
-  }
-
+/** Best-effort removal of the legacy layer; CSS remains opaque on rejection. */
+async function applyBuzzVibrancy(_themeName: string) {
+  document.documentElement.removeAttribute("data-buzz-translucent");
+  if (!isTauri()) return;
   try {
     await invokeTauri<void>("set_window_vibrancy", {
-      enabled: buzz,
+      enabled: false,
       material: BUZZ_VIBRANCY_MATERIAL,
     });
-    // A newer theme change superseded this request while the IPC was in flight;
-    // that later call owns the current translucency state, so don't clobber it.
-    if (requestToken !== buzzVibrancyRequest) return;
-    buzzVibrancyEnabled = buzz;
-    // Native layer is installed. Record readiness and try to enable translucency
-    // — but only if `applyBuzzSidebar` has already installed the Buzz gradient
-    // vars. If that effect hasn't landed yet (the IPC won the race), it will
-    // call maybeEnableBuzzTranslucent itself once the marker is applied.
-    if (buzz && isMacPlatform()) {
-      buzzVibrancyReady = true;
-      maybeEnableBuzzTranslucent(themeName, requestToken);
-    }
   } catch (error) {
     console.warn("set_window_vibrancy failed", error);
-    if (requestToken !== buzzVibrancyRequest) return;
-    // Vibrancy failed — don't go transparent or we'd show through to nothing.
-    buzzVibrancyEnabled = false;
-    setBuzzTranslucent(false);
   }
 }
 
-/** Apply cached CSS vars synchronously to prevent FOUC. */
-function applyCachedVars(): string | null {
+function clearSchoolXOnlyVars() {
+  const root = document.documentElement;
+  for (const variable of SCHOOLX_THEME_ONLY_VAR_NAMES) {
+    root.style.removeProperty(variable);
+  }
+}
+
+function applyResolvedTheme(
+  themeName: SyntaxThemeName,
+  isDark: boolean,
+  vars: Record<string, string>,
+) {
+  const root = document.documentElement;
+  clearSchoolXOnlyVars();
+  for (const [key, value] of Object.entries(vars)) {
+    root.style.setProperty(key, value);
+  }
+  root.classList.remove("light", "dark");
+  root.classList.add(isDark ? "dark" : "light");
+  const background = vars["--background"];
+  if (background) root.style.backgroundColor = `hsl(${background})`;
+  else root.style.removeProperty("background-color");
+  applyBuzzSidebar(themeName);
+  applyEffectiveAccent(
+    themeName,
+    window.localStorage.getItem(ACCENT_STORAGE_KEY) ?? DEFAULT_ACCENT,
+  );
+}
+
+/** Apply a compatible cache synchronously to prevent FOUC. */
+function applyCachedVars(expectedThemeName: SyntaxThemeName): string | null {
   try {
     const cached = window.localStorage.getItem(CACHE_KEY);
     if (!cached) return null;
-    const { themeName, vars, isDark } = JSON.parse(cached);
-    const root = document.documentElement;
-    for (const [key, value] of Object.entries(vars)) {
-      root.style.setProperty(key, value as string);
-    }
-    root.classList.remove("light", "dark");
-    root.classList.add(isDark ? "dark" : "light");
-    applyBuzzSidebar(themeName);
-
-    const accent =
-      window.localStorage.getItem(ACCENT_STORAGE_KEY) ?? DEFAULT_ACCENT;
-    // Pin Buzz themes to the neutral accent here too, matching applyTheme.
-    // Otherwise a cached Buzz theme + non-neutral stored accent flashes the
-    // old accent on reload until the async applyTheme effect runs.
-    applyAccentColor(resolveEffectiveAccent(themeName, accent));
-
-    return themeName;
+    const payload = parseThemeCachePayload(cached);
+    if (!payload || !isValidThemeName(payload.themeName)) return null;
+    if (!canApplyThemeCache(payload, expectedThemeName)) return null;
+    applyResolvedTheme(payload.themeName, payload.isDark, payload.vars);
+    return payload.themeName;
   } catch {
     return null;
   }
@@ -430,65 +340,85 @@ async function applyTheme(
   name: SyntaxThemeName,
 ): Promise<{ isDark: boolean } | null> {
   const requestToken = ++themeApplyRequest;
-  const themeData = await loadThemeData(name);
+  let result: { isDark: boolean; vars: Record<string, string> };
+  if (isSchoolXThemeName(name)) {
+    result = createSchoolXTheme(name);
+  } else {
+    const themeData = await loadThemeData(name);
+    if (requestToken !== themeApplyRequest) return null;
+    const info = extractThemeInfo(name, themeData);
+    result = createThemeVars(info.bg, info.fg, info.comment, {
+      added: info.added,
+      deleted: info.deleted,
+      modified: info.modified,
+    });
+  }
   if (requestToken !== themeApplyRequest) return null;
 
-  const info = extractThemeInfo(name, themeData);
-  const { isDark, vars } = createThemeVars(info.bg, info.fg, info.comment, {
-    added: info.added,
-    deleted: info.deleted,
-    modified: info.modified,
-  });
+  applyResolvedTheme(name, result.isDark, result.vars);
 
-  const root = document.documentElement;
-  for (const [key, value] of Object.entries(vars)) {
-    root.style.setProperty(key, value);
-  }
-
-  root.classList.remove("light", "dark");
-  root.classList.add(isDark ? "dark" : "light");
-  applyBuzzSidebar(name);
-  // The Buzz gradient vars are now installed. If the vibrancy layer already
-  // resolved for the current request (the IPC won the race against this theme
-  // load), enable translucency now — otherwise applyBuzzVibrancy does it. This
-  // is the second half of the two-effect handshake; the token guards against a
-  // superseding theme switch.
-  maybeEnableBuzzTranslucent(name, buzzVibrancyRequest);
-
-  // Apply the accent synchronously in the same batch as the theme vars so the
-  // browser paints the new theme + accent together. Doing this in a later
-  // microtask (e.g. the caller's `.then`) let the previous accent flash on the
-  // new theme for a frame — the flicker seen when switching to Buzz. Buzz
-  // themes resolve to the neutral accent regardless of the stored value.
-  applyAccentColor(
-    resolveEffectiveAccent(
-      name,
-      window.localStorage.getItem(ACCENT_STORAGE_KEY) ?? DEFAULT_ACCENT,
-    ),
-  );
-
-  // Cache for FOUC prevention
   try {
-    window.localStorage.setItem(
-      CACHE_KEY,
-      JSON.stringify({ themeName: name, vars, isDark }),
-    );
+    const payload = isSchoolXThemeName(name)
+      ? {
+          isDark: result.isDark,
+          revision: SCHOOLX_THEME_CACHE_REVISION,
+          themeName: name,
+          vars: result.vars,
+        }
+      : { isDark: result.isDark, themeName: name, vars: result.vars };
+    window.localStorage.setItem(CACHE_KEY, JSON.stringify(payload));
   } catch {
     // Storage full — non-critical
   }
 
-  return { isDark };
+  return { isDark: result.isDark };
+}
+
+type InitialThemeState = {
+  followSystem: boolean;
+  selectedTheme: SyntaxThemeName;
+  systemIsDark: boolean;
+};
+
+function initializeThemeState(
+  defaultTheme: SyntaxThemeName,
+): InitialThemeState {
+  const storedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
+  const selectedTheme = readStoredTheme(defaultTheme);
+  const followSystem = resolveStoredFollowSystem(
+    window.localStorage.getItem(FOLLOW_SYSTEM_KEY),
+    storedTheme,
+  );
+  const systemIsDark = window.matchMedia(
+    "(prefers-color-scheme: dark)",
+  ).matches;
+  const effectiveTheme = followSystem
+    ? resolveSystemTheme(selectedTheme, systemIsDark)
+    : selectedTheme;
+
+  if (!applyCachedVars(effectiveTheme)) {
+    if (isSchoolXThemeName(effectiveTheme)) {
+      const { isDark, vars } = createSchoolXTheme(effectiveTheme);
+      applyResolvedTheme(effectiveTheme, isDark, vars);
+    } else {
+      clearSchoolXOnlyVars();
+      applyBuzzSidebar(effectiveTheme);
+    }
+  }
+
+  return { followSystem, selectedTheme, systemIsDark };
 }
 
 export function ThemeProvider({
   children,
   defaultTheme = "buzz",
 }: ThemeProviderProps) {
-  // Apply cached vars synchronously before first render
-  const [selectedTheme, setSelectedTheme] = useState<string>(() => {
-    applyCachedVars();
-    return readStoredTheme(defaultTheme);
-  });
+  const [initialThemeState] = useState(() =>
+    initializeThemeState(defaultTheme),
+  );
+  const [selectedTheme, setSelectedTheme] = useState<string>(
+    initialThemeState.selectedTheme,
+  );
   const [isDark, setIsDark] = useState<boolean>(() => {
     return document.documentElement.classList.contains("dark");
   });
@@ -497,17 +427,12 @@ export function ThemeProvider({
   const [accentColor, setAccentColorState] = useState<string>(() => {
     return window.localStorage.getItem(ACCENT_STORAGE_KEY) ?? DEFAULT_ACCENT;
   });
-  const [followSystem, setFollowSystemState] = useState<boolean>(() => {
-    const stored = window.localStorage.getItem(FOLLOW_SYSTEM_KEY);
-    if (stored !== null) return stored === "true";
-    // Fresh profiles (no saved theme) default to System mode so the Buzz
-    // default tracks the OS light/dark scheme. Profiles that picked a theme
-    // before this toggle existed keep their fixed theme until they opt in.
-    return window.localStorage.getItem(THEME_STORAGE_KEY) === null;
-  });
-  const [systemIsDark, setSystemIsDark] = useState<boolean>(() => {
-    return window.matchMedia("(prefers-color-scheme: dark)").matches;
-  });
+  const [followSystem, setFollowSystemState] = useState<boolean>(
+    initialThemeState.followSystem,
+  );
+  const [systemIsDark, setSystemIsDark] = useState<boolean>(
+    initialThemeState.systemIsDark,
+  );
 
   // Resolve the effective theme based on follow-system preference
   const effectiveTheme = (() => {
@@ -587,12 +512,10 @@ export function ThemeProvider({
     };
   }, [followSystem]);
 
-  // Re-apply the accent when the user picks a new swatch or the effective theme
-  // changes. applyTheme already applies the (Buzz-neutral-aware) accent in the
-  // same synchronous batch as the theme vars — the flicker fix — so this effect
-  // is idempotent on theme changes and simply covers accent-only changes.
+  // First-party themes reassert their fixed semantic action colors here;
+  // third-party themes continue to use the stored accent swatch.
   useEffect(() => {
-    applyAccentColor(resolveEffectiveAccent(effectiveTheme, accentColor));
+    applyEffectiveAccent(effectiveTheme, accentColor);
   }, [accentColor, effectiveTheme]);
 
   const setTheme = useCallback((name: string) => {

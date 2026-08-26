@@ -7,46 +7,27 @@
 
 import type { ThemeRegistrationRaw } from "shiki";
 
-/**
- * Buzz theme name. Buzz is a first-party light theme that reuses GitHub
- * Light for every base color (backgrounds, text, borders, code) — the
- * message area and containers are indistinguishable from GitHub Light. Its
- * one distinguishing feature is a branded gradient painted across the
- * sidebar/nav canvas, replacing GitHub Light's flat grey. The gradient is
- * applied by {@link ThemeProvider} toggling a `data-buzz-sidebar` attribute
- * on the document root; the CSS lives in `shared/styles/globals/theme.css`.
- */
+/** Internal compatibility ID for the first-party SchoolX light theme. */
 export const BUZZ_THEME_NAME = "buzz";
 
 /**
- * Buzz Dark theme name. The dark-mode counterpart to {@link BUZZ_THEME_NAME}:
- * reuses the GitHub Dark palette for every base color, with the same branded
- * sidebar gradient (dark-tuned colors, see `shared/styles/globals/theme.css`).
- * {@link ThemeProvider} toggles the shared `data-buzz-sidebar` attribute for
- * this theme too; the `.dark` root class selects the dark gradient values.
- *
- * Buzz and Buzz Dark are paired in {@link THEME_PAIRS}, so the picker shows a
- * combined "Buzz" tile under System mode (follow-OS) plus a single "Buzz" tile
- * under Light and a "Buzz Dark" tile under Dark.
+ * Internal compatibility ID for SchoolX Dark. The persisted IDs stay paired
+ * so existing preferences and follow-system behavior need no migration.
  */
 export const BUZZ_DARK_THEME_NAME = "buzz-dark";
 
-/** The Shiki bundle Buzz borrows its base palette from. */
+/** Syntax-only Shiki mapping for the first-party light theme. */
 export const BUZZ_BASE_THEME: SyntaxThemeName = "github-light";
 
-/** The Shiki bundle Buzz Dark borrows its base palette from. */
+/** Syntax-only Shiki mapping for the first-party dark theme. */
 export const BUZZ_DARK_BASE_THEME: SyntaxThemeName = "github-dark";
 
 /**
  * Resolve a theme name to the real Shiki bundled theme it maps to.
  *
- * Most themes map to themselves, but the Buzz aliases (`buzz` / `buzz-dark`)
- * are not bundled Shiki themes — they reuse the GitHub Light / GitHub Dark
- * palettes. The Shiki highlighter engine (used for fenced code blocks in
- * `CodeBlock.tsx`) only understands bundled names, so callers that hand a
- * theme name to `loadTheme` / `codeToTokens` must resolve it through here
- * first; passing a raw Buzz alias makes Shiki throw and code blocks fall
- * back to unhighlighted plain text.
+ * Most themes map to themselves. The internal first-party aliases use GitHub
+ * Light/Dark for code highlighting only; app semantic colors come from
+ * `schoolx-theme.ts`.
  */
 export function resolveShikiThemeName(name: string): SyntaxThemeName {
   if (name === BUZZ_THEME_NAME) return BUZZ_BASE_THEME;
@@ -54,9 +35,7 @@ export function resolveShikiThemeName(name: string): SyntaxThemeName {
   return name as SyntaxThemeName;
 }
 
-// Available themes. "buzz" is a Buzz-branded theme that reuses the
-// github-light palette plus a sidebar gradient; the rest are the Shiki
-// bundled syntax themes, alphabetically sorted.
+// Persisted first-party IDs lead the list; bundled third-party themes follow.
 export const SYNTAX_THEMES = [
   "buzz",
   "buzz-dark",
@@ -153,9 +132,8 @@ const themeImports: Record<
   SyntaxThemeName,
   () => Promise<{ default: ThemeRegistrationRaw }>
 > = {
-  // Buzz reuses the github-light palette; its gradient is applied separately.
+  // First-party aliases remain GitHub-mapped for syntax highlighting only.
   buzz: () => import("shiki/themes/github-light.mjs"),
-  // Buzz Dark reuses the github-dark palette; dark gradient applied separately.
   "buzz-dark": () => import("shiki/themes/github-dark.mjs"),
   andromeeda: () => import("shiki/themes/andromeeda.mjs"),
   "aurora-x": () => import("shiki/themes/aurora-x.mjs"),

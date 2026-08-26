@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { createThemeVars } from "./adaptive-theme";
+import { createThemeVars, hexToHsl } from "./adaptive-theme";
 import {
   SYNTAX_THEMES,
   type SyntaxThemeName,
@@ -13,7 +13,7 @@ import {
   type ThemePreviewVars,
 } from "./ThemePreviewFrame";
 import { NEUTRAL_ACCENT } from "./ThemeProvider";
-import { hexToHsl } from "./adaptive-theme";
+import { createSchoolXTheme, isSchoolXThemeName } from "./schoolx-theme";
 
 export type ThemePreviewVarsByTheme = Partial<
   Record<SyntaxThemeName, ThemePreviewVars>
@@ -23,6 +23,9 @@ let themePreviewVarsCache: ThemePreviewVarsByTheme | null = null;
 let themePreviewVarsPromise: Promise<ThemePreviewVarsByTheme> | null = null;
 
 async function loadThemePreviewVars(name: SyntaxThemeName) {
+  if (isSchoolXThemeName(name)) {
+    return [name, createSchoolXTheme(name).vars] as const;
+  }
   const themeData = await loadThemeData(name);
   const info = extractThemeInfo(name, themeData);
   const { vars } = createThemeVars(info.bg, info.fg, info.comment, {
@@ -86,16 +89,20 @@ export function useThemePreviewVars() {
 }
 
 export function getThemeFallbackPreviewVars(name: SyntaxThemeName) {
+  if (isSchoolXThemeName(name)) return createSchoolXTheme(name).vars;
   return isLightTheme(name) ? LIGHT_PREVIEW_VARS : DARK_PREVIEW_VARS;
 }
 
 export function withAccentPreviewVars(
   vars: ThemePreviewVars | null,
   accentColor: string,
+  themeName: SyntaxThemeName,
 ): ThemePreviewVars | null {
   if (!vars) {
     return null;
   }
+
+  if (isSchoolXThemeName(themeName)) return vars;
 
   if (accentColor === NEUTRAL_ACCENT) {
     return {

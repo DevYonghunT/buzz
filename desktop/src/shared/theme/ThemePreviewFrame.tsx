@@ -3,25 +3,6 @@ import { cn } from "@/shared/lib/cn";
 
 export type ThemePreviewVars = Record<string, string>;
 
-/**
- * Buzz sidebar-gradient stop tokens, keyed by theme name. The actual custom
- * colors live once in `shared/styles/globals/theme.css`; the picker consumes
- * those same semantic variables instead of duplicating raw values here.
- */
-export const BUZZ_GRADIENT_STOPS: Record<
-  string,
-  { top: string; bottom: string }
-> = {
-  buzz: {
-    top: "var(--buzz-gradient-light-top)",
-    bottom: "var(--buzz-gradient-light-bottom)",
-  },
-  "buzz-dark": {
-    top: "var(--buzz-gradient-dark-top)",
-    bottom: "var(--buzz-gradient-dark-bottom)",
-  },
-};
-
 export const LIGHT_PREVIEW_VARS: ThemePreviewVars = {
   "--background": "0 0% 100%",
   "--border": "0 0% 89.8%",
