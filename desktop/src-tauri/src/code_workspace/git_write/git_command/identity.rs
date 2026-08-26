@@ -1,8 +1,10 @@
 use std::fs;
+#[cfg(unix)]
 use std::io::{Read, Seek};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
+#[cfg(unix)]
 use sha2::{Digest, Sha256};
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -182,10 +184,26 @@ pub(super) fn open_verified_file(
     Ok(file)
 }
 
+#[cfg(not(unix))]
+pub(super) fn open_verified_file(
+    _identity: &FileIdentity,
+    _max_bytes: usize,
+) -> Result<fs::File, String> {
+    Err("secure Git file verification is unavailable on this platform".to_string())
+}
+
 #[cfg(unix)]
 pub(super) fn verify_regular_file(identity: &FileIdentity, max_bytes: usize) -> Result<(), String> {
     let _ = open_verified_file(identity, max_bytes)?;
     Ok(())
+}
+
+#[cfg(not(unix))]
+pub(super) fn verify_regular_file(
+    _identity: &FileIdentity,
+    _max_bytes: usize,
+) -> Result<(), String> {
+    Err("secure Git file verification is unavailable on this platform".to_string())
 }
 
 #[cfg(unix)]

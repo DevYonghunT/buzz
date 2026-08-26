@@ -42,6 +42,7 @@ fn macos_xpc_prepare_revalidates_git_write_descriptors() -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(unix)]
 #[test]
 #[ignore = "private Git write helper subprocess entry"]
 fn helper_subprocess_entry() {
@@ -54,6 +55,7 @@ fn helper_subprocess_entry() {
     }
 }
 
+#[cfg(unix)]
 #[test]
 fn pinned_helper_runs_closed_read_and_rejects_replaced_input() -> Result<(), String> {
     let repository = tempfile::tempdir().map_err(|error| error.to_string())?;
@@ -103,6 +105,24 @@ fn pinned_helper_runs_closed_read_and_rejects_replaced_input() -> Result<(), Str
         "typed Git command failed: Git artifact identity changed after it was frozen"
     );
     Ok(())
+}
+
+#[cfg(not(unix))]
+#[test]
+fn git_write_surface_fails_closed_without_descriptor_support() {
+    let root = Path::new(r"C:\schoolx\repository");
+    let error = match PinnedGitWriteRepository::pin(root) {
+        Ok(_) => panic!("Git write authority was created without descriptor-bound Unix support"),
+        Err(error) => error,
+    };
+    assert_eq!(
+        error,
+        "SchoolX Code Git writes require descriptor-bound Unix support"
+    );
+    assert!(pin_input_file(&root.join("message.txt"), 1024)
+        .is_err_and(|error| error.contains("secure Git file pinning is unavailable")));
+    assert!(pin_directory(root)
+        .is_err_and(|error| error.contains("secure Git directory pinning is unavailable")));
 }
 
 #[test]
@@ -270,6 +290,7 @@ fn command_builder_locks_helpers_protocols_and_diff_drivers() -> Result<(), Stri
     Ok(())
 }
 
+#[cfg(unix)]
 #[test]
 fn bound_helper_rejects_worktree_git_file_and_object_database_replacement() -> Result<(), String> {
     let sandbox = tempfile::tempdir().map_err(|error| error.to_string())?;
@@ -351,6 +372,7 @@ fn bound_helper_rejects_worktree_git_file_and_object_database_replacement() -> R
     Ok(())
 }
 
+#[cfg(unix)]
 fn resolve_git_path(root: &Path, value: &str) -> Result<std::path::PathBuf, String> {
     let path = Path::new(value.trim());
     let path = if path.is_absolute() {
@@ -361,6 +383,7 @@ fn resolve_git_path(root: &Path, value: &str) -> Result<std::path::PathBuf, Stri
     path.canonicalize().map_err(|error| error.to_string())
 }
 
+#[cfg(unix)]
 fn run_git(root: &Path, arguments: &[&str]) -> Result<String, String> {
     let output = Command::new("git")
         .current_dir(root)

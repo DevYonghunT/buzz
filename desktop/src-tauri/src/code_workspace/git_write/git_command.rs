@@ -29,9 +29,9 @@ pub(in crate::code_workspace) use executable::RootTrustedGit;
 use executable::{pin_git_executable, verify_git_executable};
 #[cfg(all(unix, test))]
 use identity::verify_named_directory;
-use identity::{
-    directory_identity, open_verified_file, verify_directory_identity, verify_regular_file,
-};
+#[cfg(unix)]
+use identity::{directory_identity, verify_directory_identity};
+use identity::{open_verified_file, verify_regular_file};
 pub(super) use identity::{
     pin_directory, pin_input_file, verify_named_directory_identity, DirectoryIdentity, FileIdentity,
 };
