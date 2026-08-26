@@ -391,6 +391,10 @@ type MockBridgeOptions = {
   nostrBindSignDelayMs?: number;
   /** Reject successive mock WebSocket connect attempts, then resume. */
   websocketConnectErrors?: string[];
+  /** Deliver AUTH synchronously, before the mock connect command resolves. */
+  websocketAuthBeforeConnectResolves?: boolean;
+  /** Stall the first AUTH signing command forever; later attempts complete. */
+  stallFirstAuthSigning?: boolean;
   stallWebsocketSends?: boolean;
   userSearchDelayMs?: number;
   /**
