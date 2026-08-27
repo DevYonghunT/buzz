@@ -24,7 +24,6 @@ import {
   useEncryptedBackupSession,
 } from "./EncryptedBackupCreator";
 import { IdentityKeyHelpDialog } from "./IdentityKeyHelpDialog";
-import { LandingBees } from "./LandingBees";
 import {
   NostrKeyImportForm,
   type NostrKeyImportStage,
@@ -37,6 +36,7 @@ import {
 import { OnboardingFooterProvider } from "./OnboardingFooter";
 import { OnboardingSlideTransition } from "./OnboardingSlideTransition";
 import { SetupStep } from "./SetupStep";
+import { SchoolXOnboardingBrand } from "./SchoolXOnboardingBrand";
 
 export type MachineOnboardingPage =
   | "identity"
@@ -215,7 +215,6 @@ export function MachineOnboardingFlow({
       data-testid="machine-onboarding-gate"
     >
       <StartupWindowDragRegion />
-      {page === "identity" ? <LandingBees /> : null}
       {isSecuritySubview ? (
         <div className="fixed inset-x-0 top-8 z-20 flex justify-center px-6">
           <Button
@@ -251,12 +250,11 @@ export function MachineOnboardingFlow({
               effect="mask-reveal-up"
               transitionKey="machine-identity"
             >
-              <img
-                alt="Buzz" // schoolx:buzz-name-ok — buzz-agent runtime logo
-                className="w-full max-w-[600px]"
-                src="/landing/buzz-wordmark.png"
+              <SchoolXOnboardingBrand
+                productName={t("app.productName")}
+                variant="hero"
               />
-              <p className="mt-2 max-w-[560px] text-center text-2xl font-normal leading-none text-foreground">
+              <p className="mt-5 max-w-[560px] text-pretty text-center text-2xl font-normal leading-tight text-foreground/80">
                 {t("app.onboarding.landing.taglineTop")}
                 <br />
                 {t("app.onboarding.landing.taglineBottom")}
@@ -311,14 +309,14 @@ export function MachineOnboardingFlow({
                   ease: "easeOut",
                 }}
               >
-                <h1 className="text-title font-normal text-foreground">
+                <h1 className="text-balance text-title font-normal text-foreground">
                   {keyImportStage === "backup-password"
                     ? "Unlock your account"
                     : identityLost
                       ? "Re-import your key"
                       : "Enter your private key"}
                 </h1>
-                <p className="mt-5 max-w-[440px] text-sm leading-6 text-foreground/80">
+                <p className="mt-5 max-w-[440px] text-pretty text-sm leading-6 text-foreground/80">
                   {keyImportStage === "backup-password"
                     ? "Enter your backup password to unlock your key and restore your identity."
                     : identityLost

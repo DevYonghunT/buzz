@@ -7,6 +7,7 @@ use serde::Serialize;
 
 const VERSION_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 const VERSION_OUTPUT_CAP: u64 = 64 * 1024;
+const CODEX_NOT_FOUND_ERROR: &str = "Codex CLI was not found on this computer";
 const SUPPORTED_CODEX_VERSION_PREFIXES: [&str; 2] = ["0.145.", "0.149."];
 const SUPPORTED_CODEX_VERSION_REQUIREMENT: &str =
     "codex-cli 0.145.<numeric patch> or codex-cli 0.149.<numeric patch>";
@@ -122,7 +123,7 @@ fn resolve_codex(explicit: Option<&Path>) -> Result<PathBuf, String> {
             path.to_path_buf()
         }
         None => crate::managed_agents::resolve_command("codex")
-            .ok_or_else(|| "Codex CLI was not found on this Mac".to_string())?,
+            .ok_or_else(|| CODEX_NOT_FOUND_ERROR.to_string())?,
     };
     let canonical = candidate
         .canonicalize()
@@ -229,6 +230,16 @@ mod tests {
     fn explicit_paths_must_be_absolute() {
         let result = resolve_codex(Some(Path::new("codex")));
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn missing_codex_error_is_platform_neutral() {
+        assert_eq!(
+            CODEX_NOT_FOUND_ERROR,
+            "Codex CLI was not found on this computer"
+        );
+        assert!(!CODEX_NOT_FOUND_ERROR.contains("Mac"));
+        assert!(!CODEX_NOT_FOUND_ERROR.contains("Windows"));
     }
 
     #[test]

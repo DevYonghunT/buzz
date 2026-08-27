@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { installMockBridge } from "../helpers/bridge";
+import { FEATURE_OVERRIDES_STORAGE_KEY } from "../helpers/features";
 import { openSettings } from "../helpers/settings";
 
 const ENGINEERING_CHANNEL_ID = "1c7e1c02-87bb-5e88-b2da-5a7a9432d0c9";
@@ -9,6 +10,15 @@ const FORUM_POST_ID = "mock-forum-release-thread";
 const FORUM_REPLY_ID = "mock-forum-release-reply";
 
 test.beforeEach(async ({ page }) => {
+  await page.addInitScript(
+    ({ storageKey }) => {
+      window.localStorage.setItem(
+        storageKey,
+        JSON.stringify({ projects: false }),
+      );
+    },
+    { storageKey: FEATURE_OVERRIDES_STORAGE_KEY },
+  );
   await installMockBridge(page);
 });
 
@@ -31,6 +41,24 @@ async function createWorkflow(
   await dialog.getByRole("button", { name: "Create" }).click();
   await expect(dialog).not.toBeVisible();
 }
+
+test("Projects stays in the primary menu despite a legacy disabled override", async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  await page.goto("/");
+
+  const projects = page.getByTestId("open-projects-view");
+  await expect(projects).toBeVisible({ timeout: 30_000 });
+  await projects.click();
+  await expect(page).toHaveURL(/#\/projects$/);
+
+  await openSettings(page);
+  await page.getByTestId("settings-nav-experimental").click();
+  await expect(page.getByTestId("settings-experimental")).not.toContainText(
+    "Projects",
+  );
+});
 
 test("global back and forward move across channel routes", async ({ page }) => {
   await page.goto("/");

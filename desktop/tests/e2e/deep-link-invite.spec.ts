@@ -128,7 +128,7 @@ test("add-community deep link starts onboarding when no community is configured"
 
   await expect(page.getByTestId("community-onboarding-flow")).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "Build your profile" }),
+    page.getByRole("heading", { name: "Set up your SchoolX profile" }),
   ).toBeVisible();
   await expect
     .poll(() =>
@@ -320,9 +320,9 @@ test("Welcome failure retries once before allowing starter channel setup to be s
   await backButton.click();
 
   await expect(
-    page.getByRole("heading", { name: "Build your profile" }),
+    page.getByRole("heading", { name: "Set up your SchoolX profile" }),
   ).toBeVisible();
-  await page.getByLabel("Community username").fill("Tyler");
+  await page.getByLabel("Display name").fill("Tyler");
   await page.getByTestId("community-profile-next").click();
 
   await enterButton.click();

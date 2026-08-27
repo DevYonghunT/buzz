@@ -13,6 +13,10 @@ import {
 } from "@/features/agents/channelAgents";
 import { resolveSnapshotAvatarPng } from "@/features/agents/ui/snapshotAvatarPng";
 import {
+  refreshCodeRuntimeAfterInstall,
+  shouldRefreshCodeRuntimeAfterInstall,
+} from "@/features/agents/lib/refreshCodeRuntimeAfterInstall";
+import {
   channelsQueryKey,
   upsertCachedChannelMember,
 } from "@/features/channels/hooks";
@@ -233,9 +237,17 @@ export function useInstallAcpRuntimeMutation() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (runtimeId: string) => installAcpRuntime(runtimeId),
-    onSettled: () => {
+    onSettled: (result, error, runtimeId) => {
       void queryClient.invalidateQueries({ queryKey: acpRuntimesQueryKey });
       void queryClient.invalidateQueries({ queryKey: managedAgentsQueryKey });
+      if (shouldRefreshCodeRuntimeAfterInstall(runtimeId, result, error)) {
+        void refreshCodeRuntimeAfterInstall(runtimeId, queryClient).catch(
+          () => {
+            // A successful installer must remain successful even if the
+            // immediate discovery pass races an OS PATH update. Code can retry.
+          },
+        );
+      }
     },
   });
 }

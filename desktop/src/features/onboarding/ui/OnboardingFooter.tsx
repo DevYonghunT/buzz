@@ -16,9 +16,8 @@ const OnboardingFooterTargetContext = React.createContext<HTMLElement | null>(
  * `OnboardingSlideTransition`'s transform. A transformed ancestor establishes a
  * containing block that would otherwise trap `position: fixed`, which is why
  * the CTAs can't simply live inside the step and use `fixed` themselves. The
- * slot stays inside the `.buzz-onboarding-neutral-theme` subtree so
- * `--buzz-welcome-chartreuse` and the theme color tokens still resolve for the
- * docked buttons.
+ * slot stays inside the onboarding theme subtree so its semantic colors match
+ * the surrounding SchoolX surface.
  */
 export function OnboardingFooterProvider({
   children,
@@ -30,13 +29,11 @@ export function OnboardingFooterProvider({
   return (
     <OnboardingFooterTargetContext.Provider value={target}>
       {children}
-      {/* Scrim: on pages taller than the viewport, content scrolls under the
-          docked CTA. This bottom-anchored fade to the shell's bottom color
-          (invisible on short pages and on the flat chartreuse landing) gives
-          the CTA a floor to sit on instead of colliding with form fields. */}
+      {/* On pages taller than the viewport, content scrolls under this flat
+          theme surface so the docked CTA never collides with form fields. */}
       <div
         aria-hidden
-        className="pointer-events-none fixed inset-x-0 bottom-0 z-10 h-36 bg-[linear-gradient(to_top,var(--buzz-onboarding-shell-bottom)_35%,transparent)]"
+        className="pointer-events-none fixed inset-x-0 bottom-0 z-10 h-28 border-t border-border/40 bg-background"
       />
       <div
         className="pointer-events-none fixed inset-x-0 bottom-5 z-20 flex justify-center px-4"

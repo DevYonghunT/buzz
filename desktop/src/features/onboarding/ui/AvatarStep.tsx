@@ -332,10 +332,10 @@ export function AvatarStep({
       >
         <div className="flex w-full flex-col items-center text-center lg:items-start lg:text-left">
           <div className="w-full max-w-[500px]">
-            <h1 className="text-title font-normal text-foreground">
+            <h1 className="text-balance text-title font-normal text-foreground">
               {t("app.onboarding.avatar.title")}
             </h1>
-            <p className="mt-5 text-sm leading-6 text-muted-foreground">
+            <p className="mt-5 text-pretty text-sm leading-6 text-muted-foreground">
               {t("app.onboarding.avatar.description")}
             </p>
           </div>

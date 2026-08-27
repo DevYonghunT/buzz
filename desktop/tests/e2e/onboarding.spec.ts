@@ -920,7 +920,7 @@ test("first-community owner can connect an existing hosted community", async ({
   await expect(page.getByText("North Star")).toBeVisible();
   await page.getByRole("button", { name: "Connect", exact: true }).click();
   await expect(
-    page.getByRole("heading", { name: "Build your profile" }),
+    page.getByRole("heading", { name: "Set up your SchoolX profile" }),
   ).toBeVisible();
   await expect
     .poll(() =>
@@ -1016,7 +1016,7 @@ test("first-community owner can create and connect a hosted community", async ({
   );
   await page.getByRole("button", { name: "Next" }).click();
   await expect(
-    page.getByRole("heading", { name: "Build your profile" }),
+    page.getByRole("heading", { name: "Set up your SchoolX profile" }),
   ).toBeVisible();
   await expect
     .poll(() =>
@@ -1127,7 +1127,7 @@ test("first-community reports a created community without a relay address", asyn
     "The community was created, but Builderlab did not return its relay address.",
   );
   await expect(
-    page.getByRole("heading", { name: "Build your profile" }),
+    page.getByRole("heading", { name: "Set up your SchoolX profile" }),
   ).toHaveCount(0);
 });
 
@@ -1377,7 +1377,7 @@ test("first-community direct join reaches profile", async ({ page }) => {
   await page.getByTestId("invite-redeem-submit").click();
 
   await expect(
-    page.getByRole("heading", { name: "Build your profile" }),
+    page.getByRole("heading", { name: "Set up your SchoolX profile" }),
   ).toBeVisible();
   await expect(page.getByText("Connecting securely…")).toHaveCount(0);
   await expect(page.getByText("Create an identity key")).toHaveCount(0);
@@ -1461,7 +1461,7 @@ test("community onboarding reuses an existing relay profile", async ({
     page.getByRole("heading", { name: "Meet your starter team" }),
   ).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "Build your profile" }),
+    page.getByRole("heading", { name: "Set up your SchoolX profile" }),
   ).toHaveCount(0);
 });
 
@@ -1666,11 +1666,11 @@ test("connected first-community profile step offers equal-width Next and Back co
 
   await expect(page.getByTestId("community-onboarding-flow")).toBeVisible();
   await expect(
-    page.getByRole("heading", { name: "Build your profile" }),
+    page.getByRole("heading", { name: "Set up your SchoolX profile" }),
   ).toBeVisible();
   const profileMain = page.getByTestId("community-profile-main");
   const profileHeading = page.getByRole("heading", {
-    name: "Build your profile",
+    name: "Set up your SchoolX profile",
   });
   await expect(profileHeading).toBeVisible();
   const profileHeadingBox = await profileHeading.boundingBox();
@@ -1707,7 +1707,7 @@ test("connected first-community profile step offers equal-width Next and Back co
     borderRadius: "16px",
     fontSize: "14px",
   });
-  await expect(page.getByText("Your username", { exact: true })).toBeVisible();
+  await expect(page.getByText("Display name", { exact: true })).toBeVisible();
   await expect(page.getByTestId("community-onboarding-flow")).toHaveAttribute(
     "data-system-color-scheme",
     /^(light|dark)$/,
@@ -2450,7 +2450,7 @@ test("membership denial on community profile save offers recovery", async ({
   await page.getByRole("button", { name: "Save changes" }).click();
   await page.getByRole("button", { name: "Use anyway" }).click();
   await expect(
-    page.getByRole("heading", { name: "Build your profile" }),
+    page.getByRole("heading", { name: "Set up your SchoolX profile" }),
   ).toBeVisible();
   await expect
     .poll(() =>

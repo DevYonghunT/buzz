@@ -15,7 +15,7 @@ import { getInstallErrorMessage } from "@/shared/lib/installError";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import { Card } from "@/shared/ui/card";
-import { FlappingBee } from "@/shared/ui/buzz-logo/FlappingBee";
+import { SchoolXMark } from "@/shared/ui/schoolx-brand/SchoolXMark";
 import { Spinner } from "@/shared/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/shared/ui/tooltip";
 import {
@@ -80,7 +80,7 @@ function RuntimeReadinessIndicator({
   return (
     <span
       aria-hidden="true"
-      className="pointer-events-none absolute right-8 top-8 flex h-8 w-8 items-center justify-center rounded-full border border-[var(--buzz-welcome-chartreuse)] bg-[var(--buzz-welcome-chartreuse)]"
+      className="pointer-events-none absolute right-8 top-8 flex size-8 items-center justify-center rounded-full border border-accent bg-accent"
       data-testid={`onboarding-runtime-check-${runtime.id}`}
     >
       <Check
@@ -151,7 +151,7 @@ function RuntimeStatus({
       <div className="flex flex-col items-center gap-1.5">
         <Button
           aria-label={`Sign in to ${runtime.label}`}
-          className="buzz-onboarding-runtime-setup h-5 rounded-full bg-[var(--buzz-welcome-chartreuse)]/30 px-2.5 font-mono !text-badge font-normal uppercase text-foreground hover:bg-[var(--buzz-welcome-chartreuse)]/40"
+          className="buzz-onboarding-runtime-setup h-5 rounded-full bg-accent px-2.5 font-mono !text-badge font-normal uppercase text-accent-foreground hover:bg-accent/80"
           data-testid={`onboarding-runtime-instructions-${runtime.id}`}
           onClick={() => {
             if (didSignInCheckTimeOut) {
@@ -242,7 +242,7 @@ function RuntimeStatus({
     return (
       <Button
         aria-label={`Check ${runtime.label} again`}
-        className="buzz-onboarding-runtime-setup h-5 rounded-full bg-[var(--buzz-welcome-chartreuse)]/30 px-2.5 font-mono !text-badge font-normal uppercase text-foreground hover:bg-[var(--buzz-welcome-chartreuse)]/40"
+        className="buzz-onboarding-runtime-setup h-5 rounded-full bg-accent px-2.5 font-mono !text-badge font-normal uppercase text-accent-foreground hover:bg-accent/80"
         disabled={runtimesQuery.isFetching}
         onClick={() => void runtimesQuery.refetch()}
         type="button"
@@ -258,7 +258,7 @@ function RuntimeStatus({
     return (
       <Button
         aria-label={`${installError ? "Retry installing" : "Install"} ${runtime.label}`}
-        className="buzz-onboarding-runtime-setup h-5 rounded-full bg-[var(--buzz-welcome-chartreuse)]/30 px-2.5 font-mono !text-badge font-normal uppercase text-foreground hover:bg-[var(--buzz-welcome-chartreuse)]/40"
+        className="buzz-onboarding-runtime-setup h-5 rounded-full bg-accent px-2.5 font-mono !text-badge font-normal uppercase text-accent-foreground hover:bg-accent/80"
         data-testid={`onboarding-runtime-install-${runtime.id}`}
         onClick={onInstall}
         type="button"
@@ -272,7 +272,7 @@ function RuntimeStatus({
   return (
     <Button
       aria-label={`View ${runtime.label} install instructions`}
-      className="buzz-onboarding-runtime-setup h-5 rounded-full bg-[var(--buzz-welcome-chartreuse)]/30 px-2.5 font-mono !text-badge font-normal uppercase text-foreground hover:bg-[var(--buzz-welcome-chartreuse)]/40"
+      className="buzz-onboarding-runtime-setup h-5 rounded-full bg-accent px-2.5 font-mono !text-badge font-normal uppercase text-accent-foreground hover:bg-accent/80"
       data-testid={`onboarding-runtime-instructions-${runtime.id}`}
       onClick={() => void openUrl(runtime.installInstructionsUrl)}
       type="button"
@@ -590,9 +590,9 @@ function RuntimeProvidersLoadingState() {
       data-testid="onboarding-runtime-loading"
       role="status"
     >
-      <div className="flex flex-col items-center text-foreground opacity-35">
-        <FlappingBee className="h-auto w-16" />
-        <p className="mt-5 text-2xl font-normal leading-8">
+      <div className="flex flex-col items-center text-foreground opacity-60">
+        <SchoolXMark className="size-16" decorative />
+        <p className="mt-5 text-pretty text-2xl font-normal leading-8">
           Finding your providers...
         </p>
       </div>
@@ -617,10 +617,10 @@ function RuntimeProvidersSection({
   return (
     <section className="flex min-h-full w-full flex-col items-center">
       <div className="w-full max-w-[820px] text-center">
-        <h1 className="text-title font-normal text-foreground">
+        <h1 className="text-balance text-title font-normal text-foreground">
           Set up your agent harnesses
         </h1>
-        <p className="mx-auto mt-3 max-w-[760px] text-sm leading-6 text-foreground/90">
+        <p className="mx-auto mt-3 max-w-[760px] text-pretty text-sm leading-6 text-foreground/90">
           SchoolX checks for command-line harnesses on this machine. Install the
           CLI or sign in to at least one to continue.
         </p>

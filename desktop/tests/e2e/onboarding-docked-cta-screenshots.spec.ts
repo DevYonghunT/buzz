@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 import { waitForAnimations } from "../helpers/animations";
 import { installMockBridge, TEST_IDENTITIES } from "../helpers/bridge";
@@ -15,9 +15,36 @@ const NCRYPTSEC =
 
 test.use({ viewport: { width: 1280, height: 800 } });
 
+async function ensureMockBridgeReady(page: Page, pageErrors: string[]) {
+  await expect
+    .poll(
+      async () => ({
+        errors: [...pageErrors],
+        ready: await page.evaluate(
+          () =>
+            typeof (
+              window as Window & {
+                __TAURI_INTERNALS__?: { invoke?: unknown };
+              }
+            ).__TAURI_INTERNALS__?.invoke === "function",
+        ),
+      }),
+      { timeout: 10_000 },
+    )
+    .toEqual({ errors: [], ready: true });
+}
+
+function collectPageErrors(page: Page) {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  return errors;
+}
+
 test("machine onboarding: landing, backup, setup docked CTAs", async ({
   page,
 }) => {
+  test.setTimeout(120_000);
+  const pageErrors = collectPageErrors(page);
   await installMockBridge(page, undefined, {
     skipCommunitySeed: true,
     skipOnboardingSeed: true,
@@ -25,7 +52,8 @@ test("machine onboarding: landing, backup, setup docked CTAs", async ({
   await page.goto("/");
 
   const gate = page.getByTestId("machine-onboarding-gate");
-  await expect(gate).toBeVisible();
+  await ensureMockBridgeReady(page, pageErrors);
+  await expect(gate).toBeVisible({ timeout: 20_000 });
   await waitForAnimations(page);
   await page.screenshot({ path: `${SHOT_DIR}/01-landing.png` });
 
@@ -131,6 +159,7 @@ test("machine onboarding: landing, backup, setup docked CTAs", async ({
   ).toBeVisible();
   await waitForAnimations(page);
   await page.screenshot({ path: `${SHOT_DIR}/03-setup.png` });
+  expect(pageErrors).toEqual([]);
 });
 
 test("machine key import remains usable in a short viewport", async ({
@@ -209,11 +238,16 @@ test("backup options keep one-column geometry on narrow windows", async ({
 });
 
 test("relay onboarding: profile and avatar docked CTAs", async ({ page }) => {
+  test.setTimeout(60_000);
+  const pageErrors = collectPageErrors(page);
   await seedActiveIdentity(page, BLANK_TYLER_IDENTITY);
   await installMockBridge(page, undefined, { skipOnboardingSeed: true });
   await page.goto("/");
 
-  await expect(page.getByTestId("onboarding-page-1")).toBeVisible();
+  await ensureMockBridgeReady(page, pageErrors);
+  await expect(page.getByTestId("onboarding-page-1")).toBeVisible({
+    timeout: 30_000,
+  });
   await page.getByTestId("onboarding-display-name").fill("Ada Lovelace");
   await waitForAnimations(page);
   await page.screenshot({ path: `${SHOT_DIR}/04-profile.png` });
@@ -225,4 +259,5 @@ test("relay onboarding: profile and avatar docked CTAs", async ({ page }) => {
     .fill("https://example.com/onboarding-avatar.png");
   await waitForAnimations(page);
   await page.screenshot({ path: `${SHOT_DIR}/05-avatar.png` });
+  expect(pageErrors).toEqual([]);
 });

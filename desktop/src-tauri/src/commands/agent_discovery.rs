@@ -1646,10 +1646,10 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn test_is_powershell_command_detects_powershell_commands() {
+        let codex = crate::managed_agents::known_acp_runtime_exact("codex").unwrap();
+        let codex_install = codex.cli_install_commands_windows[0];
         assert!(
-            super::is_powershell_command(
-                r#"powershell.exe -NoProfile -NonInteractive -Command "irm https://chatgpt.com/codex/install.ps1 | iex""#
-            ),
+            super::is_powershell_command(codex_install),
             "canonical codex install command must be detected as PowerShell"
         );
         assert!(
@@ -1675,7 +1675,8 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn test_build_install_command_uses_powershell_natively_on_windows() {
-        let ps_command = r#"powershell.exe -NoProfile -NonInteractive -Command "irm https://chatgpt.com/codex/install.ps1 | iex""#;
+        let codex = crate::managed_agents::known_acp_runtime_exact("codex").unwrap();
+        let ps_command = codex.cli_install_commands_windows[0];
         let result = super::build_install_command(ps_command);
         assert!(
             result.is_ok(),
@@ -1740,11 +1741,10 @@ mod tests {
     #[cfg(windows)]
     #[test]
     fn test_powershell_command_argv_exact() {
-        // Catalog format: body wrapped in one outer double-quote pair (Bash-layer serialization).
-        let body = "irm https://chatgpt.com/codex/install.ps1 | iex";
-        let cmd = super::install_powershell_command(&format!(
-            r#"powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "{body}""#
-        ));
+        let codex = crate::managed_agents::known_acp_runtime_exact("codex").unwrap();
+        let command = codex.cli_install_commands_windows[0];
+        let body = "$env:CODEX_RELEASE='0.149.1'; irm https://chatgpt.com/codex/install.ps1 | iex";
+        let cmd = super::install_powershell_command(command);
         assert_eq!(
             cmd.get_args()
                 .map(|a| a.to_string_lossy().into_owned())

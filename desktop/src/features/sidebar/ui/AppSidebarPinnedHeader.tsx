@@ -131,22 +131,18 @@ export function AppSidebarPrimaryMenu({
             </SidebarMenuButton>
           </SidebarMenuItem>
         </FeatureGate>
-        <FeatureGate feature="projects">
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              data-testid="open-projects-view"
-              isActive={selectedView === "projects"}
-              onClick={onSelectProjects}
-              tooltip="Projects"
-              type="button"
-            >
-              <FolderGit2 className="h-4 w-4" />
-              <SidebarMenuLabel>
-                {t("app.sidebar.nav.projects")}
-              </SidebarMenuLabel>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </FeatureGate>
+        <SidebarMenuItem>
+          <SidebarMenuButton
+            data-testid="open-projects-view"
+            isActive={selectedView === "projects"}
+            onClick={onSelectProjects}
+            tooltip="Projects"
+            type="button"
+          >
+            <FolderGit2 className="h-4 w-4" />
+            <SidebarMenuLabel>{t("app.sidebar.nav.projects")}</SidebarMenuLabel>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
         <SidebarMenuItem>
           <SidebarMenuButton
             data-testid="open-agents-view"

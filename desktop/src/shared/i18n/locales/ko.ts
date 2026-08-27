@@ -98,6 +98,28 @@ export const ko = {
         skipForNow: "나중에 하기",
         continueWithoutSaving: "저장하지 않고 계속하기",
       },
+      communityProfile: {
+        title: "SchoolX 프로필 만들기",
+        description:
+          "이 커뮤니티에서 사람들과 에이전트에게 보일 이름과 아바타를 정해 주세요.",
+        nameLabel: "표시 이름",
+        namePlaceholder: "이름을 입력하세요",
+        addAvatar: "아바타 추가",
+        changeAvatar: "아바타 변경",
+        avatarPreview: "내 프로필",
+        editAvatar: "아바타 편집",
+        continue: "계속하기",
+        back: "뒤로",
+      },
+      starterTeam: {
+        title: "첫 팀원을 소개합니다",
+        description:
+          "SchoolX에서는 사람과 에이전트가 한 워크스페이스에서 함께합니다. 첫 팀원들이 사용 방법을 안내해 드립니다.",
+        preparing: "SchoolX 시작 화면을 준비하는 중",
+        enter: "SchoolX 열기",
+        skipForNow: "나중에 하기",
+        back: "뒤로",
+      },
       avatar: {
         title: "프로필 사진을 정해 주세요",
         description: "이미지나 이모지를 아바타로 고를 수 있습니다",

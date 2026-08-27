@@ -99,11 +99,19 @@ function renderApp() {
 }
 
 async function installE2eBridgeIfConfigured() {
+  const e2eWindow = window as E2eWindow;
+  // An explicit E2E build always needs mock IPC to render. Individual specs
+  // can replace this default from an init script (including relay mode), while
+  // production builds can never activate it from a stray browser global.
+  if (import.meta.env.MODE === "e2e") {
+    e2eWindow.__BUZZ_E2E__ ??= { mode: "mock" };
+  }
+
   // The mock bridge is compiled only into dev and explicit E2E builds. A
   // pre-bootstrap global alone must never activate mock IPC in production.
   if (
     !(import.meta.env.DEV || import.meta.env.MODE === "e2e") ||
-    !(window as E2eWindow).__BUZZ_E2E__
+    !e2eWindow.__BUZZ_E2E__
   ) {
     return;
   }

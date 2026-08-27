@@ -2,13 +2,71 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createCodeSessionState } from "./codeSessionReducer.ts";
-import { captureCodeAuthoritativeRefreshCompletion } from "./codeSessionStore.ts";
+import {
+  captureCodeAuthoritativeRefreshCompletion,
+  reprobeCodeRuntimeStatus,
+} from "./codeSessionStore.ts";
 
 const scope = {
   communityId: "community-1",
   projectDtag: "project-1",
   repositoryIdentity: "a".repeat(64),
 };
+
+test("manual runtime refresh re-probes before reading updated status", async () => {
+  const calls = [];
+  const probe = {
+    available: true,
+    executable: "C:\\Users\\user\\AppData\\Roaming\\npm\\codex.cmd",
+    version: "codex-cli 0.149.0",
+    error: null,
+  };
+  const status = {
+    phase: "stopped",
+    generation: 0,
+    executable: probe.executable,
+    version: probe.version,
+    pid: null,
+    userAgent: null,
+    codexHome: null,
+    platformFamily: null,
+    platformOs: null,
+    queuedNotifications: 0,
+    lastError: null,
+  };
+
+  const result = await reprobeCodeRuntimeStatus({
+    async probeCodeRuntime() {
+      calls.push("probe");
+      return probe;
+    },
+    async getCodeRuntimeStatus() {
+      calls.push("status");
+      return status;
+    },
+  });
+
+  assert.deepEqual(calls, ["probe", "status"]);
+  assert.deepEqual(result, { probe, status });
+});
+
+test("manual runtime refresh does not read stale status when probing fails", async () => {
+  let statusReads = 0;
+
+  await assert.rejects(
+    reprobeCodeRuntimeStatus({
+      async probeCodeRuntime() {
+        throw new Error("probe transport failed");
+      },
+      async getCodeRuntimeStatus() {
+        statusReads += 1;
+        throw new Error("status should not be read");
+      },
+    }),
+    /probe transport failed/,
+  );
+  assert.equal(statusReads, 0);
+});
 
 function refreshState() {
   return {

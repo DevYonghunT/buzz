@@ -53,6 +53,7 @@ import { CodeThreadSidebar } from "./CodeThreadSidebar";
 import { CodeThreadLifecycleNotice } from "./CodeThreadLifecycleNotice";
 import { CodeTimeline } from "./CodeTimeline";
 import { CodeWorkspaceHeader } from "./CodeWorkspaceHeader";
+import { CodeWorkspacePanelLayout } from "./CodeWorkspacePanelLayout";
 import { useCodeTerminalVisibility } from "./useCodeTerminalVisibility";
 
 function errorMessage(error: unknown): string {
@@ -823,148 +824,157 @@ export function CodeWorkspaceScreen({
         preparationReady={taskCreation.preparationReady}
         recoveryRequired={taskCreation.recoveryRequired}
       />
-      <div className="relative flex min-h-0 flex-1 overflow-hidden">
-        {sidebarOpen ? (
-          <CodeThreadSidebar
-            actionPendingId={actionPendingId}
-            actionsReady={sidebarActionsReady}
-            canCreate={sidebarActionsReady}
-            creating={creating}
-            isForkBlocked={threadMutations.isForkLocallyBlocked}
-            isLifecycleBlocked={threadMutations.isLifecycleLocallyBlocked}
-            loading={
-              listRefreshPending ||
-              preparationsQuery.isFetching ||
-              threadsQuery.isFetching
-            }
-            onArchiveThread={threadMutations.archiveThread}
-            onCreate={taskCreation.openDialog}
-            onForkThread={forkThread}
-            onOpenPreparation={(preparation) =>
-              void openPreparation(preparation)
-            }
-            onRefresh={() => {
-              void refreshLists();
-            }}
-            onRenameThread={threadMutations.renameThread}
-            onSelectThread={(threadId) => {
-              onSelectedThreadIdChange(threadId);
-            }}
-            onUnarchiveThread={threadMutations.unarchiveThread}
-            preparations={preparationsQuery.data ?? []}
-            refreshReady={sidebarRefreshReady}
-            scope={scope}
-            selectedThreadId={selectedThreadId}
-            threads={threads}
-          />
-        ) : null}
-        <section className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <CodeWorkspaceHeader
-            canReadChanges={selectedCapabilities?.canReadChanges === true}
-            inspectorOpen={inspectorOpen}
-            modelSelection={modelSelection}
-            modelSelectionDisabled={modelSelectionDisabled}
-            onInspectorOpenChange={setInspectorOpen}
-            onRetry={() => {
-              if (selectedThreadId) void resumeThread(selectedThreadId, true);
-            }}
-            onSidebarOpenChange={setSidebarOpen}
-            onTerminalToggle={terminal.toggle}
-            selectedLabel={selectedLabel}
-            selectedRow={selectedRow}
-            selectedThreadId={selectedThreadId}
-            selectionLoading={selectionLoading}
-            showRetry={
-              selectedCanExecute &&
-              selectedThreadId !== null &&
-              actionError !== null &&
-              openedThread === null
-            }
-            sidebarOpen={sidebarOpen}
-            terminalOpen={terminal.open}
-            terminalVisible={terminalThreadId !== null}
-          />
-          {visibleError ? (
-            <div
-              className="border-destructive/30 border-b bg-destructive/10 px-3 py-2 text-xs text-destructive"
-              role="alert"
-            >
-              {visibleError}
-            </div>
-          ) : null}
-          {selectedThread ? (
-            <>
-              <CodeTimeline
-                approvals={pendingApprovals}
-                canRespond={(approval) =>
-                  selectedCanExecute &&
-                  interactionReady &&
-                  selectCanRespondToCodeApproval(session.state, approval)
-                }
-                loading={selectionLoading}
-                onRespond={async (approval, response) => {
-                  if (!(await session.respondToApproval(approval, response))) {
-                    throw new Error(
-                      "This approval changed before the response was sent.",
-                    );
-                  }
-                }}
-                rows={timelineRows}
-              />
-              {selectedRow?.lifecycle === "active" ? (
-                <CodeComposer
-                  active={effectiveTurnId !== null}
-                  canInterrupt={
+      <CodeWorkspacePanelLayout
+        changes={
+          inspectorOpen &&
+          selectedRow &&
+          selectedCapabilities?.canReadChanges &&
+          changesRuntimeGeneration !== null ? (
+            <CodeChangesPanel
+              binding={selectedRow.binding}
+              className="min-w-0 flex-1"
+              controller={gitHandoff}
+              enabled={changesEnabled}
+              onClose={() => setInspectorOpen(false)}
+              runtimeGeneration={changesRuntimeGeneration}
+              scope={scope}
+            />
+          ) : null
+        }
+        conversation={
+          <section className="flex min-h-0 min-w-0 flex-1 flex-col">
+            <CodeWorkspaceHeader
+              canReadChanges={selectedCapabilities?.canReadChanges === true}
+              inspectorOpen={inspectorOpen}
+              modelSelection={modelSelection}
+              modelSelectionDisabled={modelSelectionDisabled}
+              onInspectorOpenChange={setInspectorOpen}
+              onRetry={() => {
+                if (selectedThreadId) void resumeThread(selectedThreadId, true);
+              }}
+              onSidebarOpenChange={setSidebarOpen}
+              onTerminalToggle={terminal.toggle}
+              selectedLabel={selectedLabel}
+              selectedRow={selectedRow}
+              selectedThreadId={selectedThreadId}
+              selectionLoading={selectionLoading}
+              showRetry={
+                selectedCanExecute &&
+                selectedThreadId !== null &&
+                actionError !== null &&
+                openedThread === null
+              }
+              sidebarOpen={sidebarOpen}
+              terminalOpen={terminal.open}
+              terminalVisible={terminalThreadId !== null}
+            />
+            {visibleError ? (
+              <div
+                className="border-destructive/30 border-b bg-destructive/10 px-3 py-2 text-xs text-destructive"
+                role="alert"
+              >
+                {visibleError}
+              </div>
+            ) : null}
+            {selectedThread ? (
+              <>
+                <CodeTimeline
+                  approvals={pendingApprovals}
+                  canRespond={(approval) =>
                     selectedCanExecute &&
                     interactionReady &&
-                    activeTurn !== null
+                    selectCanRespondToCodeApproval(session.state, approval)
                   }
-                  disabled={composerDisabled}
-                  disabledReason={gitHandoff.gitBlockerReason}
-                  onInterrupt={interrupt}
-                  onSubmit={submitPrompt}
+                  loading={selectionLoading}
+                  onRespond={async (approval, response) => {
+                    if (
+                      !(await session.respondToApproval(approval, response))
+                    ) {
+                      throw new Error(
+                        "This approval changed before the response was sent.",
+                      );
+                    }
+                  }}
+                  rows={timelineRows}
                 />
-              ) : selectedRow ? (
-                <CodeThreadLifecycleNotice
-                  blocked={selectedLifecycleBlocked}
-                  lifecycle={selectedRow.lifecycle}
-                  onRefresh={refreshLists}
-                  onUnarchive={() =>
-                    threadMutations.unarchiveThread(
-                      selectedRow.binding.codexThreadId,
-                    )
-                  }
-                />
-              ) : null}
-            </>
-          ) : selectedRow?.unavailable ? (
-            <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-muted-foreground">
-              {selectedRow.unavailable}
-            </div>
-          ) : (
-            <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
-              <p className="text-sm font-medium">{projectName} Code</p>
-              <p className="mt-1 max-w-sm text-xs text-muted-foreground">
-                Create a task in an isolated worktree or choose a recent task.
-              </p>
-            </div>
-          )}
-        </section>
-        {inspectorOpen &&
-        selectedRow &&
-        selectedCapabilities?.canReadChanges &&
-        changesRuntimeGeneration !== null ? (
-          <CodeChangesPanel
-            binding={selectedRow.binding}
-            className="absolute inset-y-0 right-0 z-20 w-[min(34rem,calc(100%-3rem))] shadow-xl xl:static xl:z-auto xl:w-[34rem] xl:max-w-[42vw] xl:shadow-none"
-            controller={gitHandoff}
-            enabled={changesEnabled}
-            onClose={() => setInspectorOpen(false)}
-            runtimeGeneration={changesRuntimeGeneration}
-            scope={scope}
-          />
-        ) : null}
-      </div>
+                {selectedRow?.lifecycle === "active" ? (
+                  <CodeComposer
+                    active={effectiveTurnId !== null}
+                    canInterrupt={
+                      selectedCanExecute &&
+                      interactionReady &&
+                      activeTurn !== null
+                    }
+                    disabled={composerDisabled}
+                    disabledReason={gitHandoff.gitBlockerReason}
+                    onInterrupt={interrupt}
+                    onSubmit={submitPrompt}
+                  />
+                ) : selectedRow ? (
+                  <CodeThreadLifecycleNotice
+                    blocked={selectedLifecycleBlocked}
+                    lifecycle={selectedRow.lifecycle}
+                    onRefresh={refreshLists}
+                    onUnarchive={() =>
+                      threadMutations.unarchiveThread(
+                        selectedRow.binding.codexThreadId,
+                      )
+                    }
+                  />
+                ) : null}
+              </>
+            ) : selectedRow?.unavailable ? (
+              <div className="flex flex-1 items-center justify-center px-6 text-center text-sm text-muted-foreground">
+                {selectedRow.unavailable}
+              </div>
+            ) : (
+              <div className="flex flex-1 flex-col items-center justify-center px-6 text-center">
+                <p className="text-sm font-medium">{projectName} Code</p>
+                <p className="mt-1 max-w-sm text-xs text-muted-foreground">
+                  Create a task in an isolated worktree or choose a recent task.
+                </p>
+              </div>
+            )}
+          </section>
+        }
+        tasks={
+          sidebarOpen ? (
+            <CodeThreadSidebar
+              actionPendingId={actionPendingId}
+              actionsReady={sidebarActionsReady}
+              canCreate={sidebarActionsReady}
+              className="w-full"
+              creating={creating}
+              isForkBlocked={threadMutations.isForkLocallyBlocked}
+              isLifecycleBlocked={threadMutations.isLifecycleLocallyBlocked}
+              loading={
+                listRefreshPending ||
+                preparationsQuery.isFetching ||
+                threadsQuery.isFetching
+              }
+              onArchiveThread={threadMutations.archiveThread}
+              onCreate={taskCreation.openDialog}
+              onForkThread={forkThread}
+              onOpenPreparation={(preparation) =>
+                void openPreparation(preparation)
+              }
+              onRefresh={() => {
+                void refreshLists();
+              }}
+              onRenameThread={threadMutations.renameThread}
+              onSelectThread={(threadId) => {
+                onSelectedThreadIdChange(threadId);
+              }}
+              onUnarchiveThread={threadMutations.unarchiveThread}
+              preparations={preparationsQuery.data ?? []}
+              refreshReady={sidebarRefreshReady}
+              scope={scope}
+              selectedThreadId={selectedThreadId}
+              threads={threads}
+            />
+          ) : null
+        }
+      />
       {terminalThreadId ? (
         <CodeTerminalDrawer
           key={`${scope.communityId}:${scope.projectDtag}:${scope.repositoryIdentity}:${terminalThreadId}`}

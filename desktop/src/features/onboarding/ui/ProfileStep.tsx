@@ -222,10 +222,10 @@ export function ProfileStep({
       transitionKey={`profile-${direction}`}
     >
       <div className="w-full max-w-2xl">
-        <h1 className="text-title font-normal text-foreground">
+        <h1 className="text-balance text-title font-normal text-foreground">
           {t("app.onboarding.profile.title")}
         </h1>
-        <p className="mt-5 text-sm leading-6 text-muted-foreground">
+        <p className="mt-5 text-pretty text-sm leading-6 text-muted-foreground">
           {t("app.onboarding.profile.description")}
         </p>
       </div>

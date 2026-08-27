@@ -8,6 +8,7 @@ import { Button } from "@/shared/ui/button";
 import { Input } from "@/shared/ui/input";
 import { Spinner } from "@/shared/ui/spinner";
 import { StartupWindowDragRegion } from "@/shared/ui/StartupWindowDragRegion";
+import { SchoolXMark } from "@/shared/ui/schoolx-brand/SchoolXMark";
 import { InviteRedeemForm } from "./InviteRedeemForm";
 import { writeTextToClipboard } from "@/shared/lib/clipboard";
 
@@ -98,22 +99,23 @@ export function MembershipDenied({
 
   return (
     <div
-      className="flex min-h-dvh items-center justify-center bg-[radial-gradient(circle_at_top,hsl(var(--primary)/0.14),transparent_48%),linear-gradient(180deg,hsl(var(--background)),hsl(var(--muted)/0.55))] px-4 py-8"
+      className="flex min-h-dvh items-center justify-center bg-background px-4 py-8"
       data-testid="membership-denied"
     >
       <StartupWindowDragRegion />
-      <div className="w-full max-w-md rounded-[28px] border border-border/70 bg-background/92 p-8 shadow-2xl backdrop-blur-sm">
+      <div className="w-full max-w-md rounded-2xl border border-border bg-card p-8 text-card-foreground shadow-lg">
         <div className="space-y-3">
+          <SchoolXMark className="size-12" decorative />
           <Badge variant="warning">Membership required</Badge>
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-destructive/10">
               <ShieldX className="h-4 w-4 text-destructive" />
             </div>
-            <h1 className="text-2xl font-semibold tracking-tight text-foreground">
+            <h1 className="text-balance text-2xl font-semibold text-foreground">
               Not a member yet
             </h1>
           </div>
-          <p className="text-sm leading-6 text-muted-foreground">
+          <p className="text-pretty text-sm leading-6 text-muted-foreground">
             This relay requires an invitation. Ask a relay admin to add you as a
             member, then come back and try again.
           </p>
@@ -129,6 +131,7 @@ export function MembershipDenied({
                 {npub}
               </code>
               <Button
+                aria-label="Copy public key"
                 className="shrink-0"
                 onClick={() => {
                   void handleCopy();

@@ -46,6 +46,8 @@ pub use bindings::{
     CodeThreadPreparationOperation,
 };
 pub(crate) use bindings::{CodeThreadBindingLifecycle, CodeThreadLifecycleClaim};
+#[cfg(test)]
+pub(crate) use discovery::ensure_supported_codex_version;
 pub use discovery::CodeRuntimeProbe;
 pub(crate) use git_write::CodeGitWriteState;
 pub use git_write::{

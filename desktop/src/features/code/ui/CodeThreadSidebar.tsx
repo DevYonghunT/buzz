@@ -156,6 +156,7 @@ export function CodeThreadSidebar({
   actionPendingId,
   actionsReady,
   canCreate,
+  className,
   creating,
   isForkBlocked,
   isLifecycleBlocked,
@@ -172,11 +173,13 @@ export function CodeThreadSidebar({
   refreshReady,
   scope,
   selectedThreadId,
+  style,
   threads,
 }: {
   actionPendingId: string | null;
   actionsReady: boolean;
   canCreate: boolean;
+  className?: string;
   creating: boolean;
   isForkBlocked: (threadId: string) => boolean;
   isLifecycleBlocked: (threadId: string) => boolean;
@@ -193,6 +196,7 @@ export function CodeThreadSidebar({
   refreshReady: boolean;
   scope: CodeThreadBindingScope;
   selectedThreadId: string | null;
+  style?: React.CSSProperties;
   threads: readonly CodeBoundThreadSummary[];
 }) {
   const [searchQuery, setSearchQuery] = React.useState("");
@@ -221,8 +225,12 @@ export function CodeThreadSidebar({
   return (
     <aside
       aria-label="Code tasks"
-      className="flex min-h-0 w-60 shrink-0 flex-col border-border/60 border-r bg-muted/15"
+      className={cn(
+        "flex min-h-0 w-60 shrink-0 flex-col border-border/60 border-r bg-muted/15",
+        className,
+      )}
       data-testid="code-thread-sidebar"
+      style={style}
     >
       <div className="flex h-11 items-center gap-2 border-border/60 border-b px-3">
         <h2 className="min-w-0 flex-1 truncate text-sm font-semibold">Tasks</h2>

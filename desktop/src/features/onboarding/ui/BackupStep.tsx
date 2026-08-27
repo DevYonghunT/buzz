@@ -8,8 +8,8 @@ import type { IdentityStorage } from "@/shared/api/types";
 import { cn } from "@/shared/lib/cn";
 import { writeTextToClipboard } from "@/shared/lib/clipboard";
 import { Button } from "@/shared/ui/button";
-import { FuzzyLogo } from "@/shared/ui/buzz-logo/FuzzyLogo";
 import { Card } from "@/shared/ui/card";
+import { SchoolXMark } from "@/shared/ui/schoolx-brand/SchoolXMark";
 import { Spinner } from "@/shared/ui/spinner";
 import {
   ONBOARDING_PRIMARY_CTA_CLASS,
@@ -191,10 +191,10 @@ export function BackupStep({
         transitionKey={`backup-options-${direction}`}
       >
         <div className="flex w-full max-w-140 shrink-0 flex-col text-center">
-          <h1 className="text-title font-normal text-foreground">
+          <h1 className="text-balance text-title font-normal text-foreground">
             {t("app.onboarding.backup.options.title")}
           </h1>
-          <p className="mt-5 text-sm leading-6 text-foreground/75">
+          <p className="mt-5 text-pretty text-sm leading-6 text-foreground/75">
             {t("app.onboarding.backup.options.description")}
           </p>
         </div>
@@ -304,7 +304,7 @@ export function BackupStep({
         {/* Plain string concat: cn()'s tailwind-merge misreads the custom
             text-title size token as conflicting with text-foreground. */}
         <h1
-          className={`text-title font-normal text-foreground ${REVEAL_ANIMATION_CLASS}`}
+          className={`text-balance text-title font-normal text-foreground ${REVEAL_ANIMATION_CLASS}`}
           key={created ? "created" : "creating"}
         >
           {created
@@ -314,7 +314,7 @@ export function BackupStep({
         {created ? (
           <p
             className={cn(
-              "mt-5 text-sm leading-6 text-foreground/80",
+              "mt-5 text-pretty text-sm leading-6 text-foreground/80",
               REVEAL_ANIMATION_CLASS,
             )}
           >
@@ -338,13 +338,7 @@ export function BackupStep({
           className="flex w-full flex-1 items-center justify-center py-10"
           data-testid="backup-intro-logo"
         >
-          <FuzzyLogo
-            ariaLabel={t("app.onboarding.backup.titleCreating")}
-            className="w-20! text-foreground"
-            fuzz
-            loop
-            loopRestSeconds={0}
-          />
+          <SchoolXMark className="size-20" decorative />
         </div>
       ) : (
         <div

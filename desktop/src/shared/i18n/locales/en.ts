@@ -122,6 +122,28 @@ export const en = {
         skipForNow: "Skip for now",
         continueWithoutSaving: "Continue without saving",
       },
+      communityProfile: {
+        title: "Set up your SchoolX profile",
+        description:
+          "Choose the name and avatar people and agents will see in this community.",
+        nameLabel: "Display name",
+        namePlaceholder: "Enter your name",
+        addAvatar: "Add an avatar",
+        changeAvatar: "Change your avatar",
+        avatarPreview: "Your profile",
+        editAvatar: "Edit your avatar",
+        continue: "Continue",
+        back: "Back",
+      },
+      starterTeam: {
+        title: "Meet your starter team",
+        description:
+          "SchoolX brings people and agents together in one workspace. Your starter team will help you find your way around.",
+        preparing: "Preparing your SchoolX welcome",
+        enter: "Open SchoolX",
+        skipForNow: "Skip for now",
+        back: "Back",
+      },
       avatar: {
         title: "Next, add a display image",
         description: "Choose an image or emoji as your avatar",

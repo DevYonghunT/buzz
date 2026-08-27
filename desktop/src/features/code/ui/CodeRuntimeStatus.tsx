@@ -46,6 +46,7 @@ export function CodeRuntimeStatus({
     status?.phase === "ready" &&
     (replay.status === "idle" || replay.status === "synchronizing");
   const canStart = status?.phase === "stopped" || status?.phase === "failed";
+  const needsInstallRecheck = status?.phase === "notInstalled";
 
   return (
     <div
@@ -99,21 +100,37 @@ export function CodeRuntimeStatus({
               {status.phase === "failed" ? "Retry" : "Start"}
             </Button>
           ) : null}
-          <Button
-            aria-label="Refresh Codex runtime status"
-            className="h-6 w-6"
-            disabled={pending}
-            onClick={onRefresh}
-            size="icon-xs"
-            title="Refresh runtime status"
-            variant="ghost"
-          >
-            <RotateCw
-              className={cn(
-                pending && "animate-spin motion-reduce:animate-none",
-              )}
-            />
-          </Button>
+          {needsInstallRecheck ? (
+            <Button
+              disabled={pending}
+              onClick={onRefresh}
+              size="xs"
+              variant="outline"
+            >
+              <RotateCw
+                className={cn(
+                  pending && "animate-spin motion-reduce:animate-none",
+                )}
+              />
+              {pending ? "Checking…" : "Check again"}
+            </Button>
+          ) : (
+            <Button
+              aria-label="Refresh Codex runtime status"
+              className="h-6 w-6"
+              disabled={pending}
+              onClick={onRefresh}
+              size="icon-xs"
+              title="Refresh runtime status"
+              variant="ghost"
+            >
+              <RotateCw
+                className={cn(
+                  pending && "animate-spin motion-reduce:animate-none",
+                )}
+              />
+            </Button>
+          )}
         </div>
       </div>
 

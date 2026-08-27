@@ -4,6 +4,7 @@ import * as React from "react";
 import { codeWorkspaceApi, type CodeWorkspaceApi } from "../api/codeWorkspace";
 import type {
   CodeApprovalResponse,
+  CodeRuntimeProbe,
   CodeRuntimeStatus,
   CodeThreadBindingScope,
 } from "../api/types";
@@ -36,6 +37,18 @@ export type CodeAuthoritativeRefreshCompletion = {
   readonly subscriptionEpoch: number;
   complete: () => boolean;
 };
+
+/** Re-run executable discovery before reading the lifecycle it updates. */
+export async function reprobeCodeRuntimeStatus(
+  api: Pick<CodeWorkspaceApi, "probeCodeRuntime" | "getCodeRuntimeStatus">,
+): Promise<{
+  probe: CodeRuntimeProbe;
+  status: CodeRuntimeStatus;
+}> {
+  const probe = await api.probeCodeRuntime();
+  const status = await api.getCodeRuntimeStatus();
+  return { probe, status };
+}
 
 /** Capture a one-shot reducer completion that rejects any later state drift. */
 export function captureCodeAuthoritativeRefreshCompletion(
@@ -157,8 +170,6 @@ export function useCodeSessionStore(
     },
     refetchInterval: 3_000,
   });
-  const refetchRuntimeStatus = runtimeQuery.refetch;
-
   const startRuntime = React.useCallback(async () => {
     const revision = ++runtimeRevisionRef.current;
     setRuntimeMutationPending(true);
@@ -264,8 +275,18 @@ export function useCodeSessionStore(
   }, [api, replayRestartKey, sessionScope, state.runtimeStatus?.phase]);
 
   const refreshRuntime = React.useCallback(async () => {
-    await refetchRuntimeStatus();
-  }, [refetchRuntimeStatus]);
+    setRuntimeMutationPending(true);
+    setRuntimeMutationError(null);
+    try {
+      const { probe, status } = await reprobeCodeRuntimeStatus(api);
+      queryClient.setQueryData(codeSessionQueryKeys.runtimeProbe(), probe);
+      receiveRuntimeStatus(status, ++runtimeRevisionRef.current);
+    } catch (error) {
+      setRuntimeMutationError(errorMessage(error));
+    } finally {
+      setRuntimeMutationPending(false);
+    }
+  }, [api, queryClient, receiveRuntimeStatus]);
 
   const retryEventSync = React.useCallback(() => {
     fullReplayRequestedRef.current = true;

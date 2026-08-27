@@ -926,6 +926,66 @@ test("opens a scoped SchoolX Code task and submits through its bound thread", as
   });
 });
 
+test("resizes and remembers the SchoolX Code side panels", async ({ page }) => {
+  await page.setViewportSize({ width: 1_600, height: 900 });
+  await installMockBridge(page, { schoolxCodeWorkspace: true });
+  await openBoundThread(page);
+
+  const tasks = page.getByTestId("code-thread-sidebar");
+  const tasksResize = page.getByTestId("code-tasks-resize-handle");
+  const initialTasksBox = await tasks.boundingBox();
+  const tasksResizeBox = await tasksResize.boundingBox();
+  expect(initialTasksBox).not.toBeNull();
+  expect(tasksResizeBox).not.toBeNull();
+
+  await page.mouse.move(
+    (tasksResizeBox?.x ?? 0) + (tasksResizeBox?.width ?? 0) / 2,
+    (tasksResizeBox?.y ?? 0) + (tasksResizeBox?.height ?? 0) / 2,
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    (tasksResizeBox?.x ?? 0) + (tasksResizeBox?.width ?? 0) / 2 + 80,
+    (tasksResizeBox?.y ?? 0) + (tasksResizeBox?.height ?? 0) / 2,
+  );
+  await page.mouse.up();
+
+  await expect
+    .poll(async () => (await tasks.boundingBox())?.width ?? 0)
+    .toBeGreaterThan((initialTasksBox?.width ?? 0) + 70);
+
+  const changesFrame = page.getByTestId("code-changes-panel-frame");
+  const changesResize = page.getByTestId("code-changes-resize-handle");
+  const initialChangesBox = await changesFrame.boundingBox();
+  expect(initialChangesBox).not.toBeNull();
+  await changesResize.focus();
+  await page.keyboard.press("ArrowLeft");
+  await expect
+    .poll(async () => (await changesFrame.boundingBox())?.width ?? 0)
+    .toBeGreaterThan((initialChangesBox?.width ?? 0) + 12);
+
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const raw = window.localStorage.getItem(
+          "buzz.desktop.schoolx-code-panel-widths",
+        );
+        return raw ? JSON.parse(raw) : null;
+      }),
+    )
+    .toMatchObject({ tasks: 320, changes: 560 });
+
+  await page.reload();
+  await expect(codeRuntimeReadyLabel(page)).toBeVisible({ timeout: 15_000 });
+  await expect(tasks).toBeVisible();
+  await expect(changesFrame).toBeVisible();
+  await expect
+    .poll(async () => ({
+      changes: Math.round((await changesFrame.boundingBox())?.width ?? 0),
+      tasks: Math.round((await tasks.boundingBox())?.width ?? 0),
+    }))
+    .toEqual({ tasks: 320, changes: 560 });
+});
+
 test("locks task refresh while a new Codex thread opens without relisting it", async ({
   page,
 }) => {
