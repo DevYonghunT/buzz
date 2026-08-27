@@ -3291,6 +3291,7 @@ mod tests {
         root: PathBuf,
     }
 
+    #[cfg(unix)]
     #[test]
     fn pinned_change_inventory_commands_are_literal_closed_and_non_renaming() {
         let base_commit = "a".repeat(40);
