@@ -273,6 +273,13 @@ jobs:
         run: |
           cargo build --release --target "$TARGET" -p buzz-acp -p buzz-agent -p buzz-dev-mcp -p git-credential-nostr -p buzz-cli
           ./scripts/bundle-sidecars.sh "$TARGET"
+      - name: Test Windows Code journal startup
+        shell: bash
+        run: |
+          cargo test --manifest-path desktop/src-tauri/Cargo.toml --target "$TARGET" --lib windows_ -- --test-threads=1
+          cargo test --manifest-path desktop/src-tauri/Cargo.toml --target "$TARGET" --lib code_workspace::git_write::startup::tests::missing_git_journal_is_empty_without_creating_store_bytes -- --exact --test-threads=1
+        env:
+          CMAKE_POLICY_VERSION_MINIMUM: "3.5"
       - name: Build Windows NSIS installer (unsigned)
         shell: bash
         run: cd desktop && pnpm tauri build --target "$TARGET" --bundles nsis --config src-tauri/tauri.team.conf.json

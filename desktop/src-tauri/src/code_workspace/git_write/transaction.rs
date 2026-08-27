@@ -1,6 +1,6 @@
 use std::path::Path;
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod crash_tests;
 pub(super) mod fault;
 mod recovery;

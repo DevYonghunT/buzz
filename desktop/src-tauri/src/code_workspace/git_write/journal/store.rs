@@ -42,11 +42,27 @@ impl GitOperationJournalStore {
     /// Strictly load the journal. Missing `code` or journal paths represent an
     /// empty store and do not create, chmod, rename, or fsync anything.
     pub(crate) fn load(&self) -> Result<GitOperationJournal, String> {
-        let Some(directory) = self.open_code_directory(false)? else {
-            return Ok(GitOperationJournal::default());
-        };
-        self.load_from_directory(&directory)
-            .map(|(journal, _)| journal)
+        #[cfg(unix)]
+        {
+            let Some(directory) = self.open_code_directory(false)? else {
+                return Ok(GitOperationJournal::default());
+            };
+            self.load_from_directory(&directory)
+                .map(|(journal, _)| journal)
+        }
+        #[cfg(not(unix))]
+        {
+            // Strict Git writes and managed worktrees remain unavailable on
+            // this platform. Local-mode Code tasks do not create this journal,
+            // so an absent file is the only safe state needed at startup.
+            // Any existing bytes still fail closed because this build cannot
+            // validate or recover their Unix-specific ownership evidence.
+            load_unsupported_platform_empty_journal(
+                &self.app_data_dir,
+                &self.code_dir,
+                &self.journal_path,
+            )
+        }
     }
 
     /// Compact acknowledged history, validate the complete next image, and
@@ -174,6 +190,73 @@ impl GitOperationJournalStore {
         }
         open_private_directory(&self.code_dir).map(Some)
     }
+}
+
+#[cfg(any(not(unix), test))]
+fn load_unsupported_platform_empty_journal(
+    app_data_dir: &Path,
+    code_dir: &Path,
+    journal_path: &Path,
+) -> Result<GitOperationJournal, String> {
+    if journal_path.parent() != Some(code_dir) {
+        return Err("SchoolX Code Git journal escaped its data directory".to_string());
+    }
+    let metadata = match fs::symlink_metadata(code_dir) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(GitOperationJournal::default());
+        }
+        Err(error) => {
+            return Err(format!(
+                "failed to inspect SchoolX Code Git journal directory: {error}"
+            ));
+        }
+    };
+    if is_symlink_or_reparse_point(&metadata) || !metadata.is_dir() {
+        return Err("SchoolX Code Git journal directory must be a real directory".to_string());
+    }
+    let resolved_code_dir = code_dir.canonicalize().map_err(|error| {
+        format!("failed to resolve SchoolX Code Git journal directory: {error}")
+    })?;
+    if resolved_code_dir.parent() != Some(app_data_dir)
+        || !resolved_code_dir.starts_with(app_data_dir)
+    {
+        return Err("SchoolX Code Git journal directory escaped the app-data root".to_string());
+    }
+
+    match fs::symlink_metadata(journal_path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let after = code_dir.canonicalize().map_err(|resolve_error| {
+                format!("failed to revalidate SchoolX Code Git journal directory: {resolve_error}")
+            })?;
+            if after != resolved_code_dir {
+                return Err("SchoolX Code Git journal directory changed during startup".to_string());
+            }
+            Ok(GitOperationJournal::default())
+        }
+        Ok(_) => Err(
+            "SchoolX Code found a Git journal that this platform cannot safely recover".to_string(),
+        ),
+        Err(error) => Err(format!(
+            "failed to inspect SchoolX Code Git journal on this platform: {error}"
+        )),
+    }
+}
+
+#[cfg(any(not(unix), test))]
+fn is_symlink_or_reparse_point(metadata: &fs::Metadata) -> bool {
+    if metadata.file_type().is_symlink() {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt as _;
+
+        const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0400;
+        return metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0;
+    }
+    #[cfg(not(windows))]
+    false
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -469,4 +552,141 @@ fn validate_private_file_identity(
     _expected_size: Option<u64>,
 ) -> Result<(), String> {
     Err("Strict SchoolX Code Git journal storage is unsupported on this platform".to_string())
+}
+
+#[cfg(test)]
+mod unsupported_platform_load_tests {
+    use super::*;
+
+    #[test]
+    fn absent_journal_is_an_empty_zero_mutation_store() -> Result<(), String> {
+        let temp = tempfile::tempdir().map_err(|error| error.to_string())?;
+        let app_data_dir = temp
+            .path()
+            .canonicalize()
+            .map_err(|error| error.to_string())?;
+        let code_dir = app_data_dir.join("code");
+        let journal_path = code_dir.join(JOURNAL_FILE);
+
+        let loaded =
+            load_unsupported_platform_empty_journal(&app_data_dir, &code_dir, &journal_path)?;
+
+        assert_eq!(loaded, GitOperationJournal::default());
+        assert!(!code_dir.exists());
+        Ok(())
+    }
+
+    #[test]
+    fn existing_data_directory_with_no_journal_is_an_empty_store() -> Result<(), String> {
+        let temp = tempfile::tempdir().map_err(|error| error.to_string())?;
+        let app_data_dir = temp
+            .path()
+            .canonicalize()
+            .map_err(|error| error.to_string())?;
+        let code_dir = app_data_dir.join("code");
+        fs::create_dir(&code_dir).map_err(|error| error.to_string())?;
+        let journal_path = code_dir.join(JOURNAL_FILE);
+
+        let loaded =
+            load_unsupported_platform_empty_journal(&app_data_dir, &code_dir, &journal_path)?;
+
+        assert_eq!(loaded, GitOperationJournal::default());
+        assert!(code_dir.is_dir());
+        assert!(!journal_path.exists());
+        Ok(())
+    }
+
+    #[test]
+    fn existing_journal_fails_closed_without_changing_bytes() -> Result<(), String> {
+        let temp = tempfile::tempdir().map_err(|error| error.to_string())?;
+        let app_data_dir = temp
+            .path()
+            .canonicalize()
+            .map_err(|error| error.to_string())?;
+        let code_dir = app_data_dir.join("code");
+        fs::create_dir(&code_dir).map_err(|error| error.to_string())?;
+        let journal_path = code_dir.join(JOURNAL_FILE);
+        let bytes = b"preserve unsupported journal evidence";
+        fs::write(&journal_path, bytes).map_err(|error| error.to_string())?;
+
+        let error =
+            load_unsupported_platform_empty_journal(&app_data_dir, &code_dir, &journal_path)
+                .expect_err("an existing unsupported-platform journal must fail closed");
+
+        assert!(error.contains("cannot safely recover"));
+        assert_eq!(
+            fs::read(&journal_path).map_err(|read_error| read_error.to_string())?,
+            bytes
+        );
+        Ok(())
+    }
+}
+
+#[cfg(all(test, windows))]
+mod windows_store_tests {
+    use super::*;
+
+    fn windows_store() -> Result<(tempfile::TempDir, PathBuf, GitOperationJournalStore), String> {
+        let temp = tempfile::tempdir().map_err(|error| error.to_string())?;
+        let app_data_dir = temp
+            .path()
+            .canonicalize()
+            .map_err(|error| error.to_string())?;
+        let store = GitOperationJournalStore::for_app_data(&app_data_dir)?;
+        Ok((temp, app_data_dir, store))
+    }
+
+    #[test]
+    fn windows_existing_code_directory_without_git_journal_loads_empty_without_mutation(
+    ) -> Result<(), String> {
+        let (_temp, app_data_dir, store) = windows_store()?;
+        let code_dir = app_data_dir.join(JOURNAL_DIRECTORY);
+        fs::create_dir(&code_dir).map_err(|error| error.to_string())?;
+        let marker = code_dir.join("binding-store-marker");
+        fs::write(&marker, b"preserve").map_err(|error| error.to_string())?;
+
+        let loaded = store.load()?;
+
+        assert_eq!(loaded, GitOperationJournal::default());
+        assert!(!store.path().exists());
+        assert_eq!(
+            fs::read(&marker).map_err(|error| error.to_string())?,
+            b"preserve"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn windows_existing_git_journal_fails_closed_and_preserves_bytes() -> Result<(), String> {
+        let (_temp, app_data_dir, store) = windows_store()?;
+        let code_dir = app_data_dir.join(JOURNAL_DIRECTORY);
+        fs::create_dir(&code_dir).map_err(|error| error.to_string())?;
+        let bytes = b"unsupported durable evidence";
+        fs::write(store.path(), bytes).map_err(|error| error.to_string())?;
+
+        let error = store
+            .load()
+            .expect_err("Windows must not recover an existing Unix journal");
+
+        assert!(error.contains("cannot safely recover"));
+        assert_eq!(
+            fs::read(store.path()).map_err(|read_error| read_error.to_string())?,
+            bytes
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn windows_git_journal_save_remains_unsupported_without_creating_files() -> Result<(), String> {
+        let (_temp, app_data_dir, store) = windows_store()?;
+
+        let error = store
+            .save(&GitOperationJournal::default())
+            .expect_err("Windows Git journal writes must remain unsupported");
+
+        assert!(error.contains("unsupported on this platform"));
+        assert!(!app_data_dir.join(JOURNAL_DIRECTORY).exists());
+        assert!(!store.path().exists());
+        Ok(())
+    }
 }

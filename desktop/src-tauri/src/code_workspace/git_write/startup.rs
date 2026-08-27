@@ -462,7 +462,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(unix)]
     fn missing_git_journal_is_empty_without_creating_store_bytes() -> Result<(), String> {
         let directory = tempfile::tempdir().map_err(|error| error.to_string())?;
         let binding_store = CodeThreadBindingStore::for_app_data(directory.path())?;
