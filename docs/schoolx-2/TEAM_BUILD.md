@@ -80,7 +80,7 @@ Intel이 보이면 `...-intel-...`이다.
 
 | | 팀 빌드 (이 문서) | 정식 배포 |
 |---|---|---|
-| macOS 서명 | **없음** — 경고 우회 필요 | Apple Developer 계정으로 서명·공증 |
+| macOS 서명 | **Actions 결과에는 없음** — 승인 운영자 후처리는 §4.1 | Apple Developer 계정으로 서명·공증 |
 | Windows 서명 | **없음** — SmartScreen 경고 | 코드 서명 인증서 |
 | 자동 업데이트 | **없음** (`createUpdaterArtifacts: false`) | 업데이트 endpoint |
 | 배포 경로 | Actions 아티팩트 (한시적) | GitHub Release |
@@ -89,6 +89,37 @@ Intel이 보이면 `...-intel-...`이다.
 $99), Windows는 코드 서명 인증서가 필요하다. 학교에 배포하기 전에는 최소한
 macOS 서명이 있어야 한다 — 교사가 우클릭·시스템 설정을 거쳐야 하는 앱은
 설치 단계에서 이탈한다.
+
+### 4.1 승인된 운영자가 macOS DMG를 후처리할 때
+
+Actions에서 받은 미서명 macOS DMG는 Team `3WPS7QNZV5`의 기존 Developer ID
+Application identity와 검증된 `notarytool` keychain profile이 있는 Mac에서
+다음 스크립트로 후처리할 수 있다. 실제 identity나 credential은 명령행·문서·
+로그에 쓰지 않고, 승인된 shell 환경의 `DEVELOPER_ID_IDENTITY`와
+`NOTARY_PROFILE`에만 둔다.
+
+```bash
+./scripts/schoolx-sign-notarize-team-dmg.sh \
+  --arch arm64 \
+  --input /absolute/path/SchoolX_apple-silicon_unsigned.dmg \
+  --output /absolute/path/SchoolX_apple-silicon_signed.dmg
+
+./scripts/schoolx-sign-notarize-team-dmg.sh \
+  --arch x86_64 \
+  --input /absolute/path/SchoolX_intel_unsigned.dmg \
+  --output /absolute/path/SchoolX_intel_signed.dmg
+```
+
+스크립트는 원본을 바꾸거나 기존 출력을 덮어쓰지 않는다. 다섯 sidecar → Code
+Git XPC → 앱 순으로 서명하고 앱을 별도로 공증·staple한 뒤, 그 앱으로 DMG를
+재조립한다. 마지막 DMG byte도 다시 서명·공증·staple하고 Gatekeeper와 저장소
+release verifier가 모두 통과한 뒤에만 출력 경로에 공개한다. `arm64`와
+`x86_64`는 각각 해당 Actions 아티팩트에 지정해야 하며 architecture 불일치는
+즉시 실패한다.
+
+이 후처리는 팀 테스트용 DMG의 macOS 경고를 없애는 절차다. Team Build는 계속
+자동 업데이트 아티팩트를 만들지 않으며, 이 로컬 결과는 보호된 태그와 정식
+release provenance를 가진 canonical 배포본을 대신하지 않는다.
 
 ## 5. API 키를 구워서 배포하기 (선택)
 
