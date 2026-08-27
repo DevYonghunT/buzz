@@ -999,7 +999,7 @@ fn configure_git_auth(command: &mut Command, auth: &GitAuthConfig, needs_credent
     // repo-local hooks — every process git spawns inherits our environment
     // (including NOSTR_PRIVATE_KEY below), and a cloned repository's hooks
     // must never run with the identity key in reach.
-    let mut entries: Vec<(&str, String)> = vec![
+    let mut entries: Vec<(&'static str, String)> = vec![
         ("credential.helper", String::new()),
         ("core.hooksPath", "/dev/null".to_string()),
         ("core.fsmonitor", "false".to_string()),
@@ -1018,6 +1018,7 @@ fn configure_git_auth(command: &mut Command, auth: &GitAuthConfig, needs_credent
         ),
     ];
     if needs_credentials {
+        append_windows_remote_http_config(&mut entries, cfg!(windows));
         let Some(cred_helper) = &auth.credential_helper else {
             return apply_git_config(command, &entries);
         };
@@ -1029,6 +1030,20 @@ fn configure_git_auth(command: &mut Command, auth: &GitAuthConfig, needs_credent
         entries.push(("credential.useHttpPath", "true".to_string()));
     }
     apply_git_config(command, &entries);
+}
+
+/// Add the process-local Git for Windows workaround for networks where
+/// Schannel cannot reach a certificate revocation endpoint. Best-effort mode
+/// still checks reachable endpoints and preserves certificate chain and
+/// hostname validation. The setting is never persisted to the user's Git
+/// configuration. The backend must be explicit because Git only applies its
+/// Schannel SSL options when `http.sslBackend` is configured, while SchoolX
+/// deliberately ignores the system and global Git configuration.
+fn append_windows_remote_http_config(entries: &mut Vec<(&'static str, String)>, windows: bool) {
+    if windows {
+        entries.push(("http.sslBackend", "schannel".to_string()));
+        entries.push(("http.schannelCheckRevoke", "best-effort".to_string()));
+    }
 }
 
 /// Format a path for git `credential.helper`.
@@ -1176,9 +1191,9 @@ fn validate_clone_url_against_relay(clone_url: &str, relay_base: &str) -> Result
 #[cfg(test)]
 mod tests {
     use super::{
-        capture_git_child_bytes, clean_branch, clean_target_ref, credential_helper_config_value,
-        git_needs_credentials, git_subcommand, read_pipe_bounded, validate_clone_url,
-        validate_clone_url_against_relay,
+        append_windows_remote_http_config, capture_git_child_bytes, clean_branch, clean_target_ref,
+        credential_helper_config_value, git_needs_credentials, git_subcommand, read_pipe_bounded,
+        validate_clone_url, validate_clone_url_against_relay,
     };
     use std::process::{Command, Stdio};
     use std::sync::{
@@ -1194,6 +1209,23 @@ mod tests {
             credential_helper_config_value(&path),
             "C:/Users/x/AppData/Local/Buzz/git-credential-nostr.exe",
         );
+    }
+
+    #[test]
+    fn windows_remote_http_config_uses_schannel_best_effort_revocation() {
+        let mut entries = Vec::new();
+        append_windows_remote_http_config(&mut entries, true);
+        assert_eq!(
+            entries,
+            vec![
+                ("http.sslBackend", "schannel".to_string()),
+                ("http.schannelCheckRevoke", "best-effort".to_string()),
+            ]
+        );
+
+        let mut non_windows_entries = Vec::new();
+        append_windows_remote_http_config(&mut non_windows_entries, false);
+        assert!(non_windows_entries.is_empty());
     }
 
     #[test]
