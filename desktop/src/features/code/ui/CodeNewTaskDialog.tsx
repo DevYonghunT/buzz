@@ -1,7 +1,10 @@
 import { AlertTriangle, GitBranch, GitFork, LoaderCircle } from "lucide-react";
 
 import type { CodeExecutionMode } from "../api/types";
-import type { CodeLocalCheckoutSnapshot } from "../lib/codeTaskCreation";
+import {
+  type CodeLocalCheckoutSnapshot,
+  supportsManagedCodeWorktrees,
+} from "../lib/codeTaskCreation";
 import type { CodeTaskCreationPhase } from "../state/useCodeTaskCreation";
 import { cn } from "@/shared/lib/cn";
 import { Alert, AlertDescription, AlertTitle } from "@/shared/ui/alert";
@@ -187,6 +190,7 @@ export function CodeNewTaskDialog({
   preparationReady: boolean;
   recoveryRequired: boolean;
 }) {
+  const managedWorktreesSupported = supportsManagedCodeWorktrees();
   const modeLocked = pending || preparationReady;
   const progressLabel = pendingLabel(phase, executionMode);
   const submitLabel =
@@ -211,8 +215,9 @@ export function CodeNewTaskDialog({
         <DialogHeader>
           <DialogTitle className="text-balance">New Code task</DialogTitle>
           <DialogDescription className="text-pretty">
-            Choose where Codex can change files for this task. Every new task
-            starts with a managed worktree selected.
+            {managedWorktreesSupported
+              ? "Choose where Codex can change files for this task. Every new task starts with a managed worktree selected."
+              : "On Windows, SchoolX Code works in the local checkout after you review its current state."}
           </DialogDescription>
         </DialogHeader>
 
@@ -229,13 +234,17 @@ export function CodeNewTaskDialog({
             </legend>
             <ExecutionModeOption
               checked={executionMode === "worktree"}
-              description="Work in an isolated checkout managed by SchoolX. Your existing checkout stays untouched."
-              disabled={modeLocked}
+              description={
+                managedWorktreesSupported
+                  ? "Work in an isolated checkout managed by SchoolX. Your existing checkout stays untouched."
+                  : "Managed worktrees are not available on Windows."
+              }
+              disabled={modeLocked || !managedWorktreesSupported}
               icon={GitFork}
               label="Managed worktree"
               mode="worktree"
               onChange={onExecutionModeChange}
-              recommended
+              recommended={managedWorktreesSupported}
             />
             <ExecutionModeOption
               checked={executionMode === "local"}
@@ -245,6 +254,7 @@ export function CodeNewTaskDialog({
               label="Local checkout"
               mode="local"
               onChange={onExecutionModeChange}
+              recommended={!managedWorktreesSupported}
             />
           </fieldset>
 

@@ -346,6 +346,35 @@ fn align_unborn_head_branch(
     .map(|_| ())
 }
 
+/// On Windows, `Path::canonicalize()` returns an extended-length path
+/// (`\\?\C:\...`) which Git for Windows rejects as an invalid argument when
+/// passed as a CLI destination. Strip the prefix at the command boundary so
+/// external tooling receives an ordinary absolute path, while retaining the
+/// canonicalized path internally for containment and security checks.
+#[cfg(windows)]
+fn path_for_external_command(path: &std::path::Path) -> std::path::PathBuf {
+    use std::path::Component;
+
+    let mut components = path.components();
+    if let Some(Component::Prefix(prefix_component)) = components.next() {
+        if let std::path::Prefix::VerbatimDisk(letter) = prefix_component.kind() {
+            let mut stripped = std::path::PathBuf::from(format!("{}:\\", letter as char));
+            for component in components {
+                if let Component::Normal(part) = component {
+                    stripped.push(part);
+                }
+            }
+            return stripped;
+        }
+    }
+    path.to_path_buf()
+}
+
+#[cfg(not(windows))]
+fn path_for_external_command(path: &std::path::Path) -> std::path::PathBuf {
+    path.to_path_buf()
+}
+
 pub(crate) fn clone_project_repository_blocking(
     repos_dir: Option<&str>,
     project_dtag: &str,
@@ -375,7 +404,10 @@ pub(crate) fn clone_project_repository_blocking(
             repo_dir.display()
         ));
     }
-    let repo_path = repo_dir
+    // Keep the canonical path for the checks above, but give Git for Windows
+    // the ordinary drive-qualified form it accepts as a clone destination.
+    let repo_dir_for_git = path_for_external_command(&repo_dir);
+    let repo_path = repo_dir_for_git
         .to_str()
         .ok_or_else(|| "repository path is not UTF-8".to_string())?;
 
@@ -880,5 +912,32 @@ mod tests {
             .iter()
             .any(|tag| tag.as_slice() == ["t", "review-request"]));
         assert!(event.verify().is_ok());
+    }
+
+    #[test]
+    fn clone_destination_strips_windows_verbatim_disk_prefix() {
+        // This is the exact shape produced by canonicalize() on Windows. Keep
+        // the prefix in the fixture: a relative path would never exercise the
+        // Windows Prefix::VerbatimDisk branch.
+        let input = std::path::Path::new(r"\\?\C:\Users\test\.schoolx\REPOS\owner--test");
+        let result = super::path_for_external_command(input);
+        if cfg!(windows) {
+            assert_eq!(
+                result,
+                std::path::Path::new(r"C:\Users\test\.schoolx\REPOS\owner--test")
+            );
+        } else {
+            assert_eq!(result, input);
+        }
+    }
+
+    #[test]
+    fn clone_destination_leaves_ordinary_absolute_path_unchanged() {
+        let input = std::path::Path::new(if cfg!(windows) {
+            r"C:\Users\test\.schoolx\REPOS\owner--test"
+        } else {
+            "/home/test/.schoolx/REPOS/owner--test"
+        });
+        assert_eq!(super::path_for_external_command(input), input);
     }
 }

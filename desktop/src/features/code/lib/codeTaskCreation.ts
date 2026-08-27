@@ -4,8 +4,19 @@ import type {
   CodeWorktreeStatus,
 } from "../api/types";
 
-/** Every New task dialog starts isolated; Local is never remembered. */
-export const DEFAULT_CODE_TASK_EXECUTION_MODE: CodeExecutionMode = "worktree";
+/** Managed worktrees currently rely on native pinned-directory support. */
+export function supportsManagedCodeWorktrees(platform?: string): boolean {
+  const detectedPlatform =
+    platform ?? (typeof navigator === "undefined" ? "" : navigator.platform);
+  return !detectedPlatform.toLowerCase().startsWith("win");
+}
+
+/** Choose the safest execution mode supported by the current desktop OS. */
+export function defaultCodeTaskExecutionMode(
+  platform?: string,
+): CodeExecutionMode {
+  return supportsManagedCodeWorktrees(platform) ? "worktree" : "local";
+}
 
 /** Display-only checkout state produced by native Git inspection. */
 export type CodeLocalCheckoutSnapshot = {

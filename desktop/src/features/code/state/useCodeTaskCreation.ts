@@ -14,8 +14,8 @@ import type {
   CodeWorktreeDescriptor,
 } from "../api/types";
 import {
-  DEFAULT_CODE_TASK_EXECUTION_MODE,
   type CodeLocalCheckoutSnapshot,
+  defaultCodeTaskExecutionMode,
   localCheckoutSnapshotChanged,
   localCheckoutSnapshotFromPreparation,
   localCheckoutSnapshotFromStatus,
@@ -91,7 +91,7 @@ export function useCodeTaskCreation({
 }) {
   const [open, setOpen] = React.useState(false);
   const [executionMode, setExecutionMode] = React.useState<CodeExecutionMode>(
-    DEFAULT_CODE_TASK_EXECUTION_MODE,
+    defaultCodeTaskExecutionMode,
   );
   const [phase, setPhase] = React.useState<CodeTaskCreationPhase>("idle");
   const [prepared, setPrepared] =
@@ -118,7 +118,7 @@ export function useCodeTaskCreation({
   const pending = phase !== "idle";
 
   const resetDraft = React.useCallback(() => {
-    setExecutionMode(DEFAULT_CODE_TASK_EXECUTION_MODE);
+    setExecutionMode(defaultCodeTaskExecutionMode());
     setPhase("idle");
     setPrepared(null);
     setLocalSnapshot(null);

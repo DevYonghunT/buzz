@@ -2,14 +2,18 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  DEFAULT_CODE_TASK_EXECUTION_MODE,
+  defaultCodeTaskExecutionMode,
   localCheckoutSnapshotChanged,
   localCheckoutSnapshotFromPreparation,
   localCheckoutSnapshotFromStatus,
+  supportsManagedCodeWorktrees,
 } from "./codeTaskCreation.ts";
 
-test("new Code tasks default to a managed worktree", () => {
-  assert.equal(DEFAULT_CODE_TASK_EXECUTION_MODE, "worktree");
+test("new Code tasks use the execution mode supported by the desktop OS", () => {
+  assert.equal(defaultCodeTaskExecutionMode("MacIntel"), "worktree");
+  assert.equal(defaultCodeTaskExecutionMode("Linux x86_64"), "worktree");
+  assert.equal(defaultCodeTaskExecutionMode("Win32"), "local");
+  assert.equal(supportsManagedCodeWorktrees("Win32"), false);
 });
 
 test("local checkout display state excludes native path and Git authority", () => {
