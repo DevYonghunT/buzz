@@ -178,6 +178,47 @@ test("admin can add members but cannot assign the admin role", async ({
   await page.keyboard.press("Escape");
 });
 
+test("explains when a name search matches an existing community member", async ({
+  page,
+}) => {
+  await page.getByTestId("community-invite-dialog-trigger").click();
+
+  const search = page.getByTestId("member-pubkey-input");
+  await search.fill(TEST_IDENTITIES.alice.username);
+
+  const existingMemberStatus = page.getByTestId(
+    "member-search-existing-member-status",
+  );
+  await expect(existingMemberStatus).toHaveText(
+    "This person is already a community member.",
+  );
+  await expect(existingMemberStatus).toHaveAttribute("role", "status");
+  await expect(
+    page.getByTestId(`member-search-result-${TEST_IDENTITIES.alice.pubkey}`),
+  ).toHaveCount(0);
+  await expect(page.getByTestId("member-search-empty-status")).toHaveCount(0);
+
+  await search.fill(TEST_IDENTITIES.alice.pubkey);
+  await expect(page.locator("#member-search-membership-status")).toBeVisible();
+  await expect(page.getByTestId("member-search-popover")).toHaveCount(0);
+
+  await search.fill("a");
+  await expect(
+    page.getByTestId(`member-search-result-${TEST_IDENTITIES.charlie.pubkey}`),
+  ).toBeVisible();
+  await expect(
+    page.getByTestId(`member-search-result-${TEST_IDENTITIES.alice.pubkey}`),
+  ).toHaveCount(0);
+  await expect(existingMemberStatus).toHaveCount(0);
+  await expect(page.getByTestId("member-search-empty-status")).toHaveCount(0);
+
+  await search.fill("profile-that-is-not-on-this-relay");
+  await expect(page.getByTestId("member-search-empty-status")).toHaveText(
+    "No people found. Paste a full npub or hex public key to add someone directly.",
+  );
+  await expect(existingMemberStatus).toHaveCount(0);
+});
+
 test("owner can add multiple admins directly by npub from live Invites UI", async ({
   page,
 }) => {

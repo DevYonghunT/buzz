@@ -91,14 +91,18 @@ test("manual: key creation and backup", async ({ page }) => {
   await waitForAnimations(page);
   await page.screenshot({ path: `${SHOTS}/01-landing.png` });
 
-  await page.getByRole("button", { name: "Create a new identity key" }).click();
+  await page
+    .getByRole("button", {
+      name: "Continue with this device’s identity key",
+    })
+    .click();
   await expect(
     page.getByRole("heading", {
-      name: "Your unique identity key has been created",
+      name: "Your identity key is ready",
     }),
   ).toBeVisible();
   await waitForAnimations(page);
-  // 02 — key created, still masked. This is the state a teammate lands in.
+  // 02 — device key ready, still masked. This is the state a teammate lands in.
   await page.screenshot({ path: `${SHOTS}/02-key-created.png` });
 
   // 03 — revealed, because the manual has to show what "your key" looks like

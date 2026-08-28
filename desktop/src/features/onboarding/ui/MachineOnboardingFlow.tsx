@@ -45,7 +45,7 @@ export type MachineOnboardingPage =
   | "setup"
   | "config";
 
-type BackupSubview = "created" | "options" | "password";
+type BackupSubview = "ready" | "options" | "password";
 
 /** A pending navigation the parent should execute after RouterProvider mounts. */
 export type PostOnboardingNavigation = {
@@ -91,17 +91,17 @@ export function MachineOnboardingFlow({
   >();
   const [readyRuntimeIds, setReadyRuntimeIds] = React.useState<string[]>([]);
   const [backupSubview, setBackupSubview] =
-    React.useState<BackupSubview>("created");
+    React.useState<BackupSubview>("ready");
   const [backupDirection, setBackupDirection] = React.useState<
     "forward" | "backward"
   >("forward");
   const [returningFromSecurity, setReturningFromSecurity] =
     React.useState(false);
   // Owned here so switching between the yellow onboarding view and the dark
-  // security subview keeps the created backup, password, and test progress.
+  // security subview keeps the backup password and test progress.
   const backupSession = useEncryptedBackupSession();
   const reduceMotion = useReducedMotion() ?? false;
-  const isSecuritySubview = page === "backup" && backupSubview !== "created";
+  const isSecuritySubview = page === "backup" && backupSubview !== "ready";
   const handleReadyRuntimeIdsChange = React.useCallback(
     (runtimeIds: readonly string[]) => {
       setReadyRuntimeIds(Array.from(new Set(runtimeIds)));
@@ -144,7 +144,7 @@ export function MachineOnboardingFlow({
     [complete, skipAgentSetup],
   );
 
-  const loadFreshIdentity = React.useCallback(async () => {
+  const loadDeviceIdentity = React.useCallback(async () => {
     setIsPending(true);
     setError(null);
     try {
@@ -154,7 +154,7 @@ export function MachineOnboardingFlow({
       setIdentityStorage(identity.storage);
       setBackupDirection("forward");
       setReturningFromSecurity(false);
-      setBackupSubview("created");
+      setBackupSubview("ready");
       setPage("backup");
     } catch (cause) {
       setError(
@@ -180,7 +180,7 @@ export function MachineOnboardingFlow({
       setIdentityStorage(identity.storage);
       setBackupDirection("forward");
       setReturningFromSecurity(false);
-      setBackupSubview("created");
+      setBackupSubview("ready");
       setPage("backup");
     } catch (cause) {
       setError(
@@ -223,7 +223,7 @@ export function MachineOnboardingFlow({
             onClick={() => {
               setBackupDirection("backward");
               setReturningFromSecurity(true);
-              setBackupSubview("created");
+              setBackupSubview("ready");
             }}
             type="button"
             variant="ghost"
@@ -266,14 +266,12 @@ export function MachineOnboardingFlow({
                 <Button
                   className={ONBOARDING_LANDING_CTA_CLASS}
                   disabled={isPending}
-                  onClick={() => void loadFreshIdentity()}
+                  onClick={() => void loadDeviceIdentity()}
                   type="button"
                 >
                   {isPending
                     ? t("app.onboarding.landing.loading")
-                    : selectedPubkey
-                      ? t("app.onboarding.landing.continueSetup")
-                      : t("app.onboarding.landing.createKey")}
+                    : t("app.onboarding.landing.continueWithDeviceIdentity")}
                 </Button>
                 <Button
                   className={`${ONBOARDING_SECONDARY_CTA_CLASS} px-5`}
@@ -285,9 +283,7 @@ export function MachineOnboardingFlow({
                   type="button"
                   variant="ghost"
                 >
-                  {selectedPubkey
-                    ? t("app.onboarding.landing.useDifferentKey")
-                    : t("app.onboarding.landing.useExistingKey")}
+                  {t("app.onboarding.landing.useDifferentKey")}
                 </Button>
               </div>
               <IdentityKeyHelpDialog />
@@ -374,8 +370,8 @@ export function MachineOnboardingFlow({
           ) : page === "setup" ? (
             <SetupStep
               actions={{
-                // Fresh-key users return to whichever identity backup subview
-                // they used to reach setup; imported keys skip backup entirely.
+                // Device-identity users return to whichever backup subview they
+                // used to reach setup; imported keys skip backup entirely.
                 back: () => {
                   if (identityWasImported) {
                     setKeyImportStage("key-entry");

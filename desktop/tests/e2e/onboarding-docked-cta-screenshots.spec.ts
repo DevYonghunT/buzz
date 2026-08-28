@@ -57,7 +57,9 @@ test("machine onboarding: landing, backup, setup docked CTAs", async ({
   await waitForAnimations(page);
   await page.screenshot({ path: `${SHOT_DIR}/01-landing.png` });
 
-  await page.getByRole("button", { name: "Use an existing key" }).click();
+  await page
+    .getByRole("button", { name: "Use a different identity key" })
+    .click();
   await expect(
     page.getByRole("heading", { name: "Enter your private key" }),
   ).toBeVisible();
@@ -92,12 +94,18 @@ test("machine onboarding: landing, backup, setup docked CTAs", async ({
   await expect(importCard).toBeVisible();
   await page.getByRole("button", { name: "Back", exact: true }).click();
   await expect(
-    page.getByRole("button", { name: "Create a new identity key" }),
+    page.getByRole("button", {
+      name: "Continue with this device’s identity key",
+    }),
   ).toBeVisible();
-  await page.getByRole("button", { name: "Create a new identity key" }).click();
+  await page
+    .getByRole("button", {
+      name: "Continue with this device’s identity key",
+    })
+    .click();
   await expect(
     page.getByRole("heading", {
-      name: "Your unique identity key has been created",
+      name: "Your identity key is ready",
     }),
   ).toBeVisible();
   await waitForAnimations(page);
@@ -171,7 +179,9 @@ test("machine key import remains usable in a short viewport", async ({
     skipOnboardingSeed: true,
   });
   await page.goto("/");
-  await page.getByRole("button", { name: "Use an existing key" }).click();
+  await page
+    .getByRole("button", { name: "Use a different identity key" })
+    .click();
 
   const heading = page.getByRole("heading", { name: "Enter your private key" });
   const input = page.getByLabel("Private key", { exact: true });
@@ -213,10 +223,14 @@ test("backup options keep one-column geometry on narrow windows", async ({
     skipOnboardingSeed: true,
   });
   await page.goto("/");
-  await page.getByRole("button", { name: "Create a new identity key" }).click();
+  await page
+    .getByRole("button", {
+      name: "Continue with this device’s identity key",
+    })
+    .click();
   await expect(
     page.getByRole("heading", {
-      name: "Your unique identity key has been created",
+      name: "Your identity key is ready",
     }),
   ).toBeVisible();
   await page.getByTestId("backup-options-link").click();

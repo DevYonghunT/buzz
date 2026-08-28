@@ -13,7 +13,11 @@ async function enterMachineBackup(page: import("@playwright/test").Page) {
     skipOnboardingSeed: true,
   });
   await page.goto("/");
-  await page.getByRole("button", { name: "Create a new identity key" }).click();
+  await page
+    .getByRole("button", {
+      name: "Continue with this device’s identity key",
+    })
+    .click();
 }
 
 async function openBackupOptions(page: import("@playwright/test").Page) {
@@ -46,30 +50,30 @@ const SHOTS = "test-results/screenshots-onboarding";
 const MOCK_NCRYPTSEC =
   "ncryptsec1qgg9947rlpvqu76pj5ecreduf9jxhselq2nae2kghhvd5g7dgjtcxfqtd67p9m0w57lspw8gsq6yphnm8623nsl8xn9j4jdzz84zm3frztj3z7s35vpzmqf6ksu8r89qk5z2zxfmu5gv8th8wclt0h4p";
 
-test("backup step appears on fresh-key path after profile submit", async ({
+test("backup step appears after continuing with the device identity", async ({
   page,
 }) => {
   await enterMachineBackup(page);
 
   await expect(page.getByTestId("onboarding-page-backup")).toBeVisible();
 
-  // Perceived-loading intro: the animated logo and "Creating" title show
+  // Perceived-loading intro: the animated logo and loading title show
   // first, then the finished state replaces them after the hold.
   await expect(
-    page.getByRole("heading", { name: "Creating your identity key" }),
+    page.getByRole("heading", { name: "Loading your identity key" }),
   ).toBeVisible();
   await expect(page.getByTestId("backup-intro-logo")).toBeVisible();
 
   await expect(
     page.getByRole("heading", {
-      name: "Your unique identity key has been created",
+      name: "Your identity key is ready",
     }),
   ).toBeVisible();
   await expect(page.getByTestId("backup-intro-logo")).toHaveCount(0);
 });
 
 // ---------------------------------------------------------------------------
-// Key-created view: masked key with reveal toggle. Backup options open the
+// Identity-ready view: masked key with reveal toggle. Backup options open the
 // dark security view; the raw key is fetched only on explicit reveal/copy.
 // ---------------------------------------------------------------------------
 
@@ -112,7 +116,7 @@ test("key view reveals explicitly; options copy explicitly", async ({
     .toContain("copy_text_to_clipboard");
   expect(await invokedCommands(page)).toContain("get_nsec");
 
-  // Return restores the yellow key-created view; its Next skips backup and
+  // Return restores the yellow identity-ready view; its Next skips backup and
   // continues directly to setup.
   await page.getByTestId("backup-return-to-onboarding").click();
   await expect(page.getByTestId("onboarding-page-backup")).toBeVisible();
@@ -335,10 +339,12 @@ test("backup step back button returns to machine identity choice", async ({
   // Backing out preserves the loaded key — primary CTA continues setup rather
   // than minting another identity (#2318).
   await expect(
-    page.getByRole("button", { name: "Continue setup" }),
+    page.getByRole("button", {
+      name: "Continue with this device’s identity key",
+    }),
   ).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "Use a different key instead" }),
+    page.getByRole("button", { name: "Use a different identity key" }),
   ).toBeVisible();
 });
 
@@ -355,7 +361,11 @@ test("reveal shows inline error when get_nsec fails and Next still advances", as
     { skipCommunitySeed: true, skipOnboardingSeed: true },
   );
   await page.goto("/");
-  await page.getByRole("button", { name: "Create a new identity key" }).click();
+  await page
+    .getByRole("button", {
+      name: "Continue with this device’s identity key",
+    })
+    .click();
 
   await expect(page.getByTestId("onboarding-page-backup")).toBeVisible();
   await page.getByTestId("backup-key-reveal-toggle").click();
@@ -376,7 +386,11 @@ test("reveal retry succeeds after initial failure", async ({ page }) => {
     { skipCommunitySeed: true, skipOnboardingSeed: true },
   );
   await page.goto("/");
-  await page.getByRole("button", { name: "Create a new identity key" }).click();
+  await page
+    .getByRole("button", {
+      name: "Continue with this device’s identity key",
+    })
+    .click();
 
   await page.getByTestId("backup-key-reveal-toggle").click();
   await expect(page.getByTestId("backup-copy-error")).toBeVisible();

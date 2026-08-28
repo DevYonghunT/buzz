@@ -23,16 +23,14 @@ export const ko = {
         taglineTop: "우리 사람들, 에이전트, 프로젝트를",
         taglineBottom: "한곳에서",
         loading: "신원을 불러오는 중…",
-        continueSetup: "설정 이어서 하기",
         // 「프라이빗키」로 부른다 — 사용 설명서와 같은 용어. 비밀번호가 아니라
         // 잃어버리면 복구할 수 없는 것이라는 감각을 주는 쪽을 택했다.
-        createKey: "새 프라이빗키 만들기",
-        useDifferentKey: "다른 프라이빗키로 바꾸기",
-        useExistingKey: "이미 있는 프라이빗키 사용하기",
+        continueWithDeviceIdentity: "이 기기의 프라이빗키로 계속하기",
+        useDifferentKey: "다른 프라이빗키 사용하기",
       },
       backup: {
-        titleCreated: "내 프라이빗키가 만들어졌습니다",
-        titleCreating: "프라이빗키를 만들고 있습니다",
+        titleReady: "프라이빗키를 사용할 준비가 됐습니다",
+        titleLoading: "프라이빗키를 불러오고 있습니다",
         introContinue: " 지금 바로 계속하셔도 되고, ",
         optionsLink: "보관 방법 보기",
         introRestore: "에서 복구 방법을 확인하셔도 됩니다.",

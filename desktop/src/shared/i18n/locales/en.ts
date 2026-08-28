@@ -46,14 +46,12 @@ export const en = {
         taglineTop: "Your people, your agents, your projects —",
         taglineBottom: "all in one place.",
         loading: "Loading identity…",
-        continueSetup: "Continue setup",
-        createKey: "Create a new identity key",
-        useDifferentKey: "Use a different key instead",
-        useExistingKey: "Use an existing key",
+        continueWithDeviceIdentity: "Continue with this device’s identity key",
+        useDifferentKey: "Use a different identity key",
       },
       backup: {
-        titleCreated: "Your unique identity key has been created",
-        titleCreating: "Creating your identity key",
+        titleReady: "Your identity key is ready",
+        titleLoading: "Loading your identity key",
         /**
          * The intro is one sentence with a link inside it. Split into three
          * pieces rather than interpolated, because Korean puts the particle

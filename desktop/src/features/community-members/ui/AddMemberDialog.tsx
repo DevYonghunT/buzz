@@ -80,31 +80,41 @@ export function DirectAddMemberForm({
   const parsedPubkey = parsePubkeyInput(deferredQuery);
   const userSearchQuery = useUserSearchQuery(deferredQuery, {
     enabled: deferredQuery.length > 0,
-    limit: 8,
+    // The relay ranks before this picker removes existing members, archived
+    // identities, and current selections. Keep a wider bounded candidate pool
+    // so those local exclusions do not make an inviteable person disappear.
+    limit: 50,
   });
   const isArchived = useIsArchivedPredicate();
   const selectedPubkeys = React.useMemo(
     () => new Set(selectedUsers.map((user) => user.pubkey.toLowerCase())),
     [selectedUsers],
   );
+  const memberPubkeys = React.useMemo(
+    () =>
+      new Set(
+        (membersQuery.data ?? []).map((member) => member.pubkey.toLowerCase()),
+      ),
+    [membersQuery.data],
+  );
   const isAlreadyMember =
-    parsedPubkey !== null &&
-    (membersQuery.data ?? []).some(
-      (m) => m.pubkey.toLowerCase() === parsedPubkey.toLowerCase(),
-    );
+    parsedPubkey !== null && memberPubkeys.has(parsedPubkey.toLowerCase());
   const canAdd = selectedUsers.length > 0 && !addMutation.isPending;
+  const rawSearchResults = userSearchQuery.data ?? [];
+  const hasOnlyExistingMemberSearchResults =
+    rawSearchResults.length > 0 &&
+    rawSearchResults.every((user) =>
+      memberPubkeys.has(user.pubkey.toLowerCase()),
+    );
   const searchResults = React.useMemo(
     () =>
       (userSearchQuery.data ?? []).filter(
         (user) =>
           !isArchived(user.pubkey) &&
           !selectedPubkeys.has(user.pubkey.toLowerCase()) &&
-          !(membersQuery.data ?? []).some(
-            (member) =>
-              member.pubkey.toLowerCase() === user.pubkey.toLowerCase(),
-          ),
+          !memberPubkeys.has(user.pubkey.toLowerCase()),
       ),
-    [isArchived, membersQuery.data, selectedPubkeys, userSearchQuery.data],
+    [isArchived, memberPubkeys, selectedPubkeys, userSearchQuery.data],
   );
   const directResult = React.useMemo<UserSearchResult | null>(() => {
     if (
@@ -135,6 +145,16 @@ export function DirectAddMemberForm({
   const actionTransition = shouldReduceMotion
     ? { duration: 0 }
     : { duration: 0.18, ease: [0.23, 1, 0.32, 1] as const };
+  const isSearchPopoverOpen =
+    isPickerOpen && deferredQuery.length > 0 && !isAlreadyMember;
+  let searchStatus: "loading" | "existing-member" | "empty" | null = null;
+  if (userSearchQuery.isLoading) {
+    searchStatus = "loading";
+  } else if (searchResults.length === 0 && directResult === null) {
+    searchStatus = hasOnlyExistingMemberSearchResults
+      ? "existing-member"
+      : "empty";
+  }
 
   function reset() {
     setQuery("");
@@ -211,7 +231,7 @@ export function DirectAddMemberForm({
           <Popover
             modal={false}
             onOpenChange={setIsPickerOpen}
-            open={isPickerOpen && deferredQuery.length > 0}
+            open={isSearchPopoverOpen}
           >
             <PopoverAnchor asChild>
               <div
@@ -223,7 +243,10 @@ export function DirectAddMemberForm({
                 >
                   <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                     {selectedUsers.length === 0 ? (
-                      <Search className="h-4 w-4 shrink-0 text-muted-foreground/55" />
+                      <Search
+                        aria-hidden="true"
+                        className="h-4 w-4 shrink-0 text-muted-foreground/55"
+                      />
                     ) : null}
                     {selectedUsers.map((user) => (
                       <motion.div
@@ -246,8 +269,18 @@ export function DirectAddMemberForm({
                     ))}
                     <Input
                       aria-autocomplete="list"
-                      aria-controls="member-search-results"
-                      aria-expanded={isPickerOpen}
+                      aria-controls={
+                        isSearchPopoverOpen
+                          ? "member-search-results"
+                          : undefined
+                      }
+                      aria-describedby={
+                        isAlreadyMember
+                          ? "member-search-membership-status"
+                          : undefined
+                      }
+                      aria-expanded={isSearchPopoverOpen}
+                      aria-haspopup="listbox"
                       autoCapitalize="none"
                       autoCorrect="off"
                       className="h-7 w-auto min-w-16 flex-1 border-0 bg-transparent px-0 py-0.5 text-sm shadow-none outline-hidden placeholder:text-muted-foreground/55 focus-visible:ring-0"
@@ -343,35 +376,57 @@ export function DirectAddMemberForm({
               <div
                 className="max-h-64 overflow-y-auto overscroll-contain py-1"
                 data-testid="member-search-results"
-                id="member-search-results"
-                role="listbox"
               >
-                {userSearchQuery.isLoading ? (
-                  <p className="px-3 py-3 text-sm text-muted-foreground">
+                <div
+                  aria-busy={userSearchQuery.isLoading || undefined}
+                  id="member-search-results"
+                  role="listbox"
+                >
+                  {searchResults.length > 0 || directResult ? (
+                    <>
+                      {directResult ? (
+                        <SearchResult
+                          onSelect={() => selectUser(directResult)}
+                          user={directResult}
+                        />
+                      ) : null}
+                      {searchResults.map((user) => (
+                        <SearchResult
+                          key={user.pubkey}
+                          onSelect={() => selectUser(user)}
+                          user={user}
+                        />
+                      ))}
+                    </>
+                  ) : null}
+                </div>
+                {searchStatus === "loading" ? (
+                  <p
+                    className="px-3 py-3 text-pretty text-sm text-muted-foreground"
+                    role="status"
+                  >
                     Searching…
                   </p>
-                ) : searchResults.length > 0 || directResult ? (
-                  <>
-                    {directResult ? (
-                      <SearchResult
-                        onSelect={() => selectUser(directResult)}
-                        user={directResult}
-                      />
-                    ) : null}
-                    {searchResults.map((user) => (
-                      <SearchResult
-                        key={user.pubkey}
-                        onSelect={() => selectUser(user)}
-                        user={user}
-                      />
-                    ))}
-                  </>
-                ) : (
-                  <p className="px-3 py-3 text-sm text-muted-foreground">
+                ) : null}
+                {searchStatus === "existing-member" ? (
+                  <p
+                    className="px-3 py-3 text-pretty text-sm text-muted-foreground"
+                    data-testid="member-search-existing-member-status"
+                    role="status"
+                  >
+                    This person is already a community member.
+                  </p>
+                ) : null}
+                {searchStatus === "empty" ? (
+                  <p
+                    className="px-3 py-3 text-pretty text-sm text-muted-foreground"
+                    data-testid="member-search-empty-status"
+                    role="status"
+                  >
                     No people found. Paste a full npub or hex public key to add
                     someone directly.
                   </p>
-                )}
+                ) : null}
               </div>
             </PopoverContent>
           </Popover>
@@ -398,7 +453,11 @@ export function DirectAddMemberForm({
           </AnimatePresence>
         </div>
         {isAlreadyMember ? (
-          <p className="text-xs text-destructive">
+          <p
+            className="text-xs text-destructive"
+            id="member-search-membership-status"
+            role="status"
+          >
             This person is already a community member.
           </p>
         ) : null}

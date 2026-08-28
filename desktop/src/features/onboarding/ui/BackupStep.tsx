@@ -23,16 +23,15 @@ import {
 import { ONBOARDING_KEY_TEXT_CLASS } from "./NsecMaskedDisplay";
 
 /**
- * How long the "Creating your identity key" loader holds the stage before the
- * finished state fades in. Purely perceptual — the key already exists; the
- * pause sells the creation moment.
+ * How long the identity-loading intro holds before the ready state fades in.
+ * The key is resolved before this step; this pause only bridges the transition.
  */
 const INTRO_HOLD_MS = 1400;
 
 /**
- * The creation moment should only be sold once per app session. Module-level
- * so remounts (e.g. navigating Back and returning to this step) skip the fake
- * hold and show the finished state instantly.
+ * The loading intro should only play once per app session. Module-level so
+ * remounts (e.g. navigating Back and returning to this step) show the ready
+ * state immediately.
  */
 let introPlayed = false;
 
@@ -59,10 +58,10 @@ type BackupStepProps = {
 };
 
 /**
- * Onboarding identity-key step — shows the freshly created key, then opens a
- * dark backup-options state. Copy fetches the raw key only after an explicit
- * click; password backup opens the separate security flow. Neither method
- * blocks Next.
+ * Onboarding identity-key step — shows the device identity, then opens a dark
+ * backup-options state. Copy fetches the raw key only after an explicit click;
+ * password backup opens the separate security flow. Neither method blocks
+ * Next.
  */
 export function BackupStep({
   direction,
@@ -75,7 +74,7 @@ export function BackupStep({
   returningFromSecurity,
 }: BackupStepProps) {
   const reduceMotion = useReducedMotion() ?? false;
-  const [created, setCreated] = React.useState(introPlayed || reduceMotion);
+  const [ready, setReady] = React.useState(introPlayed || reduceMotion);
   const [copyState, setCopyState] = React.useState<
     "idle" | "copying" | "copied"
   >("idle");
@@ -90,12 +89,12 @@ export function BackupStep({
     if (introPlayed) return;
     if (reduceMotion) {
       introPlayed = true;
-      setCreated(true);
+      setReady(true);
       return;
     }
     const timer = window.setTimeout(() => {
       introPlayed = true;
-      setCreated(true);
+      setReady(true);
     }, INTRO_HOLD_MS);
     return () => window.clearTimeout(timer);
   }, [reduceMotion]);
@@ -104,7 +103,7 @@ export function BackupStep({
     cancelledRef.current = false;
     return () => {
       // Back-during-fetch: cancel any in-flight setState calls and clear the
-      // nsec from memory on unmount (backup step is only on the fresh-key path).
+      // nsec from memory on unmount (this step handles sensitive key material).
       cancelledRef.current = true;
       setNsec(null);
       if (copiedTimerRef.current !== null)
@@ -305,13 +304,13 @@ export function BackupStep({
             text-title size token as conflicting with text-foreground. */}
         <h1
           className={`text-balance text-title font-normal text-foreground ${REVEAL_ANIMATION_CLASS}`}
-          key={created ? "created" : "creating"}
+          key={ready ? "ready" : "loading"}
         >
-          {created
-            ? t("app.onboarding.backup.titleCreated")
-            : t("app.onboarding.backup.titleCreating")}
+          {ready
+            ? t("app.onboarding.backup.titleReady")
+            : t("app.onboarding.backup.titleLoading")}
         </h1>
-        {created ? (
+        {ready ? (
           <p
             className={cn(
               "mt-5 text-pretty text-sm leading-6 text-foreground/80",
@@ -333,7 +332,7 @@ export function BackupStep({
         ) : null}
       </div>
 
-      {!created ? (
+      {!ready ? (
         <div
           className="flex w-full flex-1 items-center justify-center py-10"
           data-testid="backup-intro-logo"
@@ -404,7 +403,7 @@ export function BackupStep({
         </div>
       )}
 
-      {created ? (
+      {ready ? (
         <OnboardingFooter className={REVEAL_ANIMATION_CLASS}>
           <Button
             className={ONBOARDING_PRIMARY_CTA_CLASS}
