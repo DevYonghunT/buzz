@@ -26,6 +26,8 @@ import { CodeWorkspaceScreen } from "./CodeWorkspaceScreen";
 
 const CODE_BASE_REF_RESOLUTION_ERROR =
   "failed to resolve SchoolX Code base ref";
+const CODE_DEVELOPER_ID_APP_REQUIRED_ERROR =
+  "SchoolX Code Git requires a Developer ID signed SchoolX application";
 
 function isFirstCommitRequiredError(error: unknown): boolean {
   const message =
@@ -40,6 +42,21 @@ function isFirstCommitRequiredError(error: unknown): boolean {
           ? error.message
           : "";
   return message.includes(CODE_BASE_REF_RESOLUTION_ERROR);
+}
+
+function isDeveloperIdAppRequiredError(error: unknown): boolean {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === "string"
+        ? error
+        : typeof error === "object" &&
+            error !== null &&
+            "message" in error &&
+            typeof error.message === "string"
+          ? error.message
+          : "";
+  return message.includes(CODE_DEVELOPER_ID_APP_REQUIRED_ERROR);
 }
 
 function CodeBootstrapState({
@@ -293,6 +310,23 @@ export function ProjectCodeScreen({
         }
         description="Open this project in Terminal, create its first commit, then retry SchoolX Code."
         title="First commit required"
+      />
+    );
+  } else if (
+    repositoryQuery.isError &&
+    isDeveloperIdAppRequiredError(repositoryQuery.error)
+  ) {
+    content = (
+      <CodeBootstrapState
+        action={
+          <Button onClick={backToProject} size="sm" variant="outline">
+            <ArrowLeft />
+            Back to Project
+          </Button>
+        }
+        announcementRole="alert"
+        description="SchoolX Code on macOS requires a signed and notarized SchoolX app installed in Applications. Quit this copy, install the signed app in Applications, then open SchoolX again."
+        title="Signed SchoolX app required"
       />
     );
   } else if (repositoryQuery.isError || !repositoryQuery.data) {

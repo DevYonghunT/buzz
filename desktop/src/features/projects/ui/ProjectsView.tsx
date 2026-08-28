@@ -394,9 +394,7 @@ export function ProjectsView() {
 
   const handleOpenProjectCode = React.useCallback(
     (project: Project) => {
-      void goProjectCode(project.id, {
-        baseRef: project.defaultBranch?.trim() || "HEAD",
-      });
+      void goProjectCode(project.id);
     },
     [goProjectCode],
   );

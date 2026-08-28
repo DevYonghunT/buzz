@@ -438,6 +438,31 @@ async function openCodeProjectRoute(page: Page, keyboardOnly = false) {
   ).toContainText("buzz");
 }
 
+async function expectProminentCodeAction(action: Locator) {
+  const styles = await action.evaluate((element) => {
+    const probe = document.createElement("span");
+    probe.style.backgroundColor = "hsl(var(--primary))";
+    probe.style.color = "hsl(var(--primary-foreground))";
+    document.body.append(probe);
+
+    const actionStyles = getComputedStyle(element);
+    const primaryStyles = getComputedStyle(probe);
+    const result = {
+      backgroundColor: actionStyles.backgroundColor,
+      color: actionStyles.color,
+      height: element.getBoundingClientRect().height,
+      primaryBackgroundColor: primaryStyles.backgroundColor,
+      primaryForegroundColor: primaryStyles.color,
+    };
+    probe.remove();
+    return result;
+  });
+
+  expect(styles.backgroundColor).toBe(styles.primaryBackgroundColor);
+  expect(styles.color).toBe(styles.primaryForegroundColor);
+  expect(styles.height).toBeGreaterThanOrEqual(36);
+}
+
 test("keeps SchoolX Code entry points visible across narrow project layouts", async ({
   page,
 }) => {
@@ -459,6 +484,7 @@ test("keeps SchoolX Code entry points visible across narrow project layouts", as
     name: "Open buzz in SchoolX Code",
     exact: true,
   });
+  await expectProminentCodeAction(projectCodeAction);
   for (const width of [768, 900]) {
     await page.setViewportSize({ height: 600, width });
     await expect(projectCodeAction).toBeVisible();
@@ -486,6 +512,7 @@ test("keeps SchoolX Code entry points visible across narrow project layouts", as
     exact: true,
   });
   await expect(codeAction).toContainText("SchoolX Code");
+  await expectProminentCodeAction(codeAction);
   const terminalAction = page.getByRole("button", {
     name: "Open terminal",
     exact: true,
@@ -647,6 +674,35 @@ test("refreshes a missing checkout even when Terminal reports an existing clone"
   ).toHaveCount(0);
 });
 
+test("uses the authoritative published branch when Code opens from the project list", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    window.sessionStorage.setItem(
+      "buzz-e2e-project-branches",
+      JSON.stringify({
+        buzz: {
+          master: "0123456789abcdef0123456789abcdef01234567",
+        },
+      }),
+    );
+  });
+  await installMockBridge(page, {
+    projectHeadBranch: "master",
+    schoolxCodeWorkspace: true,
+  });
+
+  await openCodeProjectRoute(page);
+
+  await expect(codeRuntimeReadyLabel(page)).toBeVisible({ timeout: 10_000 });
+  expect(await commandPayload(page, "code_repository_inspect")).toEqual({
+    input: { repositoryRoot: "/mock/buzz", baseRef: "master" },
+  });
+  await expect(
+    page.getByRole("heading", { name: "Project scope unavailable" }),
+  ).toHaveCount(0);
+});
+
 test("keeps a failed checkout clone retryable in SchoolX Code", async ({
   page,
 }) => {
@@ -744,6 +800,42 @@ test("keeps unrelated repository inspection failures generic", async ({
   await expect(
     page.getByRole("heading", { name: "First commit required" }),
   ).toHaveCount(0);
+});
+
+test("explains the permanent macOS signing requirement without retrying", async ({
+  page,
+}) => {
+  await installMockBridge(page, {
+    schoolxCodeWorkspace: true,
+    schoolxCodeRepositoryInspectError:
+      "SchoolX Code repository inspection failed: SchoolX Code Git requires a Developer ID signed SchoolX application",
+  });
+
+  await openCodeProjectRoute(page);
+
+  const signedAppAlert = page.getByRole("alert");
+  await expect(signedAppAlert).toBeVisible();
+  await expect(
+    signedAppAlert.getByRole("heading", {
+      name: "Signed SchoolX app required",
+    }),
+  ).toBeVisible();
+  await expect(
+    signedAppAlert.getByText(
+      "SchoolX Code on macOS requires a signed and notarized SchoolX app installed in Applications. Quit this copy, install the signed app in Applications, then open SchoolX again.",
+    ),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("button", { name: "Retry", exact: true }),
+  ).toHaveCount(0);
+
+  const backToProject = signedAppAlert.getByRole("button", {
+    name: "Back to Project",
+    exact: true,
+  });
+  await expect(backToProject).toBeVisible();
+  await backToProject.click();
+  await expect(page).toHaveURL(/\/#\/projects\/[^/?]+$/);
 });
 
 test("retries a transient project lookup without treating the project as absent", async ({

@@ -429,12 +429,10 @@ function ProjectCodeAction({
   return (
     <Button
       aria-label={`Open ${project.name} in SchoolX Code`}
-      className={cn("relative z-10 h-8 shrink-0 gap-1.5", className)}
+      className={cn("relative z-10 shrink-0 gap-2 font-semibold", className)}
       onClick={() => onOpenCode(project)}
-      size="sm"
       title={`Open ${project.name} in SchoolX Code`}
       type="button"
-      variant="outline"
     >
       <Code2 className="size-4" />
       SchoolX Code

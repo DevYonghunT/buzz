@@ -286,11 +286,9 @@ export function WorkspaceTabs({
         {onOpenCode ? (
           <Button
             aria-label={`Open ${project.name} in SchoolX Code`}
-            className="h-8 shrink-0 gap-1.5"
+            className="shrink-0 gap-2 font-semibold"
             onClick={onOpenCode}
-            size="sm"
             title="Open this project in SchoolX Code"
-            variant="outline"
           >
             <Code2 className="size-4" />
             SchoolX Code

@@ -27,6 +27,12 @@ gh run watch --repo DevYonghunT/buzz
 | `schoolx-macos-intel-<version>` | Intel Mac | `.dmg` |
 | `schoolx-windows-<version>` | Windows | NSIS `.exe` |
 
+> **macOS Actions 아티팩트는 SchoolX Code를 실행할 수 없다.** 두 DMG는
+> Developer ID 서명 전 중간 산출물이므로, SchoolX Code의 Git XPC 상호 인증이
+> 이를 거부한다. Gatekeeper에서 「열기」를 허용하거나 앱을 응용 프로그램으로
+> 옮겨도 해결되지 않는다. Mac에서 SchoolX Code를 테스트할 설치본은 반드시
+> §4.1의 서명·공증 후처리를 통과한 DMG만 공유한다.
+
 Mac이 둘로 갈리는 이유는 `macos-latest` 러너가 Apple Silicon이라 그냥 빌드하면
 arm64 전용이 나오기 때문이다. Intel 잡은 `--target x86_64-apple-darwin`으로
 교차 컴파일한다.
@@ -82,6 +88,7 @@ Intel이 보이면 `...-intel-...`이다.
 |---|---|---|
 | macOS 서명 | **Actions 결과에는 없음** — 승인 운영자 후처리는 §4.1 | Apple Developer 계정으로 서명·공증 |
 | Windows 서명 | **없음** — SmartScreen 경고 | 코드 서명 인증서 |
+| macOS SchoolX Code | **미서명 아티팩트에서는 사용 불가** — §4.1 후처리 필요 | 사용 가능 |
 | 자동 업데이트 | **없음** (`createUpdaterArtifacts: false`) | 업데이트 endpoint |
 | 배포 경로 | Actions 아티팩트 (한시적) | GitHub Release |
 
