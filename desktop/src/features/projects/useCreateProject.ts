@@ -11,6 +11,10 @@ import {
   projectsQueryKey,
 } from "@/features/projects/hooks";
 import { resolveProjectRelayBase } from "@/features/projects/projectRelayBase";
+import {
+  initializeProjectRepository,
+  type ProjectRepoInitializeResult,
+} from "@/shared/api/projectGit";
 import { relayClient } from "@/shared/api/relayClient";
 import { createChannel, signRelayEvent } from "@/shared/api/tauri";
 import type { Channel, ChannelVisibility } from "@/shared/api/types";
@@ -27,6 +31,8 @@ export type CreateProjectInput = {
 export type CreateProjectResult = {
   channel: Channel;
   project: Project;
+  repositoryInitialization: ProjectRepoInitializeResult | null;
+  repositoryInitializationError: string | null;
 };
 
 const PROJECT_REPOSITORY_ID_PATTERN = /^[A-Za-z0-9._-]{1,64}$/;
@@ -52,6 +58,7 @@ export function projectRepositoryIdError(value: string): string | null {
 /** Publishes a NIP-34 repo announcement so the project appears on the relay. */
 async function createProject(
   input: CreateProjectInput,
+  reposDir?: string | null,
 ): Promise<CreateProjectResult> {
   const name = input.name.trim();
   if (!name) {
@@ -101,19 +108,46 @@ async function createProject(
     "Failed to create project.",
   );
   const relayBase = await resolveProjectRelayBase();
+  const project = eventToProject(event, relayBase);
+
+  let repositoryInitialization: ProjectRepoInitializeResult | null = null;
+  let repositoryInitializationError: string | null = null;
+  const cloneUrl = project.cloneUrls[0];
+  if (cloneUrl) {
+    try {
+      repositoryInitialization = await initializeProjectRepository({
+        reposDir,
+        projectDtag: project.dtag,
+        cloneUrl,
+        defaultBranch: project.defaultBranch,
+      });
+    } catch (error) {
+      // The channel and repository announcement already exist at this point.
+      // Preserve that successful creation and let Code offer a safe retry.
+      repositoryInitializationError =
+        error instanceof Error
+          ? error.message
+          : "Failed to initialize the project repository.";
+    }
+  } else {
+    repositoryInitializationError =
+      "The project was created without a repository clone URL.";
+  }
 
   return {
     channel,
-    project: eventToProject(event, relayBase),
+    project,
+    repositoryInitialization,
+    repositoryInitializationError,
   };
 }
 
 /** Mutation that creates a project with its stream and updates both caches. */
-export function useCreateProjectMutation() {
+export function useCreateProjectMutation(reposDir?: string | null) {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: createProject,
+    mutationFn: (input: CreateProjectInput) => createProject(input, reposDir),
     onSuccess: ({ channel, project }) => {
       queryClient.setQueryData<Channel[]>(channelsQueryKey, (current) =>
         upsertCachedChannel(current, channel),
@@ -123,6 +157,9 @@ export function useCreateProjectMutation() {
         ...current.filter((candidate) => candidate.id !== project.id),
       ]);
       void queryClient.invalidateQueries({ queryKey: projectsQueryKey });
+      void queryClient.invalidateQueries({
+        queryKey: ["projects", "local-repositories"],
+      });
     },
     onSettled: () => {
       void queryClient.invalidateQueries({

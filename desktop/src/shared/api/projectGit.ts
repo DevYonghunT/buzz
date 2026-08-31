@@ -438,6 +438,34 @@ export async function cloneProjectRepository(input: {
   });
 }
 
+export type ProjectRepoInitializeResult = {
+  path: string;
+  cloned: boolean;
+  initialized: boolean;
+  pushed: boolean;
+  branch: string;
+  commit: string;
+  message: string;
+};
+
+/** Ensures an owner-created empty project has a README commit on its default branch. */
+export async function initializeProjectRepository(input: {
+  reposDir?: string | null;
+  projectDtag: string;
+  cloneUrl: string;
+  defaultBranch?: string | null;
+}): Promise<ProjectRepoInitializeResult> {
+  return invokeTauri<ProjectRepoInitializeResult>(
+    "initialize_project_repository",
+    {
+      reposDir: input.reposDir ?? null,
+      projectDtag: input.projectDtag,
+      cloneUrl: input.cloneUrl,
+      defaultBranch: input.defaultBranch ?? null,
+    },
+  );
+}
+
 export async function createProjectRemoteBranch(input: {
   cloneUrl: string;
   sourceBranch: string;

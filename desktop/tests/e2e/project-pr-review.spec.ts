@@ -1023,11 +1023,13 @@ test("project detail content areas do not paint background fills", async ({
   await expectVisiblePanelsToBeTransparent();
 });
 
-test("project without a checkout offers fetch feedback and dropdown cloning", async ({
+test("project without a checkout joins its open channel before dropdown cloning", async ({
   page,
 }) => {
   await enableProjectsFeature(page);
-  await installMockBridge(page);
+  await installMockBridge(page, {
+    schoolxCodeProjectChannelMember: false,
+  });
   await openBuzzProject(page);
 
   await expect(
@@ -1055,15 +1057,81 @@ test("project without a checkout offers fetch feedback and dropdown cloning", as
   await expect(cloneItem.getByText("Clone", { exact: true })).toHaveClass(
     /\bborder-input\/60\b/,
   );
+  await page.evaluate(() => {
+    if (window.__BUZZ_E2E_COMMANDS__) {
+      window.__BUZZ_E2E_COMMANDS__.length = 0;
+    }
+    if (window.__BUZZ_E2E_COMMAND_PAYLOADS__) {
+      window.__BUZZ_E2E_COMMAND_PAYLOADS__.length = 0;
+    }
+  });
   await cloneItem.click();
   await expect(page.getByText("Cloned repository.")).toBeVisible();
   await expect(
     page.getByRole("button", { name: "Local", exact: true }),
   ).toBeVisible();
+  const trace = await page.evaluate(() => ({
+    commands: window.__BUZZ_E2E_COMMANDS__ ?? [],
+    payloads: window.__BUZZ_E2E_COMMAND_PAYLOADS__ ?? [],
+  }));
+  const joinIndex = trace.commands.indexOf("join_channel");
+  const cloneIndex = trace.commands.indexOf("clone_project_repository");
+  const channelReadIndexes = trace.commands.flatMap((command, index) =>
+    command === "get_channels" ? [index] : [],
+  );
+  expect(joinIndex).toBeGreaterThan(-1);
+  expect(cloneIndex).toBeGreaterThan(joinIndex);
+  expect(channelReadIndexes.some((index) => index < joinIndex)).toBe(true);
+  expect(
+    channelReadIndexes.some((index) => index > joinIndex && index < cloneIndex),
+  ).toBe(true);
+  expect(
+    trace.commands.filter((command) => command === "join_channel"),
+  ).toHaveLength(1);
+  expect(
+    trace.payloads.find((entry) => entry.command === "join_channel")?.payload,
+  ).toEqual({ channelId: "9dae0116-799b-5071-a0a8-fdd30a91a35d" });
+});
+
+test("project dropdown clone blocks private channel non-members", async ({
+  page,
+}) => {
+  await enableProjectsFeature(page);
+  await installMockBridge(page, {
+    schoolxCodeProjectChannelMember: false,
+    schoolxCodeProjectChannelVisibility: "private",
+  });
+  await openBuzzProject(page);
+
+  await page.getByRole("button", { name: "Remote", exact: true }).click();
+  const cloneItem = page.getByRole("menuitem", {
+    name: "Local missing Clone",
+  });
+  await expect(cloneItem).toBeVisible();
+  await page.evaluate(() => {
+    if (window.__BUZZ_E2E_COMMANDS__) {
+      window.__BUZZ_E2E_COMMANDS__.length = 0;
+    }
+  });
+  await cloneItem.click();
+
+  await expect(page.getByText("This project is private.")).toBeVisible();
   const commands = await page.evaluate(
     () => window.__BUZZ_E2E_COMMANDS__ ?? [],
   );
-  expect(commands).toContain("clone_project_repository");
+  expect(commands).toContain("get_channels");
+  expect(commands.filter((command) => command === "join_channel")).toHaveLength(
+    1,
+  );
+  expect(commands).not.toContain("clone_project_repository");
+
+  await expect(
+    page.getByRole("button", { name: "Remote", exact: true }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Remote", exact: true }).click();
+  await expect(
+    page.getByRole("menuitem", { name: "Local missing Clone" }),
+  ).toBeEnabled();
 });
 
 test("project branches can be created from the selected remote branch", async ({

@@ -119,6 +119,22 @@ test("creates a relay project with a dedicated discussion channel", async ({
 
   await expect(page.getByTestId("create-project-dialog")).toBeHidden();
   await expect(page.getByTestId("project-card-first-project")).toBeVisible();
+  await expect
+    .poll(() =>
+      page.evaluate(() =>
+        window.__BUZZ_E2E_COMMAND_PAYLOADS__?.find(
+          (entry) => entry.command === "initialize_project_repository",
+        ),
+      ),
+    )
+    .toMatchObject({
+      payload: {
+        reposDir: null,
+        projectDtag: "first-project",
+        cloneUrl: expect.stringMatching(/\/first-project$/),
+        defaultBranch: "main",
+      },
+    });
 
   const announcement = await page.evaluate(() =>
     window.__BUZZ_E2E_SIGNED_EVENTS__?.find((event) => event.kind === 30617),

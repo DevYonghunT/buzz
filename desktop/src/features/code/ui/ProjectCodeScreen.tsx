@@ -19,6 +19,8 @@ import {
   projectTerminalLabel,
   useOpenProjectTerminal,
 } from "@/features/projects/ui/useOpenProjectTerminal";
+import { useIdentityQuery } from "@/shared/api/hooks";
+import { initializeProjectRepository } from "@/shared/api/projectGit";
 import { TopChromeInsetHeader } from "@/shared/layout/TopChromeInsetHeader";
 import { Button } from "@/shared/ui/button";
 import { codeRepositoryQueryOptions } from "../state/codeSessionQueries";
@@ -107,6 +109,7 @@ export function ProjectCodeScreen({
   const { goProject, goProjects } = useAppNavigation();
   const projectQuery = useProjectQuery(projectId);
   const project = projectQuery.data;
+  const identityQuery = useIdentityQuery();
   const baseRef =
     requestedBaseRef?.trim() || project?.defaultBranch?.trim() || "HEAD";
   const terminalBranch =
@@ -147,6 +150,101 @@ export function ProjectCodeScreen({
     enabled: repositoryRoot.length > 0 && !isEmptyLocalRepository,
     staleTime: 30_000,
   });
+  const projectCloneUrl = project?.cloneUrls[0] ?? null;
+  const ownsProject = Boolean(
+    project &&
+      identityQuery.data?.pubkey &&
+      project.owner.toLowerCase() === identityQuery.data.pubkey.toLowerCase(),
+  );
+  const initializationKey =
+    activeCommunity && project && projectCloneUrl && ownsProject
+      ? JSON.stringify([
+          activeCommunity.id,
+          activeCommunity.reposDir ?? null,
+          project.id,
+          projectCloneUrl,
+          project.defaultBranch,
+        ])
+      : null;
+  const needsOwnedRepositoryInitialization = Boolean(
+    initializationKey &&
+      !localRepositoryQuery.isPending &&
+      !localRepositoryQuery.isError &&
+      isEmptyLocalRepository,
+  );
+  const [initializationState, setInitializationState] = React.useState<{
+    error: string | null;
+    key: string;
+    phase: "pending" | "succeeded" | "failed";
+  } | null>(null);
+  const attemptedInitializationKeyRef = React.useRef<string | null>(null);
+  const refetchLocalRepository = localRepositoryQuery.refetch;
+  const initializeOwnedRepository = React.useCallback(async () => {
+    if (
+      !initializationKey ||
+      !activeCommunity ||
+      !project ||
+      !projectCloneUrl ||
+      !ownsProject
+    ) {
+      return;
+    }
+
+    attemptedInitializationKeyRef.current = initializationKey;
+    setInitializationState({
+      error: null,
+      key: initializationKey,
+      phase: "pending",
+    });
+    try {
+      await initializeProjectRepository({
+        reposDir: activeCommunity.reposDir,
+        projectDtag: project.dtag,
+        cloneUrl: projectCloneUrl,
+        defaultBranch: project.defaultBranch,
+      });
+      await refetchLocalRepository();
+      setInitializationState({
+        error: null,
+        key: initializationKey,
+        phase: "succeeded",
+      });
+    } catch (error) {
+      setInitializationState({
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to initialize the project repository.",
+        key: initializationKey,
+        phase: "failed",
+      });
+    }
+  }, [
+    activeCommunity,
+    initializationKey,
+    ownsProject,
+    project,
+    projectCloneUrl,
+    refetchLocalRepository,
+  ]);
+
+  React.useEffect(() => {
+    if (
+      !needsOwnedRepositoryInitialization ||
+      !initializationKey ||
+      attemptedInitializationKeyRef.current === initializationKey
+    ) {
+      return;
+    }
+    void initializeOwnedRepository();
+  }, [
+    initializationKey,
+    initializeOwnedRepository,
+    needsOwnedRepositoryInitialization,
+  ]);
+
+  const currentInitialization =
+    initializationState?.key === initializationKey ? initializationState : null;
 
   if (projectQuery.isPending) {
     return (
@@ -239,6 +337,43 @@ export function ProjectCodeScreen({
         }
         description="SchoolX could not inspect this project's local checkout."
         title="Repository unavailable"
+      />
+    );
+  } else if (currentInitialization?.phase === "pending") {
+    content = (
+      <CodeBootstrapState
+        description="Creating the first commit and publishing the repository."
+        loading
+        title="Initializing repository"
+      />
+    );
+  } else if (currentInitialization?.phase === "failed") {
+    content = (
+      <CodeBootstrapState
+        action={
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <Button onClick={() => void initializeOwnedRepository()} size="sm">
+              Retry setup
+            </Button>
+            {repositoryRoot ? (
+              <Button
+                disabled={isOpeningTerminal}
+                onClick={() => void handleOpenProjectTerminal(true)}
+                size="sm"
+                variant="outline"
+              >
+                <SquareTerminal />
+                {projectTerminalLabel(true)}
+              </Button>
+            ) : null}
+          </div>
+        }
+        announcementRole="alert"
+        description={
+          currentInitialization.error ??
+          "SchoolX could not initialize this repository."
+        }
+        title="Repository setup failed"
       />
     );
   } else if (!repositoryRoot) {

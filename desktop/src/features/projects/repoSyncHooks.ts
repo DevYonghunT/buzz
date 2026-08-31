@@ -7,6 +7,7 @@ import {
   pushProjectLocalRepository,
 } from "@/shared/api/projectGit";
 import type { Project, ProjectPullRequest } from "@/features/projects/hooks";
+import { useEnsureProjectChannelAccess } from "@/features/projects/useProjectChannelAccess";
 import { publishProjectPullRequestUpdate } from "./pullRequestMutations";
 
 /** Local-vs-remote git sync status for a project checkout (ahead/behind
@@ -113,9 +114,11 @@ export function useCloneProjectRepositoryMutation(
   reposDir?: string | null,
 ) {
   const queryClient = useQueryClient();
+  const ensureProjectChannelAccess = useEnsureProjectChannelAccess();
   return useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       if (!project?.cloneUrls[0]) throw new Error("No project selected.");
+      await ensureProjectChannelAccess(project.projectChannelId);
       return cloneProjectRepository({
         reposDir,
         projectDtag: project.dtag,

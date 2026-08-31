@@ -216,6 +216,12 @@ type E2eConfig = {
     schoolxCodeHasLocalCheckout?: boolean;
     /** Return an unborn local checkout that still needs its first commit. */
     schoolxCodeEmptyLocalRepository?: boolean;
+    /** Sequenced native repository-initialization failures; null allows it. */
+    schoolxCodeInitializeErrors?: Array<string | null>;
+    /** Start the mock viewer outside the first project's discussion channel. */
+    schoolxCodeProjectChannelMember?: boolean;
+    /** Override the first project's discussion-channel visibility. */
+    schoolxCodeProjectChannelVisibility?: "open" | "private";
     /** Override whether opening Terminal reports that it performed the clone. */
     schoolxCodeTerminalReportsCloned?: boolean;
     /** Error returned by the mocked project Terminal boundary. */
@@ -1476,6 +1482,7 @@ const OWNED_RELAY_AGENT_PUBKEY =
 const MOCK_IDENTITY_PUBKEY = DEFAULT_MOCK_IDENTITY.pubkey;
 const STARTER_GENERAL_CHANNEL_ID = "9a1657ac-f7aa-5db0-b632-d8bbeb6dfb50";
 const STARTER_WELCOME_CHANNEL_ID = "5f0b1b3c-2a37-5366-9b8c-31a4b21d8e77";
+const MOCK_PROJECT_CHANNEL_ID = "9dae0116-799b-5071-a0a8-fdd30a91a35d";
 const STARTER_GENERAL_CHANNEL_NAME = "general";
 const STARTER_WELCOME_CHANNEL_NAME = "welcome-everyone";
 
@@ -2540,7 +2547,14 @@ function listMockProfiles(): RawProfile[] {
 }
 
 function listMockChannels(config?: E2eConfig): RawChannelWithMembership[] {
-  return mockChannels.map((channel) => toRawChannel(channel, config));
+  const currentPubkey = getMockMemberPubkey(config);
+  return mockChannels
+    .filter(
+      (channel) =>
+        channel.visibility === "open" ||
+        channel.members.some((member) => member.pubkey === currentPubkey),
+    )
+    .map((channel) => toRawChannel(channel, config));
 }
 
 function getMockChannel(channelId: string): MockChannel {
@@ -5298,6 +5312,9 @@ function buildMockProjectEvents(): RelayEvent[] {
           ["d", seed.dtag],
           ["name", seed.name],
           ["description", seed.description],
+          ...(projectIndex === 0
+            ? [["buzz-channel", MOCK_PROJECT_CHANNEL_ID]]
+            : []),
           ...(projectIndex === 0 && getConfig()?.mock?.projectOmitCloneTag
             ? []
             : [
@@ -6867,6 +6884,9 @@ async function handleJoinChannel(
 
     if (channel.members.some((member) => member.pubkey === currentPubkey)) {
       return;
+    }
+    if (channel.visibility === "private") {
+      throw new Error("restricted: channel is private");
     }
 
     channel.members.push(createCurrentMember(config, "member"));
@@ -10623,6 +10643,24 @@ export function maybeInstallE2eTauriMocks() {
   let mockCodeRuntimeError: string | null = null;
   let mockCodeHasLocalCheckout =
     config.mock?.schoolxCodeHasLocalCheckout ?? true;
+  let mockCodeEmptyLocalRepository =
+    config.mock?.schoolxCodeEmptyLocalRepository ?? false;
+  const mockProjectChannel = mockChannels.find(
+    (channel) => channel.id === MOCK_PROJECT_CHANNEL_ID,
+  );
+  if (mockProjectChannel) {
+    if (config.mock?.schoolxCodeProjectChannelVisibility) {
+      mockProjectChannel.visibility =
+        config.mock.schoolxCodeProjectChannelVisibility;
+    }
+    if (config.mock?.schoolxCodeProjectChannelMember === false) {
+      const currentPubkey = getMockMemberPubkey(config);
+      mockProjectChannel.members = mockProjectChannel.members.filter(
+        (member) => member.pubkey !== currentPubkey,
+      );
+      syncMockChannel(mockProjectChannel);
+    }
+  }
   const mockCodeRuntimeStatus = () => ({
     phase: mockCodeRuntimePhase,
     generation: mockCodeRuntimeGeneration,
@@ -11697,7 +11735,7 @@ export function maybeInstallE2eTauriMocks() {
         return {
           path: "/mock/buzz",
           snapshot: {
-            latest_commit: activeConfig?.mock?.schoolxCodeEmptyLocalRepository
+            latest_commit: mockCodeEmptyLocalRepository
               ? null
               : {
                   hash: "0123456789abcdef0123456789abcdef01234567",
@@ -11707,7 +11745,7 @@ export function maybeInstallE2eTauriMocks() {
                   timestamp: Math.floor(Date.now() / 1000) - 600,
                   subject: "Initialize SchoolX Code fixture",
                 },
-            commits: activeConfig?.mock?.schoolxCodeEmptyLocalRepository
+            commits: mockCodeEmptyLocalRepository
               ? []
               : [
                   {
@@ -12962,6 +13000,26 @@ export function maybeInstallE2eTauriMocks() {
           path: "/mock/buzz",
           cloned:
             activeConfig?.mock?.schoolxCodeTerminalReportsCloned ?? cloned,
+        };
+      }
+      case "initialize_project_repository": {
+        const initializationError =
+          activeConfig?.mock?.schoolxCodeInitializeErrors?.shift();
+        if (initializationError) throw new Error(initializationError);
+        const cloned = !mockCodeHasLocalCheckout;
+        const initialized = mockCodeEmptyLocalRepository || cloned;
+        mockCodeHasLocalCheckout = true;
+        mockCodeEmptyLocalRepository = false;
+        return {
+          path: "/mock/buzz",
+          cloned,
+          initialized,
+          pushed: initialized,
+          branch: "main",
+          commit: "0123456789abcdef0123456789abcdef01234567",
+          message: initialized
+            ? "Created and pushed the initial commit."
+            : "Repository is already initialized.",
         };
       }
       case "get_relay_ws_url":

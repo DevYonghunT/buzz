@@ -179,7 +179,9 @@ export function ProjectsView() {
   const [createIssueOpen, setCreateIssueOpen] = React.useState(false);
   const [createPullRequestOpen, setCreatePullRequestOpen] =
     React.useState(false);
-  const createProjectMutation = useCreateProjectMutation();
+  const createProjectMutation = useCreateProjectMutation(
+    activeCommunity?.reposDir,
+  );
   const [storedViewMode, setStoredViewMode] =
     React.useState<ProjectsViewMode | null>(() => readStoredViewMode());
   const [sort, setSort] = React.useState<ProjectsSort>(() => readStoredSort());
@@ -617,7 +619,13 @@ export function ProjectsView() {
         onCreate={async (input) => {
           const result = await createProjectMutation.mutateAsync(input);
           const project = result.project;
-          toast.success(`Project "${project.name}" created.`);
+          if (result.repositoryInitializationError) {
+            toast.warning(
+              `Project "${project.name}" was created, but its repository could not be initialized: ${result.repositoryInitializationError}`,
+            );
+          } else {
+            toast.success(`Project "${project.name}" created and initialized.`);
+          }
           // Land on the list that actually shows the new project — the
           // Overview only surfaces the top few most-active repositories.
           handleRepositoryScopeChange("all");

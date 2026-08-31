@@ -674,6 +674,67 @@ test("refreshes a missing checkout even when Terminal reports an existing clone"
   ).toHaveCount(0);
 });
 
+test("joins an open project channel before cloning on another account", async ({
+  page,
+}) => {
+  await installMockBridge(page, {
+    schoolxCodeWorkspace: true,
+    schoolxCodeHasLocalCheckout: false,
+    schoolxCodeProjectChannelMember: false,
+  });
+
+  await openCodeProjectRoute(page);
+  await page
+    .getByRole("button", {
+      name: "Clone & open in Terminal",
+      exact: true,
+    })
+    .click();
+
+  await waitForCommand(page, "join_channel");
+  await waitForCommand(page, "open_project_terminal");
+  expect(await commandPayload(page, "join_channel")).toEqual({
+    channelId: "9dae0116-799b-5071-a0a8-fdd30a91a35d",
+  });
+  const commandOrder = await page.evaluate(() =>
+    (window.__BUZZ_E2E_COMMAND_PAYLOADS__ ?? []).map((entry) => entry.command),
+  );
+  const joinIndex = commandOrder.indexOf("join_channel");
+  const verifiedReadIndex = commandOrder.indexOf("get_channels", joinIndex + 1);
+  const cloneIndex = commandOrder.indexOf("open_project_terminal");
+  expect(joinIndex).toBeGreaterThanOrEqual(0);
+  expect(verifiedReadIndex).toBeGreaterThan(joinIndex);
+  expect(cloneIndex).toBeGreaterThan(verifiedReadIndex);
+  await expect(codeRuntimeReadyLabel(page)).toBeVisible({ timeout: 10_000 });
+});
+
+test("keeps a private project clone blocked until this account is invited", async ({
+  page,
+}) => {
+  await installMockBridge(page, {
+    schoolxCodeWorkspace: true,
+    schoolxCodeHasLocalCheckout: false,
+    schoolxCodeProjectChannelMember: false,
+    schoolxCodeProjectChannelVisibility: "private",
+  });
+
+  await openCodeProjectRoute(page);
+  const cloneAction = page.getByRole("button", {
+    name: "Clone & open in Terminal",
+    exact: true,
+  });
+  await cloneAction.click();
+
+  await expect(
+    page
+      .locator("[data-sonner-toast]")
+      .filter({ hasText: "invite this account" }),
+  ).toBeVisible();
+  expect(await commandPayloads(page, "join_channel")).toEqual([]);
+  expect(await commandPayloads(page, "open_project_terminal")).toEqual([]);
+  await expect(cloneAction).toBeEnabled();
+});
+
 test("uses the authoritative published branch when Code opens from the project list", async ({
   page,
 }) => {
@@ -731,7 +792,7 @@ test("keeps a failed checkout clone retryable in SchoolX Code", async ({
   await expect(cloneAction).toBeEnabled();
 });
 
-test("explains that an empty repository needs its first commit", async ({
+test("automatically creates the first commit for an owned empty repository", async ({
   page,
 }) => {
   await installMockBridge(page, {
@@ -741,35 +802,42 @@ test("explains that an empty repository needs its first commit", async ({
 
   await openCodeProjectRoute(page);
 
-  await expect(
-    page.getByRole("heading", { name: "First commit required" }),
-  ).toBeVisible();
-  await expect(page.getByText(/create its first commit/i)).toBeVisible();
-  const terminalAction = page.getByRole("button", {
-    name: "Open in Terminal",
-    exact: true,
-  });
-  await expect(terminalAction).toBeVisible();
-  await expect(
-    page.getByRole("button", { name: "Retry", exact: true }),
-  ).toBeVisible();
-
-  await terminalAction.click();
-  await waitForCommand(page, "open_project_terminal");
-  expect(await commandPayload(page, "open_project_terminal")).toEqual({
+  await waitForCommand(page, "initialize_project_repository");
+  expect(await commandPayload(page, "initialize_project_repository")).toEqual({
     reposDir: null,
     projectDtag: "buzz",
     cloneUrl: expect.stringMatching(/\/buzz$/),
     defaultBranch: "main",
   });
+  await expect(codeRuntimeReadyLabel(page)).toBeVisible({ timeout: 10_000 });
   await expect(
     page.getByRole("heading", { name: "First commit required" }),
-  ).toBeVisible();
+  ).toHaveCount(0);
+});
 
-  await page.getByRole("button", { name: "Retry", exact: true }).click();
+test("keeps automatic repository initialization retryable", async ({
+  page,
+}) => {
+  await installMockBridge(page, {
+    schoolxCodeWorkspace: true,
+    schoolxCodeEmptyLocalRepository: true,
+    schoolxCodeInitializeErrors: ["Mock initialization failed", null],
+  });
+
+  await openCodeProjectRoute(page);
+  await waitForCommand(page, "initialize_project_repository");
+
   await expect(
-    page.getByRole("heading", { name: "First commit required" }),
+    page.getByRole("heading", { name: "Repository setup failed" }),
   ).toBeVisible();
+  await expect(page.getByText("Mock initialization failed")).toBeVisible();
+
+  await page.getByRole("button", { name: "Retry setup" }).click();
+  await waitForCommandCount(page, "initialize_project_repository", 2);
+  await expect(codeRuntimeReadyLabel(page)).toBeVisible({ timeout: 10_000 });
+  await expect(
+    page.getByRole("heading", { name: "Repository setup failed" }),
+  ).toHaveCount(0);
 });
 
 test("keeps unrelated repository inspection failures generic", async ({

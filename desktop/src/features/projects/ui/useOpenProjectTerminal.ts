@@ -3,6 +3,7 @@ import * as React from "react";
 import { toast } from "sonner";
 
 import type { Project } from "@/features/projects/hooks";
+import { useEnsureProjectChannelAccess } from "@/features/projects/useProjectChannelAccess";
 import { openProjectTerminal } from "@/shared/api/projectGit";
 
 export function projectTerminalLabel(hasLocalCheckout: boolean) {
@@ -17,6 +18,7 @@ export function projectTerminalLabel(hasLocalCheckout: boolean) {
  */
 export function useOpenProjectTerminal(reposDir?: string | null) {
   const queryClient = useQueryClient();
+  const ensureProjectChannelAccess = useEnsureProjectChannelAccess();
 
   return React.useCallback(
     async (
@@ -27,6 +29,9 @@ export function useOpenProjectTerminal(reposDir?: string | null) {
         ? undefined
         : toast.loading(`Cloning ${project.name}…`);
       try {
+        if (!options.hasLocalCheckout) {
+          await ensureProjectChannelAccess(project.projectChannelId);
+        }
         const result = await openProjectTerminal({
           reposDir,
           projectDtag: project.dtag,
@@ -52,6 +57,6 @@ export function useOpenProjectTerminal(reposDir?: string | null) {
         );
       }
     },
-    [queryClient, reposDir],
+    [ensureProjectChannelAccess, queryClient, reposDir],
   );
 }
