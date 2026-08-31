@@ -1,0 +1,865 @@
+{
+  "source": {
+    "generator": "codex app-server generate-json-schema --out <DIR>",
+    "version": "codex-cli 0.151.0",
+    "experimental": false
+  },
+  "initialize": {
+    "request": {
+      "method": "initialize",
+      "params": {
+        "clientInfo": {
+          "name": "schoolx-code",
+          "title": "SchoolX Code",
+          "version": "0.5.3"
+        },
+        "capabilities": {
+          "experimentalApi": false,
+          "requestAttestation": false
+        }
+      }
+    },
+    "response": {
+      "userAgent": "codex-test",
+      "codexHome": "/native/codex-home",
+      "platformFamily": "unix",
+      "platformOs": "macos"
+    },
+    "initializedNotification": {
+      "method": "initialized"
+    }
+  },
+  "modelList": {
+    "method": "model/list",
+    "params": {
+      "limit": 100,
+      "includeHidden": false
+    },
+    "result": {
+      "data": [
+        {
+          "id": "gpt-5.2-codex",
+          "model": "gpt-5.2-codex",
+          "displayName": "GPT-5.2 Codex",
+          "description": "Coding model for agentic workflows",
+          "hidden": false,
+          "supportedReasoningEfforts": [
+            {
+              "reasoningEffort": "medium",
+              "description": "Balanced reasoning for everyday tasks"
+            },
+            {
+              "reasoningEffort": "high",
+              "description": "Deeper reasoning for complex tasks"
+            }
+          ],
+          "defaultReasoningEffort": "medium",
+          "isDefault": true,
+          "modelSpecialty": null,
+          "multiAgentVersion": "v2"
+        }
+      ],
+      "nextCursor": null
+    }
+  },
+  "threadStart": {
+    "method": "thread/start",
+    "params": {
+      "cwd": "/native/stored-root",
+      "approvalPolicy": "on-request",
+      "sandbox": "workspace-write",
+      "serviceName": "schoolx-code",
+      "threadSource": "schoolx-code/67f11a1d-0274-4d40-9b0c-e406e51c64fb",
+      "model": "gpt-5.2-codex"
+    },
+    "result": {
+      "thread": {
+        "id": "thread-1",
+        "sessionId": "session-1",
+        "cliVersion": "0.151.0",
+        "preview": "Run the focused tests",
+        "ephemeral": false,
+        "modelProvider": "openai",
+        "createdAt": 1723600000,
+        "updatedAt": 1723600001,
+        "cwd": "/native/stored-root",
+        "name": "Native contract",
+        "source": "vscode",
+        "status": {
+          "type": "idle"
+        },
+        "threadSource": "schoolx-code/67f11a1d-0274-4d40-9b0c-e406e51c64fb",
+        "turns": [],
+        "projectId": null,
+        "historyMode": "paginated"
+      },
+      "instructionSources": ["AGENTS.md"],
+      "model": "gpt-5.2-codex",
+      "modelProvider": "openai",
+      "reasoningEffort": "medium",
+      "cwd": "/native/stored-root",
+      "approvalPolicy": "on-request",
+      "approvalsReviewer": "user",
+      "sandbox": {
+        "type": "workspaceWrite",
+        "writableRoots": ["/native/stored-root"],
+        "networkAccess": false,
+        "excludeTmpdirEnvVar": true,
+        "excludeSlashTmp": true
+      }
+    }
+  },
+  "threadList": {
+    "method": "thread/list",
+    "params": {
+      "sourceKinds": ["appServer", "vscode"],
+      "archived": false,
+      "cursor": "list-next",
+      "cwd": "/native/stored-root",
+      "limit": 100,
+      "useStateDbOnly": false,
+      "sortDirection": "desc",
+      "sortKey": "created_at"
+    },
+    "result": {
+      "data": [
+        {
+          "id": "thread-1",
+          "sessionId": "session-1",
+          "cliVersion": "0.151.0",
+          "preview": "Run the focused tests",
+          "ephemeral": false,
+          "modelProvider": "openai",
+          "createdAt": 1723600000,
+          "updatedAt": 1723600001,
+          "cwd": "/native/stored-root",
+          "source": "vscode",
+          "status": {
+            "type": "idle"
+          },
+          "threadSource": "schoolx-code/67f11a1d-0274-4d40-9b0c-e406e51c64fb",
+          "turns": [],
+          "projectId": null,
+          "historyMode": "paginated"
+        }
+      ],
+      "nextCursor": "list-page-2",
+      "backwardsCursor": null
+    }
+  },
+  "threadLoadedList": {
+    "method": "thread/loaded/list",
+    "params": {
+      "limit": 100,
+      "cursor": "loaded-next"
+    },
+    "result": {
+      "data": ["thread-1", "thread-2"],
+      "nextCursor": null
+    }
+  },
+  "threadRead": {
+    "method": "thread/read",
+    "params": {
+      "threadId": "thread-1",
+      "includeTurns": false
+    },
+    "result": {
+      "thread": {
+        "id": "thread-1",
+        "sessionId": "session-1",
+        "cliVersion": "0.151.0",
+        "preview": "Run the focused tests",
+        "ephemeral": false,
+        "modelProvider": "openai",
+        "createdAt": 1723600000,
+        "updatedAt": 1723600001,
+        "cwd": "/native/stored-root",
+        "source": "vscode",
+        "status": {
+          "type": "idle"
+        },
+        "threadSource": "schoolx-code/67f11a1d-0274-4d40-9b0c-e406e51c64fb",
+        "turns": [],
+        "projectId": null,
+        "historyMode": "paginated"
+      }
+    }
+  },
+  "threadArchive": {
+    "method": "thread/archive",
+    "params": {
+      "threadId": "thread-1"
+    },
+    "result": {}
+  },
+  "threadFork": {
+    "method": "thread/fork",
+    "params": {
+      "threadId": "thread-1",
+      "cwd": "/native/fork-root",
+      "approvalPolicy": "on-request",
+      "sandbox": "workspace-write",
+      "threadSource": "schoolx-code/89c210f4-7a5b-4bd5-a98c-322386a8a2e9"
+    },
+    "result": {
+      "thread": {
+        "id": "thread-2",
+        "sessionId": "thread-2",
+        "forkedFromId": "thread-1",
+        "parentThreadId": null,
+        "cliVersion": "0.151.0",
+        "preview": "Run the focused tests",
+        "ephemeral": false,
+        "modelProvider": "openai",
+        "createdAt": 1723600020,
+        "updatedAt": 1723600021,
+        "cwd": "/native/fork-root",
+        "name": "Native contract",
+        "source": "vscode",
+        "status": {
+          "type": "idle"
+        },
+        "threadSource": "schoolx-code/89c210f4-7a5b-4bd5-a98c-322386a8a2e9",
+        "turns": [
+          {
+            "id": "past-turn",
+            "status": "completed",
+            "items": [
+              {
+                "id": "item-restored",
+                "type": "agentMessage",
+                "text": "restored"
+              }
+            ],
+            "error": null
+          }
+        ],
+        "projectId": null,
+        "historyMode": "paginated"
+      },
+      "instructionSources": ["AGENTS.md"],
+      "model": "gpt-5.2-codex",
+      "modelProvider": "openai",
+      "cwd": "/native/fork-root",
+      "approvalPolicy": "on-request",
+      "approvalsReviewer": "user",
+      "sandbox": {
+        "type": "workspaceWrite",
+        "writableRoots": ["/native/fork-root"],
+        "networkAccess": false,
+        "excludeTmpdirEnvVar": true,
+        "excludeSlashTmp": true
+      }
+    }
+  },
+  "threadNameSet": {
+    "method": "thread/name/set",
+    "params": {
+      "threadId": "thread-1",
+      "name": "Renamed native contract"
+    },
+    "result": {}
+  },
+  "threadUnarchive": {
+    "method": "thread/unarchive",
+    "params": {
+      "threadId": "thread-1"
+    },
+    "result": {
+      "thread": {
+        "id": "thread-1",
+        "sessionId": "session-1",
+        "cliVersion": "0.151.0",
+        "preview": "Run the focused tests",
+        "ephemeral": false,
+        "modelProvider": "openai",
+        "createdAt": 1723600000,
+        "updatedAt": 1723600011,
+        "cwd": "/native/stored-root",
+        "source": "vscode",
+        "status": {
+          "type": "idle"
+        },
+        "threadSource": "schoolx-code/67f11a1d-0274-4d40-9b0c-e406e51c64fb",
+        "turns": [],
+        "projectId": null,
+        "historyMode": "paginated"
+      }
+    }
+  },
+  "threadResume": {
+    "method": "thread/resume",
+    "params": {
+      "threadId": "thread-1",
+      "cwd": "/native/stored-root",
+      "approvalPolicy": "on-request",
+      "sandbox": "workspace-write",
+      "excludeTurns": true
+    },
+    "result": {
+      "thread": {
+        "id": "thread-1",
+        "sessionId": "session-1",
+        "cliVersion": "0.151.0",
+        "preview": "Run the focused tests",
+        "ephemeral": false,
+        "modelProvider": "openai",
+        "createdAt": 1723600000,
+        "updatedAt": 1723600010,
+        "cwd": "/native/stored-root",
+        "source": "vscode",
+        "status": {
+          "type": "idle"
+        },
+        "threadSource": "schoolx-code/67f11a1d-0274-4d40-9b0c-e406e51c64fb",
+        "turns": [],
+        "projectId": null,
+        "historyMode": "paginated"
+      },
+      "instructionSources": ["AGENTS.md"],
+      "model": "gpt-5.2-codex",
+      "modelProvider": "openai",
+      "reasoningEffort": "medium",
+      "cwd": "/native/stored-root",
+      "approvalPolicy": "on-request",
+      "approvalsReviewer": "user",
+      "sandbox": {
+        "type": "workspaceWrite",
+        "writableRoots": ["/native/stored-root"],
+        "networkAccess": false,
+        "excludeTmpdirEnvVar": true,
+        "excludeSlashTmp": true
+      },
+      "itemsBackwardsCursor": "items-backwards-0-151",
+      "turnsBackwardsCursor": "turns-backwards-0-151"
+    }
+  },
+  "turnStart": {
+    "method": "turn/start",
+    "params": {
+      "threadId": "thread-1",
+      "input": [
+        {
+          "type": "text",
+          "text": "Run the focused tests",
+          "text_elements": []
+        }
+      ],
+      "cwd": "/native/stored-root",
+      "approvalPolicy": "on-request",
+      "sandboxPolicy": {
+        "type": "workspaceWrite",
+        "writableRoots": ["/native/stored-root"],
+        "networkAccess": false,
+        "excludeTmpdirEnvVar": true,
+        "excludeSlashTmp": true
+      },
+      "model": "gpt-5.2-codex",
+      "effort": "medium"
+    },
+    "result": {
+      "turn": {
+        "id": "turn-1",
+        "status": "inProgress",
+        "items": []
+      }
+    }
+  },
+  "turnSteer": {
+    "method": "turn/steer",
+    "params": {
+      "threadId": "thread-1",
+      "input": [
+        {
+          "type": "text",
+          "text": "Start with unit tests",
+          "text_elements": []
+        }
+      ],
+      "expectedTurnId": "turn-1"
+    },
+    "result": {
+      "turnId": "turn-1"
+    }
+  },
+  "turnInterrupt": {
+    "method": "turn/interrupt",
+    "params": {
+      "threadId": "thread-1",
+      "turnId": "turn-1"
+    },
+    "result": {}
+  },
+  "approvals": [
+    {
+      "request": {
+        "id": "approval-command",
+        "method": "item/commandExecution/requestApproval",
+        "params": {
+          "threadId": "thread-1",
+          "turnId": "turn-1",
+          "itemId": "item-command",
+          "startedAtMs": 1723600011000,
+          "command": "cargo test",
+          "cwd": "/native/stored-root",
+          "reason": "Run the focused tests",
+          "kind": "command"
+        }
+      },
+      "responseInput": {
+        "runtimeGeneration": 7,
+        "requestId": "approval-command",
+        "scope": {
+          "communityId": "community-1",
+          "projectDtag": "project-1",
+          "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "threadId": "thread-1",
+        "turnId": "turn-1",
+        "response": {
+          "type": "decision",
+          "decision": "acceptForSession"
+        }
+      },
+      "wireResult": {
+        "decision": "acceptForSession"
+      }
+    },
+    {
+      "request": {
+        "id": "approval-file",
+        "method": "item/fileChange/requestApproval",
+        "params": {
+          "threadId": "thread-1",
+          "turnId": "turn-1",
+          "itemId": "item-file",
+          "startedAtMs": 1723600012000,
+          "reason": "Update the native test"
+        }
+      },
+      "responseInput": {
+        "runtimeGeneration": 7,
+        "requestId": "approval-file",
+        "scope": {
+          "communityId": "community-1",
+          "projectDtag": "project-1",
+          "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "threadId": "thread-1",
+        "turnId": "turn-1",
+        "response": {
+          "type": "decision",
+          "decision": "decline"
+        }
+      },
+      "wireResult": {
+        "decision": "decline"
+      }
+    },
+    {
+      "request": {
+        "id": 9,
+        "method": "item/permissions/requestApproval",
+        "params": {
+          "threadId": "thread-1",
+          "turnId": "turn-1",
+          "itemId": "item-permissions",
+          "startedAtMs": 1723600013000,
+          "cwd": "/native/stored-root",
+          "permissions": {
+            "network": {
+              "enabled": true
+            },
+            "fileSystem": {
+              "read": ["/native/stored-root"]
+            }
+          }
+        }
+      },
+      "responseInput": {
+        "runtimeGeneration": 7,
+        "requestId": 9,
+        "scope": {
+          "communityId": "community-1",
+          "projectDtag": "project-1",
+          "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "threadId": "thread-1",
+        "turnId": "turn-1",
+        "response": {
+          "type": "permissions",
+          "intent": "grant",
+          "scope": "turn"
+        }
+      },
+      "wireResult": {
+        "permissions": {
+          "network": {
+            "enabled": true
+          },
+          "fileSystem": {
+            "read": ["/native/stored-root"]
+          }
+        },
+        "scope": "turn",
+        "strictAutoReview": true
+      }
+    },
+    {
+      "request": {
+        "id": "permission-session",
+        "method": "item/permissions/requestApproval",
+        "params": {
+          "threadId": "thread-1",
+          "turnId": "turn-1",
+          "itemId": "item-permissions-session",
+          "startedAtMs": 1723600013500,
+          "cwd": "/native/stored-root",
+          "permissions": {
+            "fileSystem": {
+              "write": ["/native/stored-root"]
+            }
+          }
+        }
+      },
+      "responseInput": {
+        "runtimeGeneration": 7,
+        "requestId": "permission-session",
+        "scope": {
+          "communityId": "community-1",
+          "projectDtag": "project-1",
+          "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "threadId": "thread-1",
+        "turnId": "turn-1",
+        "response": {
+          "type": "permissions",
+          "intent": "grant",
+          "scope": "session"
+        }
+      },
+      "wireResult": {
+        "permissions": {
+          "fileSystem": {
+            "write": ["/native/stored-root"]
+          }
+        },
+        "scope": "session",
+        "strictAutoReview": false
+      }
+    },
+    {
+      "request": {
+        "id": 10,
+        "method": "item/permissions/requestApproval",
+        "params": {
+          "threadId": "thread-1",
+          "turnId": "turn-1",
+          "itemId": "item-permissions-decline",
+          "startedAtMs": 1723600014000,
+          "cwd": "/native/stored-root",
+          "permissions": {
+            "network": {
+              "enabled": true
+            },
+            "fileSystem": {
+              "write": ["/native/stored-root"]
+            }
+          }
+        }
+      },
+      "responseInput": {
+        "runtimeGeneration": 7,
+        "requestId": 10,
+        "scope": {
+          "communityId": "community-1",
+          "projectDtag": "project-1",
+          "repositoryIdentity": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "threadId": "thread-1",
+        "turnId": "turn-1",
+        "response": {
+          "type": "permissions",
+          "intent": "decline",
+          "scope": "turn"
+        }
+      },
+      "wireResult": {
+        "permissions": {},
+        "scope": "turn",
+        "strictAutoReview": false
+      }
+    }
+  ],
+  "notifications": [
+    {
+      "method": "error",
+      "params": {
+        "threadId": "thread-1",
+        "turnId": "turn-1",
+        "error": {
+          "message": "turn failed"
+        },
+        "willRetry": false
+      }
+    },
+    {
+      "method": "warning",
+      "params": {
+        "threadId": "thread-1",
+        "message": "watch this turn"
+      }
+    },
+    {
+      "method": "configWarning",
+      "params": {
+        "summary": "ignored setting",
+        "details": "unsupported key"
+      }
+    },
+    {
+      "method": "thread/started",
+      "params": {
+        "thread": {
+          "id": "thread-2",
+          "sessionId": "thread-2",
+          "forkedFromId": "thread-1",
+          "parentThreadId": null,
+          "cliVersion": "0.151.0",
+          "preview": "Run the focused tests",
+          "ephemeral": false,
+          "modelProvider": "openai",
+          "createdAt": 1723600020,
+          "updatedAt": 1723600021,
+          "cwd": "/native/fork-root",
+          "name": "Native contract",
+          "source": "vscode",
+          "status": {
+            "type": "idle"
+          },
+          "threadSource": "schoolx-code/89c210f4-7a5b-4bd5-a98c-322386a8a2e9",
+          "turns": [],
+          "projectId": null,
+          "historyMode": "paginated"
+        }
+      }
+    },
+    {
+      "method": "thread/status/changed",
+      "params": {
+        "threadId": "thread-1",
+        "status": {
+          "type": "active",
+          "activeFlags": []
+        }
+      }
+    },
+    {
+      "method": "thread/closed",
+      "params": {
+        "threadId": "thread-1"
+      }
+    },
+    {
+      "method": "thread/archived",
+      "params": {
+        "threadId": "thread-1"
+      }
+    },
+    {
+      "method": "thread/unarchived",
+      "params": {
+        "threadId": "thread-1"
+      }
+    },
+    {
+      "method": "turn/started",
+      "params": {
+        "threadId": "thread-1",
+        "turn": {
+          "id": "turn-1",
+          "status": "inProgress",
+          "items": []
+        }
+      }
+    },
+    {
+      "method": "turn/completed",
+      "params": {
+        "threadId": "thread-1",
+        "turn": {
+          "id": "turn-1",
+          "status": "completed",
+          "items": []
+        }
+      }
+    },
+    {
+      "method": "turn/diff/updated",
+      "params": {
+        "threadId": "thread-1",
+        "turnId": "turn-1",
+        "diff": "diff --git a/a b/a"
+      }
+    },
+    {
+      "method": "turn/plan/updated",
+      "params": {
+        "threadId": "thread-1",
+        "turnId": "turn-1",
+        "plan": [
+          {
+            "step": "Run tests",
+            "status": "inProgress"
+          }
+        ]
+      }
+    },
+    {
+      "method": "item/started",
+      "params": {
+        "threadId": "thread-1",
+        "turnId": "turn-1",
+        "startedAtMs": 1723600014000,
+        "item": {
+          "id": "item-agent",
+          "type": "agentMessage",
+          "text": ""
+        }
+      }
+    },
+    {
+      "method": "item/completed",
+      "params": {
+        "threadId": "thread-1",
+        "turnId": "turn-1",
+        "completedAtMs": 1723600015000,
+        "item": {
+          "id": "item-agent",
+          "type": "agentMessage",
+          "text": "done"
+        }
+      }
+    },
+    {
+      "method": "item/agentMessage/delta",
+      "params": {
+        "threadId": "thread-1",
+        "turnId": "turn-1",
+        "itemId": "item-1",
+        "delta": "working"
+      }
+    },
+    {
+      "method": "item/plan/delta",
+      "params": {
+        "threadId": "thread-1",
+        "turnId": "turn-1",
+        "itemId": "item-plan",
+        "delta": "Run tests"
+      }
+    },
+    {
+      "method": "item/reasoning/summaryTextDelta",
+      "params": {
+        "threadId": "thread-1",
+        "turnId": "turn-1",
+        "itemId": "item-reasoning",
+        "summaryIndex": 0,
+        "delta": "Checking contracts"
+      }
+    },
+    {
+      "method": "item/reasoning/summaryPartAdded",
+      "params": {
+        "threadId": "thread-1",
+        "turnId": "turn-1",
+        "itemId": "item-reasoning",
+        "summaryIndex": 1
+      }
+    },
+    {
+      "method": "item/reasoning/textDelta",
+      "params": {
+        "threadId": "thread-1",
+        "turnId": "turn-1",
+        "itemId": "item-reasoning",
+        "contentIndex": 0,
+        "delta": "private reasoning chunk"
+      }
+    },
+    {
+      "method": "item/commandExecution/outputDelta",
+      "params": {
+        "threadId": "thread-1",
+        "turnId": "turn-1",
+        "itemId": "item-command",
+        "delta": "test output"
+      }
+    },
+    {
+      "method": "item/commandExecution/terminalInteraction",
+      "params": {
+        "threadId": "thread-1",
+        "turnId": "turn-1",
+        "itemId": "item-command",
+        "processId": "process-1",
+        "stdin": "y\n"
+      }
+    },
+    {
+      "method": "item/fileChange/patchUpdated",
+      "params": {
+        "threadId": "thread-1",
+        "turnId": "turn-1",
+        "itemId": "item-file",
+        "changes": [
+          {
+            "path": "src/lib.rs",
+            "kind": {
+              "type": "update"
+            },
+            "diff": "+contract"
+          }
+        ]
+      }
+    },
+    {
+      "method": "serverRequest/resolved",
+      "params": {
+        "threadId": "thread-1",
+        "requestId": "approval-command"
+      }
+    }
+  ],
+  "threadTurnsList": {
+    "method": "thread/turns/list",
+    "params": {
+      "threadId": "thread-1",
+      "cursor": "turns-backwards-0-151",
+      "limit": 100,
+      "sortDirection": "desc",
+      "itemsView": "full"
+    },
+    "result": {
+      "data": [
+        {
+          "id": "past-turn",
+          "status": "completed",
+          "items": [
+            {
+              "id": "item-restored",
+              "type": "agentMessage",
+              "text": "restored"
+            }
+          ],
+          "error": null,
+          "itemsView": "full"
+        }
+      ],
+      "nextCursor": null,
+      "backwardsCursor": "turns-forward-0-151"
+    }
+  }
+}

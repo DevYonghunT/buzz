@@ -2,14 +2,14 @@
 
 상태: 구현 기준안 v0.2
 작성일: 2026-08-13
-최종 갱신일: 2026-08-25
+최종 갱신일: 2026-08-31
 대상: SchoolX 데스크톱(Tauri 2 + React 19)
 
 구현 현황: Phase 0 runtime부터 Phase 1D typed adapter/pure reducer, Phase 1E UI
 수직 슬라이스를 거쳐 Phase 1F normalized event/recovery E2E와 exact bound-thread
 Changes inspector, Phase 1F.1 freshness closure, 역사적 Codex 0.145 permission 보완,
 실제 managed-worktree Changes 회귀, UI lifecycle/exact E2E bridge와 최초 0.145
-app-server manual boundary, 현재 exact 0.149.0 schema/wire snapshot과 recovery 호환성,
+app-server manual boundary, 현재 exact 0.151.0 schema/wire snapshot과 recovery 호환성,
 Git replacement-object immutable-base 차단과 native runtime
 diagnostic egress redaction, cross-platform descendant cleanup, permission display/authority
 분리, authoritative runtime checkpoint, generation Changes/prompt reconciliation과
@@ -20,9 +20,11 @@ runtime-generation model/reasoning selector와 Phase 3 Git write public contract
 owned-lock/CAS/startup recovery, Native admission gate와 remount-safe frontend recovery UX까지 구현했다.
 Crash/response-loss 행렬과 전체 Native/frontend/fresh-build E2E 회귀도 통과했다. 세 native Git helper의
 process-launch authority도 선택 B(signed unprivileged macOS XPC + Linux pinned direct spawn)로 구현했다.
-현재 Codex 계약, 제품 진입점, 운영 증거와 다음 Phase 3 decision gate는
-[`SESSION_HANDOFF_20260825_CODEX_0_149_AND_NEXT_SLICE_DECISION.md`](SESSION_HANDOFF_20260825_CODEX_0_149_AND_NEXT_SLICE_DECISION.md)를
-우선한다. Artifact별 최신 검증과 canonical release 잔여 gate는
+2026-08-25의 Codex 0.149 계약과 운영 증거는
+[`SESSION_HANDOFF_20260825_CODEX_0_149_AND_NEXT_SLICE_DECISION.md`](SESSION_HANDOFF_20260825_CODEX_0_149_AND_NEXT_SLICE_DECISION.md)에
+역사적 기록으로 남아 있다. 현재 Codex 계약은 이 문서와 checked-in 0.151
+manifest/archive/wire 및 native contract test를 우선한다. Artifact별 최신 검증과
+canonical release 잔여 gate는
 [`SESSION_HANDOFF_20260825_CODE_RELEASE_READINESS.md`](SESSION_HANDOFF_20260825_CODE_RELEASE_READINESS.md)를
 기준으로 한다. 내부 SchoolX 시각 체계의 적용/미적용 경계와 다음 구현 slice는
 [`SESSION_HANDOFF_20260825_SCHOOLX_VISUAL_SYSTEM_V1.md`](SESSION_HANDOFF_20260825_SCHOOLX_VISUAL_SYSTEM_V1.md)를
@@ -72,11 +74,10 @@ SchoolX 안에 Codex와 유사한 개발 환경을 구현할 수 있다. 현재 
   체크아웃에서 실행하는 것은 명시적으로 선택한 경우뿐이다.
 
 이 설계는 OpenAI의 `app-server`가 rich client를 위해 제공하는 스레드, 턴,
-승인, 스트리밍 이벤트, 인증 계약을 사용한다. 현재 exact schema/wire와 설치
-동작을 검증한 버전은 `codex-cli 0.149.0`이며 `codex app-server`, `generate-ts`,
+승인, 스트리밍 이벤트, 인증 계약을 사용한다. 현재 exact schema/wire를 검증한
+최신 버전은 `codex-cli 0.151.0`이며 `codex app-server`, `generate-ts`,
 `generate-json-schema`를 제공한다. `0.145.0`은 최초 역사적 baseline으로 보존되고
-runtime gate도 두 audited minor의 numeric patch를 호환 범위로 유지하지만, 최신
-exact 증명 snapshot은 `0.149.0`이다.
+runtime gate는 세 audited minor의 numeric patch를 호환 범위로 유지한다.
 
 ## 2. 제품 구조와 이름
 
@@ -323,7 +324,7 @@ Ready → Stopping → Stopped
 | app-server 1회성 command(통합 터미널과 별도) | `command/exec`, `/write`, `/resize`, `/terminate` |
 | 승인 | `item/commandExecution/requestApproval`, `item/fileChange/requestApproval`, `item/permissions/requestApproval` |
 
-현재 audited 0.145/0.149 수직 슬라이스는 `thread/name/set`, `thread/archive`,
+현재 audited 0.145/0.149/0.151 수직 슬라이스는 `thread/name/set`, `thread/archive`,
 `thread/unarchive`, `thread/fork`, `model/list`를 활성화한다. `command/exec` 계열은 아직
 활성화하지 않는다. 통합 터미널은 app-server RPC가 아니라 native가 소유하는 별도 OS shell
 PTY다.
@@ -360,10 +361,40 @@ server request는 자동 허용하지 않고 `method not supported`로 fail clos
    재생한다.
 5. 새 Codex 버전은 compatibility test를 통과한 뒤 지원 목록에 추가한다.
 
+Exact snapshot 갱신은 다음 스크립트가 version 확인, canonical schema hash,
+selected archive와 wire fixture 생성을 한 번에 수행한다. 생성된 delta를 검토하고
+contract test가 통과하기 전에는 runtime allowlist를 열지 않는다.
+
+```bash
+node scripts/refresh-schoolx-codex-schema.mjs \
+  --baseline 0.149.0 \
+  --version 0.151.0 \
+  --codex "$(command -v codex)"
+```
+
+이 maintainer audit 명령은 현재 macOS/Linux에서 `jq`, `tar`, `gzip`, `pnpm`이
+PATH에 있고 desktop 의존성이 설치된 환경을 전제로 한다. 앱의 Windows runtime이나
+Windows installer 빌드는 이 명령에 의존하지 않는다.
+
 `0.145.0`은 최초 fixture이자 역사적 compatibility baseline으로 보존한다.
-현재 최신 exact fixture는 `0.149.0`이다. Runtime은 `0.145.<numeric patch>`와
-`0.149.<numeric patch>`를 admit하지만, 모든 patch의 schema가 동일하다는 뜻은
-아니다. 두 exact snapshot 모두 영구 API로 가정하지 않는다.
+현재 최신 exact fixture는 `0.151.0`이다. Runtime은 `0.145.<numeric patch>`,
+`0.149.<numeric patch>`, `0.151.<numeric patch>`를 admit하지만, 모든 patch의
+schema가 동일하다는 뜻은 아니다. 세 exact snapshot 모두 영구 API로 가정하지 않는다.
+격리된 임시 Git 저장소와 `CODEX_HOME`에서 실제 0.151.0 바이너리로
+`initialize → thread/start → turn/start → thread/read → thread/resume`를
+왕복 검증했다. 새 thread는 `source: vscode`, `historyMode: paginated`로 보고됐고,
+persisted turn을 resume하면 두 pagination cursor가 반환됐다. 0.151 wire fixture는
+이 기본 source/history mode와 `excludeTurns: true` 요청을 재생한다. Native는 같은
+runtime generation에서 먼저 `thread/read(includeTurns: false)`로 immutable
+`historyMode`를 확인한다. `paginated`일 때만 `thread/turns/list`를
+`sortDirection: desc`,
+`itemsView: full`로 bounded pagination하고 anchor 중복을 제거한 뒤 과거→현재 순서로
+합친다. 이 exact 0.151 경로는 `experimentalApi: false` handshake에서도 실제
+바이너리로 왕복 검증했다. Cursor 반복, page/turn 한도 초과, full item이 아닌 응답,
+중간 RPC 실패, hydration 중 thread activity 변경은 일부 transcript를 반환하지 않고
+thread를 uncertain으로 표시해 fail closed한다. 0.145/0.149와 0.151에서 재개하는
+기존 `legacy` thread에는 `excludeTurns`나 pagination RPC를 보내지 않고 기존 full
+resume을 보존한다.
 
 ## 8. 로컬 데이터와 relay 데이터
 
@@ -417,7 +448,7 @@ CodeThreadBinding {
 - versioned binding index와 미완료 preparation journal은 Tauri app data의
   `code/thread-bindings.json`에 함께 저장한다.
 - native가 canonicalize한 절대 경로만 Codex `cwd`와 turn
-  `sandboxPolicy.writableRoots`에 전달한다. Audited Codex app-server 0.145/0.149
+  `sandboxPolicy.writableRoots`에 전달한다. Audited Codex app-server 0.145/0.149/0.151
   계약에 없는 top-level `runtimeWorkspaceRoots`는 보내지 않는다.
 - symlink를 따라간 최종 경로가 허용 root 밖이면 거부한다.
 - 같은 worktree를 두 active thread가 동시에 쓰지 못한다.
@@ -510,7 +541,7 @@ desktop/src-tauri/src/
 │   ├── approvals.rs        # pending approval gate
 │   ├── paths.rs            # executable/workspace canonicalization
 │   ├── bindings.rs         # versioned binding/preparation persistence
-│   ├── discovery.rs        # executable/version discovery와 0.145.x/0.149.x gate
+│   ├── discovery.rs        # executable/version discovery와 0.145.x/0.149.x/0.151.x gate
 │   ├── model_catalog.rs    # generation-bound model catalog와 최근 선택
 │   ├── worktrees.rs        # git identity와 descriptor-bound worktree 준비
 │   └── terminal.rs         # exact bound-thread PTY session actor/ownership
@@ -675,7 +706,7 @@ response/crash round-trip이 통과한다.
 cross-platform app-server child-tree ownership, permission display/authority 분리와 generation
 전환의 Changes/prompt 정합성, Changes의 complete manifest/status/binary/bounded patch와
 drift retry까지 포함한다. Phase 2의 exact bound-thread terminal과 로컬 bound-result 검색,
-audited 0.145/0.149 `thread/name/set` 이름 변경, leaf-only archive/unarchive lifecycle authority도
+audited 0.145/0.149/0.151 `thread/name/set` 이름 변경, leaf-only archive/unarchive lifecycle authority도
 완료했다. clean managed-source의 전체 persisted history를 fresh destination worktree로
 분기하는 fork와 exact-scope managed-worktree inventory도 완료했다. Native proof-based eligibility,
 strict public remove command/receipt, explicit confirmation과 response-loss-safe authoritative reconciliation을
@@ -687,7 +718,7 @@ model/reasoning selector, installation-global recent preference와 thread-open a
 
 - 첫 수직 슬라이스: exact bound-thread PTY session ownership과 terminal drawer
 - typed terminal resize/stdin/terminate와 `⌘J` lifecycle
-- exact-scope bound-result 로컬 검색과 audited 0.145/0.149 thread 이름 변경
+- exact-scope bound-result 로컬 검색과 audited 0.145/0.149/0.151 thread 이름 변경
 - persisted lifecycle authority와 leaf-only thread archive/unarchive
 - fresh destination worktree를 사용하는 thread fork
 - worktree 목록, 보존, 안전한 제거
@@ -726,7 +757,7 @@ authority와 exact pending/reserved approval을 RPC 전에 검사한다.
 
 Pinned archive가 spawned descendant까지 연쇄 archive할 수 있으므로 native는 authoritative
 thread graph에서 target의 descendant 부재를 증명한 leaf thread만 허용한다. 증명은 cwd
-filter 없이 active와 archived 양쪽을 audited 0.145/0.149의 모든
+filter 없이 active와 archived 양쪽을 audited 0.145/0.149/0.151의 모든
 `ThreadSourceKind`(`cli`, `vscode`, `exec`, `appServer`, `subAgent`, `subAgentReview`,
 `subAgentCompact`, `subAgentThreadSpawn`, `subAgentOther`, `unknown`)로 cursor 끝까지 조회하고
 `parentThreadId`/`forkedFromId` ancestry를 검사해야 한다. default interactive-source 또는
@@ -739,7 +770,7 @@ rollback하며 response loss, conflicting notification, stable commit failure는
 
 Fork도 부모의 managed root를 공유하지 않는다. lifecycle-clean stable `active` managed binding,
 idle thread, clean source worktree만 허용하고 source의 current immutable HEAD에서 detached clean
-destination을 먼저 만든다. Public input은 exact `{scope, threadId}`뿐이며 audited 0.145/0.149 request는
+destination을 먼저 만든다. Public input은 exact `{scope, threadId}`뿐이며 audited 0.145/0.149/0.151 request는
 `threadId`, native destination `cwd`, `approvalPolicy`, `sandbox`, preparation-derived
 `threadSource` 다섯 필드만 사용한다. 첫 수직 슬라이스는 `lastTurnId`를 노출하지 않고 전체
 persisted history를 복사한다.

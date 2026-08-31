@@ -1,4 +1,4 @@
-//! Audited Codex 0.145/0.149 thread lifecycle and authoritative graph contracts.
+//! Audited Codex 0.145/0.149/0.151 thread lifecycle and authoritative graph contracts.
 //!
 //! Lifecycle commands deliberately use a global, cwd-free thread inventory.
 //! The inventory is stricter than the user-facing thread projection because it
@@ -18,7 +18,7 @@ pub(crate) const CODE_AUTHORITATIVE_THREAD_PAGE_LIMIT: u32 = 100;
 pub(crate) const MAX_AUTHORITATIVE_THREADS: usize = 4_096;
 pub(crate) const MAX_AUTHORITATIVE_PAGES: usize = 64;
 
-/// Exact audited Codex 0.145/0.149 `ThreadSourceKind` filter, including both
+/// Exact audited Codex 0.145/0.149/0.151 `ThreadSourceKind` filter, including both
 /// the sub-agent umbrella and every specialized sub-agent classification.
 pub(crate) const SUPPORTED_CODEX_THREAD_SOURCE_KINDS: [&str; 10] = [
     "cli",

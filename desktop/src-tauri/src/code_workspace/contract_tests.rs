@@ -23,17 +23,17 @@ use super::bindings::{
 };
 use super::jsonrpc;
 use super::protocol::{
-    loaded_thread_list_params, normalize_notification, parse_loaded_thread_list,
-    parse_recovery_thread_list, parse_recovery_thread_read, parse_thread_name_set,
-    parse_thread_open, parse_thread_read, parse_turn_start, parse_turn_steer,
-    recovery_thread_list_params, thread_read_params, CodeBoundThreadOpenResult,
-    CodeBoundThreadSummary, CodeEventBacklog, CodeEventCheckpoint, CodePreparedWorktree,
-    CodeThreadBindingRecoverInput, CodeThreadChangeStatus, CodeThreadChangedFile,
-    CodeThreadChanges, CodeThreadChangesInput, CodeThreadForkInput,
-    CodeThreadLifecycleMutationResult, CodeThreadListInput, CodeThreadRenameInput,
-    CodeThreadResumeInput, CodeThreadStartError, CodeThreadStartInput, CodeThreadsPage,
-    CodeTurnInterruptInput, CodeTurnStartInput, CodeTurnSteerInput, CodeTurnSummary,
-    CodeWorkspaceEvent, CodeWorktreePrepareCommandInput,
+    enable_paginated_thread_resume, loaded_thread_list_params, normalize_notification,
+    parse_loaded_thread_list, parse_recovery_thread_list, parse_recovery_thread_read,
+    parse_thread_name_set, parse_thread_open, parse_thread_read, parse_thread_turns_list,
+    parse_turn_start, parse_turn_steer, recovery_thread_list_params, thread_read_params,
+    thread_turns_list_params, CodeBoundThreadOpenResult, CodeBoundThreadSummary, CodeEventBacklog,
+    CodeEventCheckpoint, CodePreparedWorktree, CodeThreadBindingRecoverInput,
+    CodeThreadChangeStatus, CodeThreadChangedFile, CodeThreadChanges, CodeThreadChangesInput,
+    CodeThreadForkInput, CodeThreadLifecycleMutationResult, CodeThreadListInput,
+    CodeThreadRenameInput, CodeThreadResumeInput, CodeThreadStartError, CodeThreadStartInput,
+    CodeThreadsPage, CodeTurnInterruptInput, CodeTurnStartInput, CodeTurnSteerInput,
+    CodeTurnSummary, CodeWorkspaceEvent, CodeWorktreePrepareCommandInput,
 };
 use super::runtime::{initialize_params, CodeRuntimePhase, CodeRuntimeStatus};
 use super::terminal::{
@@ -69,6 +69,10 @@ const SCHEMA_MANIFEST_0_149: &str = include_str!("fixtures/codex-0.149.0-schema-
 const WIRE_FIXTURE_0_149: &str = include_str!("fixtures/codex-0.149.0-wire.json");
 const SELECTED_SCHEMA_ARCHIVE_0_149: &str =
     include_str!("fixtures/codex-0.149.0-selected-schemas.tar.gz.base64");
+const SCHEMA_MANIFEST_0_151: &str = include_str!("fixtures/codex-0.151.0-schema-manifest.json");
+const WIRE_FIXTURE_0_151: &str = include_str!("fixtures/codex-0.151.0-wire.json");
+const SELECTED_SCHEMA_ARCHIVE_0_151: &str =
+    include_str!("fixtures/codex-0.151.0-selected-schemas.tar.gz.base64");
 const LIB_SOURCE: &str = include_str!("../lib.rs");
 const COMMAND_SOURCE: &str = include_str!("../commands/code_workspace.rs");
 const TERMINAL_COMMAND_SOURCE: &str = include_str!("../commands/code_terminal.rs");
@@ -245,13 +249,7 @@ fn manifest_aggregate(schemas: &Value) -> Result<String, String> {
 fn selected_schema_artifact(
     selected_schema_archive: &str,
 ) -> Result<BTreeMap<String, (Value, Vec<u8>)>, String> {
-    let encoded = selected_schema_archive
-        .lines()
-        .map(str::trim)
-        .collect::<String>();
-    let compressed = BASE64_STANDARD
-        .decode(encoded)
-        .map_err(|error| format!("invalid selected Codex schema artifact base64: {error}"))?;
+    let compressed = selected_schema_archive_bytes(selected_schema_archive)?;
     let mut archive = Archive::new(GzDecoder::new(compressed.as_slice()));
     let mut schemas = BTreeMap::new();
     for entry in archive
@@ -279,6 +277,16 @@ fn selected_schema_artifact(
         }
     }
     Ok(schemas)
+}
+
+fn selected_schema_archive_bytes(selected_schema_archive: &str) -> Result<Vec<u8>, String> {
+    let encoded = selected_schema_archive
+        .lines()
+        .map(str::trim)
+        .collect::<String>();
+    BASE64_STANDARD
+        .decode(encoded)
+        .map_err(|error| format!("invalid selected Codex schema artifact base64: {error}"))
 }
 
 fn schema_type_matches(expected: &str, instance: &Value) -> bool {
@@ -746,12 +754,79 @@ fn schema_manifest_freezes_the_audited_codex_0_149_0_contract() -> Result<(), St
     Ok(())
 }
 
+#[test]
+fn schema_manifest_freezes_the_audited_codex_0_151_0_contract() -> Result<(), String> {
+    let manifest = fixture(SCHEMA_MANIFEST_0_151)?;
+    assert_eq!(manifest["snapshotSchemaVersion"], 1);
+    assert_eq!(
+        manifest["source"],
+        json!({
+            "cliVersion": "codex-cli 0.151.0",
+            "generator": "app-server generate-json-schema",
+            "experimental": false,
+            "generatedFileCount": 301,
+            "canonicalization": "jq -S -c output including final LF",
+            "aggregateFormat": "relative paths sorted bytewise, then <canonical-file-sha256><two spaces><relative-path><LF>",
+            "fullGeneratedSetSha256": "36775498b737d8c22d127ba1906773ebbbd687b1c96360fc343ef7cd353d5e8d",
+            "selectedLeafSchemasSha256": "3babc46bd7c7cc766561a88ca4f0673deb2e7c3d9a3e83abcfb1b7c8e6167757",
+            "selectedSchemaCount": 68,
+            "selectedSchemasSha256": "89115247583848c43d6106d70adfb04fd5055f046633d53f03065c2c6e0fba24",
+            "selectedSchemaArtifact": "codex-0.151.0-selected-schemas.tar.gz.base64",
+            "selectedSchemaArtifactSha256": "6edd28684f4737f5946e16b57fd0aac345a5ae55edfa056186a563d696d681ad",
+            "selectedSchemaArtifactEncoding": "base64(gzip(tar(canonical jq -S -c files)))",
+            "executableSha256": "98491713ffb196061003ee148636e743997cc31d76144ba7c53462269896891d",
+            "executableHashIsInformational": true
+        })
+    );
+    assert_eq!(
+        manifest["runtimeVersionRequirement"],
+        "codex-cli 0.151.<numeric patch>"
+    );
+    assert_eq!(manifest["provenSnapshotVersion"], "codex-cli 0.151.0");
+
+    let schemas = manifest["schemas"]
+        .as_array()
+        .ok_or_else(|| "missing Codex 0.151 schemas".to_string())?;
+    assert_eq!(schemas.len(), 68);
+    assert_eq!(manifest["source"]["selectedSchemaCount"], 68);
+    assert_eq!(
+        manifest_aggregate(&manifest["schemas"])?,
+        manifest["source"]["selectedSchemasSha256"]
+    );
+    assert_eq!(
+        manifest["compatibilityWithBaseline"],
+        json!({
+            "baselineVersion": "codex-cli 0.149.0",
+            "retainedSelectedSchemaPaths": 66,
+            "addedSelectedSchemaPaths": [
+                "v2/ThreadTurnsListParams.json",
+                "v2/ThreadTurnsListResponse.json"
+            ],
+            "schoolxMethodsAdded": ["thread/turns/list"],
+            "exactUnchangedSelectedSchemas": 45,
+            "exactChangedSelectedSchemas": 23,
+            "structurallyUnchangedSelectedSchemas": 45,
+            "structurallyChangedSelectedSchemas": 23,
+            "numericRepresentationOnlyChanges": 0,
+            "schoolxRequestPropertiesRemoved": [],
+            "schoolxRequestPropertiesAdded": {
+                "thread/fork": ["excludeTurns"],
+                "thread/resume": ["excludeTurns"],
+                "turn/start": ["serviceTierForTurn", "toolOutput", "turnTrigger"]
+            },
+            "schoolxRequestRequiredFieldsChanged": [],
+            "schoolxResponseRequiredFieldsChanged": []
+        })
+    );
+    Ok(())
+}
+
 fn schema_properties(schema: &Value, label: &str) -> Result<BTreeSet<String>, String> {
-    schema
-        .get("properties")
-        .and_then(Value::as_object)
-        .ok_or_else(|| format!("{label} has no object properties"))
-        .map(|properties| properties.keys().cloned().collect())
+    match schema.get("properties") {
+        Some(Value::Object(properties)) => Ok(properties.keys().cloned().collect()),
+        Some(_) => Err(format!("{label} properties must be an object")),
+        None => Ok(BTreeSet::new()),
+    }
 }
 
 fn schema_required(schema: &Value, label: &str) -> Result<BTreeSet<String>, String> {
@@ -903,11 +978,208 @@ fn codex_0_149_schema_delta_preserves_schoolx_requests_and_freezes_parser_additi
     Ok(())
 }
 
+#[test]
+fn codex_0_151_schema_delta_preserves_schoolx_requests_and_parser_contracts() -> Result<(), String>
+{
+    let baseline_manifest = fixture(SCHEMA_MANIFEST_0_149)?;
+    let next_manifest = fixture(SCHEMA_MANIFEST_0_151)?;
+    let mut expected_methods = baseline_manifest["methods"]
+        .as_object()
+        .cloned()
+        .ok_or_else(|| "Codex 0.149 manifest has no method map".to_string())?;
+    expected_methods.insert(
+        "thread/turns/list".to_string(),
+        json!([
+            "v2/ThreadTurnsListParams.json",
+            "v2/ThreadTurnsListResponse.json"
+        ]),
+    );
+    assert_eq!(next_manifest["methods"], Value::Object(expected_methods));
+    assert_eq!(
+        baseline_manifest["serverRequests"],
+        next_manifest["serverRequests"]
+    );
+
+    let baseline = selected_schema_artifact(SELECTED_SCHEMA_ARCHIVE_0_149)?;
+    let next = selected_schema_artifact(SELECTED_SCHEMA_ARCHIVE_0_151)?;
+    let added_paths = next
+        .keys()
+        .filter(|path| !baseline.contains_key(*path))
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        added_paths,
+        BTreeSet::from([
+            "v2/ThreadTurnsListParams.json".to_string(),
+            "v2/ThreadTurnsListResponse.json".to_string()
+        ])
+    );
+    assert!(baseline.keys().all(|path| next.contains_key(path)));
+    let exact_unchanged = baseline
+        .iter()
+        .filter(|(path, (_, bytes))| next.get(*path).is_some_and(|(_, next)| next == bytes))
+        .count();
+    let structurally_unchanged = baseline
+        .iter()
+        .filter(|(path, (schema, _))| {
+            next.get(*path)
+                .is_some_and(|(next_schema, _)| schemas_are_structurally_equal(schema, next_schema))
+        })
+        .count();
+    assert_eq!(exact_unchanged, 45);
+    assert_eq!(baseline.len().saturating_sub(exact_unchanged), 21);
+    assert_eq!(structurally_unchanged, 45);
+    assert_eq!(baseline.len().saturating_sub(structurally_unchanged), 21);
+
+    for schemas in baseline_manifest["methods"]
+        .as_object()
+        .ok_or_else(|| "Codex 0.151 manifest has no method map".to_string())?
+        .values()
+    {
+        let method_schemas = schemas
+            .as_array()
+            .ok_or_else(|| "Codex method schema map entry is not an array".to_string())?;
+        let request_path = method_schemas
+            .first()
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Codex method has no request schema".to_string())?;
+        let response_path = method_schemas
+            .get(1)
+            .and_then(Value::as_str)
+            .ok_or_else(|| "Codex method has no response schema".to_string())?;
+        let old_request = &baseline
+            .get(request_path)
+            .ok_or_else(|| format!("Codex 0.149 is missing {request_path}"))?
+            .0;
+        let new_request = &next
+            .get(request_path)
+            .ok_or_else(|| format!("Codex 0.151 is missing {request_path}"))?
+            .0;
+        let removed = schema_properties(old_request, request_path)?
+            .difference(&schema_properties(new_request, request_path)?)
+            .cloned()
+            .collect::<Vec<_>>();
+        assert!(
+            removed.is_empty(),
+            "request properties removed from {request_path}: {removed:?}"
+        );
+        assert_eq!(
+            schema_required(old_request, request_path)?,
+            schema_required(new_request, request_path)?,
+            "request required fields drifted for {request_path}"
+        );
+
+        let old_response = &baseline
+            .get(response_path)
+            .ok_or_else(|| format!("Codex 0.149 is missing {response_path}"))?
+            .0;
+        let new_response = &next
+            .get(response_path)
+            .ok_or_else(|| format!("Codex 0.151 is missing {response_path}"))?
+            .0;
+        assert_eq!(
+            schema_required(old_response, response_path)?,
+            schema_required(new_response, response_path)?,
+            "response required fields drifted for {response_path}"
+        );
+    }
+
+    let turns_params = &next
+        .get("v2/ThreadTurnsListParams.json")
+        .ok_or_else(|| "Codex 0.151 turns-list params schema is missing".to_string())?
+        .0;
+    assert_eq!(
+        schema_required(turns_params, "Codex 0.151 turns-list params")?,
+        BTreeSet::from(["threadId".to_string()])
+    );
+    assert_eq!(
+        schema_properties(turns_params, "Codex 0.151 turns-list params")?,
+        BTreeSet::from([
+            "cursor".to_string(),
+            "itemsView".to_string(),
+            "limit".to_string(),
+            "sortDirection".to_string(),
+            "threadId".to_string()
+        ])
+    );
+    let items_view = schema_definition(&next, "v2/ThreadTurnsListParams.json", "TurnItemsView")?;
+    assert!(items_view.to_string().contains("\"full\""));
+    let turns_response = &next
+        .get("v2/ThreadTurnsListResponse.json")
+        .ok_or_else(|| "Codex 0.151 turns-list response schema is missing".to_string())?
+        .0;
+    assert_eq!(
+        schema_required(turns_response, "Codex 0.151 turns-list response")?,
+        BTreeSet::from(["data".to_string()])
+    );
+
+    assert_eq!(
+        baseline
+            .get("v2/ModelListResponse.json")
+            .map(|(_, bytes)| bytes),
+        next.get("v2/ModelListResponse.json")
+            .map(|(_, bytes)| bytes),
+        "the strict model parser schema must remain exact"
+    );
+    let old_thread = schema_definition(&baseline, "v2/ThreadReadResponse.json", "Thread")?;
+    let new_thread = schema_definition(&next, "v2/ThreadReadResponse.json", "Thread")?;
+    assert_eq!(
+        schema_required(old_thread, "Codex 0.149 Thread")?,
+        schema_required(new_thread, "Codex 0.151 Thread")?
+    );
+    let mut expected_thread_properties = schema_properties(old_thread, "Codex 0.149 Thread")?;
+    expected_thread_properties.insert("historyMode".to_string());
+    assert_eq!(
+        schema_properties(new_thread, "Codex 0.151 Thread")?,
+        expected_thread_properties,
+        "Codex 0.151 Thread must only add historyMode"
+    );
+    for definition in ["SessionSource", "ThreadStatus", "TurnStatus"] {
+        assert_eq!(
+            schema_definition(&baseline, "v2/ThreadReadResponse.json", definition)?,
+            schema_definition(&next, "v2/ThreadReadResponse.json", definition)?,
+            "strict lifecycle definition drifted: {definition}"
+        );
+    }
+
+    let old_approval = &baseline
+        .get("CommandExecutionRequestApprovalParams.json")
+        .ok_or_else(|| "Codex 0.149 command approval schema is missing".to_string())?
+        .0;
+    let new_approval = &next
+        .get("CommandExecutionRequestApprovalParams.json")
+        .ok_or_else(|| "Codex 0.151 command approval schema is missing".to_string())?
+        .0;
+    assert_eq!(
+        schema_required(old_approval, "Codex 0.149 command approval")?,
+        schema_required(new_approval, "Codex 0.151 command approval")?
+    );
+    let mut expected_approval_properties =
+        schema_properties(old_approval, "Codex 0.149 command approval")?;
+    expected_approval_properties.insert("kind".to_string());
+    assert_eq!(
+        schema_properties(new_approval, "Codex 0.151 command approval")?,
+        expected_approval_properties,
+        "Codex 0.151 command approval must only add kind"
+    );
+    Ok(())
+}
+
 fn assert_selected_schema_artifact_recomputes_every_manifest_hash(
     schema_manifest: &str,
     selected_schema_archive: &str,
 ) -> Result<(), String> {
     let manifest = fixture(schema_manifest)?;
+    if let Some(expected_archive_hash) = manifest["source"]
+        .get("selectedSchemaArtifactSha256")
+        .and_then(Value::as_str)
+    {
+        assert_eq!(
+            sha256_hex(&selected_schema_archive_bytes(selected_schema_archive)?),
+            expected_archive_hash,
+            "compressed selected schema artifact drifted"
+        );
+    }
     let archived = selected_schema_artifact(selected_schema_archive)?;
     let entries = manifest["schemas"]
         .as_array()
@@ -922,6 +1194,26 @@ fn assert_selected_schema_artifact_recomputes_every_manifest_hash(
         archived.keys().cloned().collect::<BTreeSet<_>>(),
         expected_paths
     );
+
+    let schema_shapes = manifest["schemaShapes"]
+        .as_object()
+        .ok_or_else(|| "manifest schemaShapes must be an object".to_string())?;
+    for (path, shape) in schema_shapes {
+        let schema = &archived
+            .get(path)
+            .ok_or_else(|| format!("selected schema artifact is missing shaped schema {path}"))?
+            .0;
+        assert_eq!(
+            string_set(&shape["required"], path)?,
+            schema_required(schema, path)?,
+            "manifest required shape drifted from archived schema: {path}"
+        );
+        assert_eq!(
+            string_set(&shape["properties"], path)?,
+            schema_properties(schema, path)?,
+            "manifest property shape drifted from archived schema: {path}"
+        );
+    }
 
     let dispatch_schemas = string_set(&manifest["dispatchSchemas"], "dispatch schemas")?;
     let mut aggregate = String::new();
@@ -986,6 +1278,14 @@ fn codex_0_149_selected_schema_artifact_recomputes_every_manifest_hash() -> Resu
     )
 }
 
+#[test]
+fn codex_0_151_selected_schema_artifact_recomputes_every_manifest_hash() -> Result<(), String> {
+    assert_selected_schema_artifact_recomputes_every_manifest_hash(
+        SCHEMA_MANIFEST_0_151,
+        SELECTED_SCHEMA_ARCHIVE_0_151,
+    )
+}
+
 fn assert_wire_fixture_conforms_to_the_curated_schema_shapes(
     schema_manifest: &str,
     wire_fixture: &str,
@@ -1023,7 +1323,7 @@ fn assert_wire_fixture_conforms_to_the_curated_schema_shapes(
         "initialized"
     );
 
-    let method_fixtures = [
+    let mut method_fixtures = vec![
         ("model/list", "modelList"),
         ("thread/archive", "threadArchive"),
         ("thread/fork", "threadFork"),
@@ -1038,6 +1338,9 @@ fn assert_wire_fixture_conforms_to_the_curated_schema_shapes(
         ("turn/steer", "turnSteer"),
         ("turn/interrupt", "turnInterrupt"),
     ];
+    if manifest["methods"].get("thread/turns/list").is_some() {
+        method_fixtures.push(("thread/turns/list", "threadTurnsList"));
+    }
     for (method, fixture_key) in method_fixtures {
         assert_eq!(wire[fixture_key]["method"], method);
         let schemas = manifest["methods"][method]
@@ -1176,10 +1479,14 @@ fn assert_wire_fixture_conforms_to_the_curated_schema_shapes(
             "Codex thread open response",
         )?;
     }
+    let resumed_turn = wire
+        .get("threadTurnsList")
+        .map(|turns_list| &turns_list["result"]["data"][0])
+        .unwrap_or(&wire["threadResume"]["result"]["thread"]["turns"][0]);
     for turn in [
         &wire["turnStart"]["result"]["turn"],
         &wire["threadFork"]["result"]["thread"]["turns"][0],
-        &wire["threadResume"]["result"]["thread"]["turns"][0],
+        resumed_turn,
     ] {
         assert_required_fields(turn, &facts["turnRequired"], "Codex Turn")?;
         let status = turn["status"]
@@ -1193,7 +1500,7 @@ fn assert_wire_fixture_conforms_to_the_curated_schema_shapes(
     }
     for item in [
         &wire["threadFork"]["result"]["thread"]["turns"][0]["items"][0],
-        &wire["threadResume"]["result"]["thread"]["turns"][0]["items"][0],
+        &resumed_turn["items"][0],
     ] {
         assert_required_fields(
             item,
@@ -1219,6 +1526,15 @@ fn codex_0_149_wire_fixture_conforms_to_the_curated_schema_shapes() -> Result<()
         SCHEMA_MANIFEST_0_149,
         WIRE_FIXTURE_0_149,
         SELECTED_SCHEMA_ARCHIVE_0_149,
+    )
+}
+
+#[test]
+fn codex_0_151_wire_fixture_conforms_to_the_curated_schema_shapes() -> Result<(), String> {
+    assert_wire_fixture_conforms_to_the_curated_schema_shapes(
+        SCHEMA_MANIFEST_0_151,
+        WIRE_FIXTURE_0_151,
+        SELECTED_SCHEMA_ARCHIVE_0_151,
     )
 }
 
@@ -2315,7 +2631,12 @@ fn assert_native_codex_builders_and_parsers_match_wire_fixture(
         forked.thread_source.as_deref(),
         Some("schoolx-code/89c210f4-7a5b-4bd5-a98c-322386a8a2e9")
     );
-    assert_eq!(forked.session_source, Some(json!("appServer")));
+    assert_eq!(
+        forked.session_source,
+        wire["threadFork"]["result"]["thread"]
+            .get("source")
+            .cloned()
+    );
     assert_eq!(forked.thread.turns[0].id, "past-turn");
 
     assert_eq!(
@@ -2365,14 +2686,45 @@ fn assert_native_codex_builders_and_parsers_match_wire_fixture(
     );
 
     let resume: CodeThreadResumeInput = decode(&inputs["threadResume"])?;
-    assert_eq!(
-        resume.rpc_params("/native/stored-root")?,
-        wire["threadResume"]["params"]
-    );
+    let mut resume_params = resume.rpc_params("/native/stored-root")?;
+    if wire["threadResume"]["params"]["excludeTurns"] == true {
+        enable_paginated_thread_resume(&mut resume_params)?;
+    }
+    assert_eq!(resume_params, wire["threadResume"]["params"]);
     let resumed = parse_thread_open(wire["threadResume"]["result"].clone())?;
-    assert_eq!(resumed.thread.turns[0].id, "past-turn");
     assert_eq!(resumed.model, "gpt-5.2-codex");
     assert_eq!(resumed.reasoning_effort.as_deref(), Some("medium"));
+    if let Some(turns_list) = wire.get("threadTurnsList") {
+        assert!(resumed.thread.turns.is_empty());
+        assert_eq!(resumed.history_mode.as_deref(), Some("paginated"));
+        assert_eq!(
+            resumed.items_backwards_cursor.as_deref(),
+            Some("items-backwards-0-151")
+        );
+        assert_eq!(
+            resumed.turns_backwards_cursor.as_deref(),
+            Some("turns-backwards-0-151")
+        );
+        assert_eq!(
+            thread_turns_list_params(
+                "thread-1",
+                resumed
+                    .turns_backwards_cursor
+                    .as_deref()
+                    .ok_or_else(|| "Codex 0.151 fixture omitted turns cursor".to_string())?
+            )?,
+            turns_list["params"]
+        );
+        let page = parse_thread_turns_list(turns_list["result"].clone())?;
+        assert_eq!(page.data[0].id, "past-turn");
+        assert_eq!(page.data[0].items[0]["id"], "item-restored");
+        assert_eq!(page.next_cursor, None);
+    } else {
+        assert_eq!(resumed.thread.turns[0].id, "past-turn");
+        assert_eq!(resumed.history_mode, None);
+        assert_eq!(resumed.items_backwards_cursor, None);
+        assert_eq!(resumed.turns_backwards_cursor, None);
+    }
 
     let turn: CodeTurnStartInput = decode(&inputs["turnStart"])?;
     assert_eq!(
@@ -2438,6 +2790,11 @@ fn native_codex_builders_and_parsers_match_the_0_145_wire_fixture() -> Result<()
 #[test]
 fn native_codex_builders_and_parsers_match_the_0_149_wire_fixture() -> Result<(), String> {
     assert_native_codex_builders_and_parsers_match_wire_fixture(WIRE_FIXTURE_0_149)
+}
+
+#[test]
+fn native_codex_builders_and_parsers_match_the_0_151_wire_fixture() -> Result<(), String> {
+    assert_native_codex_builders_and_parsers_match_wire_fixture(WIRE_FIXTURE_0_151)
 }
 
 fn assert_supported_notifications_and_approvals_match_wire_fixture(
@@ -2512,7 +2869,12 @@ fn all_supported_notifications_and_approvals_match_0_149_wire_fixtures() -> Resu
 }
 
 #[test]
-#[ignore = "manual audit: requires an exact audited Codex 0.145.0 or 0.149.0 CLI"]
+fn all_supported_notifications_and_approvals_match_0_151_wire_fixtures() -> Result<(), String> {
+    assert_supported_notifications_and_approvals_match_wire_fixture(WIRE_FIXTURE_0_151)
+}
+
+#[test]
+#[ignore = "manual audit: requires an exact audited Codex 0.145.0, 0.149.0, or 0.151.0 CLI"]
 fn refresh_schema_snapshot_is_manual_only() -> Result<(), String> {
     let executable = crate::managed_agents::resolve_command("codex")
         .ok_or_else(|| "Codex CLI is not installed".to_string())?;
@@ -2527,10 +2889,9 @@ fn refresh_schema_snapshot_is_manual_only() -> Result<(), String> {
     let manifest = match version.trim() {
         "codex-cli 0.145.0" => fixture(SCHEMA_MANIFEST)?,
         "codex-cli 0.149.0" => fixture(SCHEMA_MANIFEST_0_149)?,
+        "codex-cli 0.151.0" => fixture(SCHEMA_MANIFEST_0_151)?,
         _ => {
-            return Err(
-                "schema refresh requires exact codex-cli 0.145.0 or codex-cli 0.149.0".to_string(),
-            )
+            return Err("schema refresh requires exact codex-cli 0.145.0, codex-cli 0.149.0, or codex-cli 0.151.0".to_string())
         }
     };
 

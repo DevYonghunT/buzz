@@ -524,7 +524,7 @@ fn validate_fork_candidate(
     if candidate.thread_source.as_deref() != Some(expected_source.as_str()) {
         return Err("Codex fork child did not retain the exact preparation source".to_string());
     }
-    validate_app_server_source(candidate.session_source.as_ref())
+    validate_fork_session_source(candidate.session_source.as_ref())
 }
 
 fn validate_fork_opened(
@@ -546,7 +546,7 @@ fn validate_fork_opened(
     if opened.thread_source.as_deref() != Some(expected_source.as_str()) {
         return Err("Codex fork response did not retain the preparation source".to_string());
     }
-    validate_app_server_source(opened.session_source.as_ref())
+    validate_fork_session_source(opened.session_source.as_ref())
 }
 
 fn validate_fork_thread(
@@ -591,11 +591,17 @@ fn validate_fork_thread(
     Ok(())
 }
 
-fn validate_app_server_source(source: Option<&Value>) -> Result<(), String> {
-    if source == Some(&Value::String("appServer".to_string())) {
+fn validate_fork_session_source(source: Option<&Value>) -> Result<(), String> {
+    if source
+        .and_then(Value::as_str)
+        .is_some_and(|source| matches!(source, "appServer" | "vscode"))
+    {
         Ok(())
     } else {
-        Err("Codex fork child did not inherit the SchoolX appServer source".to_string())
+        Err(
+            "Codex fork child did not inherit an audited SchoolX app-server source (appServer or vscode)"
+                .to_string(),
+        )
     }
 }
 

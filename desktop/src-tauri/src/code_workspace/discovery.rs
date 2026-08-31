@@ -8,9 +8,9 @@ use serde::Serialize;
 const VERSION_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 const VERSION_OUTPUT_CAP: u64 = 64 * 1024;
 const CODEX_NOT_FOUND_ERROR: &str = "Codex CLI was not found on this computer";
-const SUPPORTED_CODEX_VERSION_PREFIXES: [&str; 2] = ["0.145.", "0.149."];
+const SUPPORTED_CODEX_VERSION_PREFIXES: [&str; 3] = ["0.145.", "0.149.", "0.151."];
 const SUPPORTED_CODEX_VERSION_REQUIREMENT: &str =
-    "codex-cli 0.145.<numeric patch> or codex-cli 0.149.<numeric patch>";
+    "codex-cli 0.145.<numeric patch>, codex-cli 0.149.<numeric patch>, or codex-cli 0.151.<numeric patch>";
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -84,6 +84,22 @@ pub(crate) fn ensure_supported_codex_version(probe: &CodeRuntimeProbe) -> Result
             "unsupported Codex CLI version; SchoolX Code currently requires {SUPPORTED_CODEX_VERSION_REQUIREMENT} without a prerelease or build suffix"
         ))
     }
+}
+
+/// Whether this exact admitted runtime generation uses the 0.151 paginated
+/// thread-history contract audited by SchoolX.
+pub(crate) fn uses_paginated_thread_history(probe: Option<&CodeRuntimeProbe>) -> bool {
+    probe
+        .and_then(|probe| probe.version.as_deref())
+        .is_some_and(|version| {
+            version
+                .strip_prefix("codex-cli 0.151.")
+                .is_some_and(|patch| {
+                    !patch.is_empty()
+                        && patch.bytes().all(|byte| byte.is_ascii_digit())
+                        && (patch.len() == 1 || !patch.starts_with('0'))
+                })
+        })
 }
 
 fn is_supported_codex_version(value: &str) -> bool {
@@ -250,6 +266,31 @@ mod tests {
         );
     }
 
+    #[test]
+    fn enables_paginated_history_only_for_exact_0_151_numeric_patches() {
+        let probe = |version: &str| CodeRuntimeProbe {
+            available: true,
+            executable: Some("/codex".to_string()),
+            version: Some(version.to_string()),
+            error: None,
+        };
+        assert!(uses_paginated_thread_history(Some(&probe(
+            "codex-cli 0.151.0"
+        ))));
+        assert!(uses_paginated_thread_history(Some(&probe(
+            "codex-cli 0.151.12"
+        ))));
+        for version in [
+            "codex-cli 0.149.1",
+            "codex-cli 0.151.01",
+            "codex-cli 0.151.0-beta.1",
+            "codex-cli 0.152.0",
+        ] {
+            assert!(!uses_paginated_thread_history(Some(&probe(version))));
+        }
+        assert!(!uses_paginated_thread_history(None));
+    }
+
     #[cfg(unix)]
     #[test]
     fn redacts_child_supplied_probe_error_and_version_text() -> Result<(), String> {
@@ -331,6 +372,8 @@ mod tests {
             "codex-cli 0.145.9",
             "codex-cli 0.149.0",
             "codex-cli 0.149.12",
+            "codex-cli 0.151.0",
+            "codex-cli 0.151.12",
         ] {
             assert!(
                 is_supported_codex_version(version),
@@ -344,6 +387,7 @@ mod tests {
             "codex-cli 0.147.0",
             "codex-cli 0.148.0",
             "codex-cli 0.150.0",
+            "codex-cli 0.152.0",
             "codex-cli 1.145.0",
             "codex-cli 0.145",
             "codex-cli 0.145.x",
@@ -363,6 +407,12 @@ mod tests {
             "codex-cli 0.149.0-test",
             "codex-cli 0.149.12+fixture.1",
             "codex-cli 0.149.0 trailing",
+            "codex-cli 0.151",
+            "codex-cli 0.151.x",
+            "codex-cli 0.151.00",
+            "codex-cli 0.151.0-test",
+            "codex-cli 0.151.12+fixture.1",
+            "codex-cli 0.151.0 trailing",
             "codex 0.145.0",
             "codex-cli v0.145.0",
         ] {

@@ -14,7 +14,9 @@ use serde_json::{json, Value};
 use super::approvals::{
     CodeApprovalResponseInput, PendingApprovalAdmissionGuard, PendingApprovalStore,
 };
-use super::discovery::{ensure_supported_codex_version, probe_codex, CodeRuntimeProbe};
+use super::discovery::{
+    ensure_supported_codex_version, probe_codex, uses_paginated_thread_history, CodeRuntimeProbe,
+};
 use super::jsonrpc::{self, IncomingMessage};
 use super::model_catalog::{collect_model_catalog, turn_selection, CodeModelCatalogSnapshot};
 use super::paths::canonical_workspace_root;
@@ -45,6 +47,8 @@ const MAX_TOPOLOGY_CHANGES: usize = 4_096;
 const STDERR_TAIL_BYTES: usize = 64 * 1024;
 const MAX_RECOVERY_THREADS: usize = 4_096;
 const MAX_RECOVERY_PAGES: usize = 64;
+const MAX_RESUME_HISTORY_TURNS: usize = 4_096;
+const MAX_RESUME_HISTORY_PAGES: usize = 64;
 #[cfg(unix)]
 const PROCESS_GROUP_TERM_TIMEOUT: Duration = Duration::from_secs(1);
 #[cfg(unix)]
@@ -609,10 +613,11 @@ impl EventBridge {
         Ok(())
     }
 
-    fn reconcile_thread_summary(
+    fn reconcile_thread_summary_at_revision(
         &self,
         generation: u64,
         thread: &CodeThreadSummary,
+        expected_activity_revision: u64,
     ) -> Result<(), String> {
         protocol::validate_id("resumed thread", &thread.id)?;
         let status_value = thread
@@ -629,6 +634,14 @@ impl EventBridge {
 
         let mut inner = self.inner.lock().map_err(|error| error.to_string())?;
         ensure_event_generation(&inner, generation)?;
+        let activity_revision = inner
+            .thread_activity_revisions
+            .get(&thread.id)
+            .copied()
+            .unwrap_or_default();
+        if activity_revision != expected_activity_revision {
+            return Err("Codex thread activity changed while resuming history".to_string());
+        }
         if inner.inflight_turn_starts.contains_key(&thread.id) {
             inner.uncertain_turn_threads.insert(thread.id.clone());
             bump_thread_activity(&mut inner, &thread.id);
@@ -1541,18 +1554,30 @@ impl CodeRuntime {
         workspace_root: &str,
     ) -> Result<CodeThreadRpcOpenResult, String> {
         let workspace_root = canonical_workspace_root(workspace_root)?;
-        let params = input.rpc_params(&workspace_root)?;
+        let preflight_generation = self.ready_generation()?;
+        let paginated_history =
+            self.thread_uses_paginated_history_at(preflight_generation, &input.thread_id)?;
+        let mut params = input.rpc_params(&workspace_root)?;
+        if paginated_history {
+            protocol::enable_paginated_thread_resume(&mut params)?;
+        }
         let requirement = input
             .model
             .as_deref()
             .map(CodeModelCatalogRequirement::Model);
-        let (generation, pending) = self
-            .begin_ready_request("thread/resume", params, requirement)
+        let (generation, activity_revision, pending) = self
+            .begin_ready_thread_request(
+                preflight_generation,
+                &input.thread_id,
+                "thread/resume",
+                params,
+                requirement,
+            )
             .map_err(CodeRpcDeliveryError::into_message)?;
         let result = pending
             .wait(REQUEST_TIMEOUT)
             .map_err(CodeRpcDeliveryError::into_message)?;
-        let resumed = match protocol::parse_thread_open(result) {
+        let mut resumed = match protocol::parse_thread_open(result) {
             Ok(resumed) => resumed,
             Err(error) => {
                 let _ = self
@@ -1567,10 +1592,19 @@ impl CodeRuntime {
                 .mark_thread_uncertain(generation, &input.thread_id);
             return Err("Codex returned a different thread while resuming".to_string());
         }
-        if let Err(error) = self
-            .events
-            .reconcile_thread_summary(generation, &resumed.thread)
+        if let Err(error) =
+            self.hydrate_resumed_thread_history(generation, paginated_history, &mut resumed)
         {
+            let _ = self
+                .events
+                .mark_thread_uncertain(generation, &input.thread_id);
+            return Err(error);
+        }
+        if let Err(error) = self.events.reconcile_thread_summary_at_revision(
+            generation,
+            &resumed.thread,
+            activity_revision,
+        ) {
             let _ = self
                 .events
                 .mark_thread_uncertain(generation, &input.thread_id);
@@ -1588,12 +1622,17 @@ impl CodeRuntime {
         checkpoint: CodeThreadLifecycleDirtyCheckpoint,
     ) -> Result<CodeThreadRpcOpenResult, String> {
         let workspace_root = canonical_workspace_root(workspace_root)?;
-        let params = input.rpc_params(&workspace_root)?;
+        let paginated_history =
+            self.thread_uses_paginated_history_at(checkpoint.generation, &input.thread_id)?;
+        let mut params = input.rpc_params(&workspace_root)?;
+        if paginated_history {
+            protocol::enable_paginated_thread_resume(&mut params)?;
+        }
         let requirement = input
             .model
             .as_deref()
             .map(CodeModelCatalogRequirement::Model);
-        let (generation, pending) = self
+        let (generation, activity_revision, pending) = self
             .begin_active_request(
                 &input.thread_id,
                 checkpoint,
@@ -1605,7 +1644,7 @@ impl CodeRuntime {
         let result = pending
             .wait(REQUEST_TIMEOUT)
             .map_err(CodeRpcDeliveryError::into_message)?;
-        let resumed = match protocol::parse_thread_open(result) {
+        let mut resumed = match protocol::parse_thread_open(result) {
             Ok(resumed) => resumed,
             Err(error) => {
                 let _ = self
@@ -1620,10 +1659,19 @@ impl CodeRuntime {
                 .mark_thread_uncertain(generation, &input.thread_id);
             return Err("Codex returned a different thread while resuming".to_string());
         }
-        if let Err(error) = self
-            .events
-            .reconcile_thread_summary(generation, &resumed.thread)
+        if let Err(error) =
+            self.hydrate_resumed_thread_history(generation, paginated_history, &mut resumed)
         {
+            let _ = self
+                .events
+                .mark_thread_uncertain(generation, &input.thread_id);
+            return Err(error);
+        }
+        if let Err(error) = self.events.reconcile_thread_summary_at_revision(
+            generation,
+            &resumed.thread,
+            activity_revision,
+        ) {
             let _ = self
                 .events
                 .mark_thread_uncertain(generation, &input.thread_id);
@@ -1641,18 +1689,23 @@ impl CodeRuntime {
         checkpoint: CodeThreadLifecycleDirtyCheckpoint,
     ) -> Result<CodeThreadRpcOpenResult, String> {
         let workspace_root = canonical_workspace_root(workspace_root)?;
-        let params = input.rpc_params(&workspace_root)?;
+        let paginated_history =
+            self.thread_uses_paginated_history_at(checkpoint.generation, &input.thread_id)?;
+        let mut params = input.rpc_params(&workspace_root)?;
+        if paginated_history {
+            protocol::enable_paginated_thread_resume(&mut params)?;
+        }
         let requirement = input
             .model
             .as_deref()
             .map(CodeModelCatalogRequirement::Model);
-        let (generation, pending) = self
+        let (generation, activity_revision, pending) = self
             .begin_recovery_resume_request(&input.thread_id, checkpoint, params, requirement)
             .map_err(CodeRpcDeliveryError::into_message)?;
         let result = pending
             .wait(REQUEST_TIMEOUT)
             .map_err(CodeRpcDeliveryError::into_message)?;
-        let resumed = match protocol::parse_thread_open(result) {
+        let mut resumed = match protocol::parse_thread_open(result) {
             Ok(resumed) => resumed,
             Err(error) => {
                 let _ = self
@@ -1667,16 +1720,141 @@ impl CodeRuntime {
                 .mark_thread_uncertain(generation, &input.thread_id);
             return Err("Codex returned a different thread while resuming".to_string());
         }
-        if let Err(error) = self
-            .events
-            .reconcile_thread_summary(generation, &resumed.thread)
+        if let Err(error) =
+            self.hydrate_resumed_thread_history(generation, paginated_history, &mut resumed)
         {
             let _ = self
                 .events
                 .mark_thread_uncertain(generation, &input.thread_id);
             return Err(error);
         }
+        if let Err(error) = self.events.reconcile_thread_summary_at_revision(
+            generation,
+            &resumed.thread,
+            activity_revision,
+        ) {
+            let _ = self
+                .events
+                .mark_thread_uncertain(generation, &input.thread_id);
+            return Err(error);
+        }
         Ok(resumed)
+    }
+
+    /// Hydrate the bounded 0.151 paginated history without changing the
+    /// 0.145/0.149 resume path. The backwards cursor includes its anchor turn,
+    /// so the paged copy wins and is merged with any newer turns returned by
+    /// `thread/resume`.
+    fn hydrate_resumed_thread_history(
+        &self,
+        generation: u64,
+        paginated_history: bool,
+        resumed: &mut CodeThreadRpcOpenResult,
+    ) -> Result<(), String> {
+        if (resumed.history_mode.as_deref() == Some("paginated")) != paginated_history {
+            return Err("Codex thread history mode changed during resume".to_string());
+        }
+        if !paginated_history {
+            if resumed.items_backwards_cursor.is_some() || resumed.turns_backwards_cursor.is_some()
+            {
+                return Err("Codex legacy resume unexpectedly returned history cursors".to_string());
+            }
+            return Ok(());
+        }
+        let Some(mut cursor) = resumed.turns_backwards_cursor.clone() else {
+            if resumed.items_backwards_cursor.is_some() {
+                return Err("Codex paginated resume omitted the turns history cursor".to_string());
+            }
+            return Ok(());
+        };
+        if resumed.history_mode.as_deref() != Some("paginated") {
+            return Err("Codex returned a turns cursor outside paginated history mode".to_string());
+        }
+
+        let mut seen_cursors = HashSet::new();
+        let mut seen_turn_ids = HashSet::new();
+        let mut descending = Vec::new();
+        let mut exhausted = false;
+        for _ in 0..MAX_RESUME_HISTORY_PAGES {
+            if !seen_cursors.insert(cursor.clone()) {
+                return Err("Codex resume history pagination repeated a cursor".to_string());
+            }
+            let params = protocol::thread_turns_list_params(&resumed.thread.id, &cursor)?;
+            let page = protocol::parse_thread_turns_list(self.request_ready_at_generation(
+                generation,
+                "thread/turns/list",
+                params,
+            )?)?;
+            for turn in page.data {
+                if !seen_turn_ids.insert(turn.id.clone()) {
+                    return Err("Codex resume history pagination repeated a turn id".to_string());
+                }
+                descending.push(turn);
+                if descending.len() > MAX_RESUME_HISTORY_TURNS {
+                    return Err(format!(
+                        "Codex resume history exceeded the {MAX_RESUME_HISTORY_TURNS}-turn safety limit"
+                    ));
+                }
+            }
+            match page.next_cursor {
+                Some(next_cursor) => cursor = next_cursor,
+                None => {
+                    exhausted = true;
+                    break;
+                }
+            }
+        }
+        if !exhausted {
+            return Err(format!(
+                "Codex resume history exceeded the {MAX_RESUME_HISTORY_PAGES}-page safety limit"
+            ));
+        }
+
+        descending.reverse();
+        let paged_ids = descending
+            .iter()
+            .map(|turn| turn.id.clone())
+            .collect::<HashSet<_>>();
+        let mut initial_ids = HashSet::new();
+        for turn in resumed.thread.turns.drain(..) {
+            if !initial_ids.insert(turn.id.clone()) {
+                return Err("Codex resume response repeated a turn id".to_string());
+            }
+            if !paged_ids.contains(&turn.id) {
+                descending.push(turn);
+            }
+        }
+        if descending.len() > MAX_RESUME_HISTORY_TURNS {
+            return Err(format!(
+                "Codex resume history exceeded the {MAX_RESUME_HISTORY_TURNS}-turn safety limit"
+            ));
+        }
+        resumed.thread.turns = descending;
+        resumed.items_backwards_cursor = None;
+        resumed.turns_backwards_cursor = None;
+        Ok(())
+    }
+
+    fn thread_uses_paginated_history_at(
+        &self,
+        generation: u64,
+        thread_id: &str,
+    ) -> Result<bool, String> {
+        protocol::validate_id("history preflight thread", thread_id)?;
+        let supports_paginated_history = {
+            let mut runtime = self.inner.lock().map_err(|error| error.to_string())?;
+            refresh_process_health(&mut runtime, &self.approvals, &self.events);
+            if runtime.phase != CodeRuntimePhase::Ready || runtime.generation != generation {
+                return Err("Codex app-server runtime generation changed".to_string());
+            }
+            uses_paginated_thread_history(runtime.probe.as_ref())
+        };
+        if !supports_paginated_history {
+            return Ok(false);
+        }
+        let params = protocol::thread_read_params(thread_id)?;
+        let result = self.request_ready_at_generation(generation, "thread/read", params)?;
+        Ok(protocol::parse_thread_history_mode(result, thread_id)?.as_deref() == Some("paginated"))
     }
 
     pub(crate) fn thread_read(&self, thread_id: &str) -> Result<CodeThreadSummary, String> {
@@ -2138,7 +2316,7 @@ impl CodeRuntime {
         checkpoint: CodeThreadLifecycleDirtyCheckpoint,
     ) -> Result<CodeThreadSummary, String> {
         let params = input.rpc_params()?;
-        let (_, pending) = self
+        let (_, _, pending) = self
             .begin_active_request(
                 &input.thread_id,
                 checkpoint,
@@ -2487,7 +2665,7 @@ impl CodeRuntime {
         checkpoint: CodeThreadLifecycleDirtyCheckpoint,
     ) -> Result<CodeTurnSummary, String> {
         let params = input.rpc_params()?;
-        let (_, pending) = self
+        let (_, _, pending) = self
             .begin_active_request(&input.thread_id, checkpoint, "turn/steer", params, None)
             .map_err(CodeRpcDeliveryError::into_message)?;
         let result = pending
@@ -2665,7 +2843,7 @@ impl CodeRuntime {
         method: &str,
         params: Value,
         model_requirement: Option<CodeModelCatalogRequirement<'_>>,
-    ) -> Result<(u64, PendingRuntimeRequest), CodeRpcDeliveryError> {
+    ) -> Result<(u64, u64, PendingRuntimeRequest), CodeRpcDeliveryError> {
         protocol::validate_id("active-only request thread", thread_id)
             .map_err(CodeRpcDeliveryError::NotSent)?;
         let mut runtime = self
@@ -2708,8 +2886,13 @@ impl CodeRuntime {
                     .to_string(),
             ));
         }
+        let activity_revision = events
+            .thread_activity_revisions
+            .get(thread_id)
+            .copied()
+            .unwrap_or_default();
         let pending = process.begin_request_with_delivery(method, params)?;
-        Ok((checkpoint.generation, pending))
+        Ok((checkpoint.generation, activity_revision, pending))
     }
 
     fn begin_fork_request(
@@ -2799,7 +2982,7 @@ impl CodeRuntime {
         checkpoint: CodeThreadLifecycleDirtyCheckpoint,
         params: Value,
         model_requirement: Option<CodeModelCatalogRequirement<'_>>,
-    ) -> Result<(u64, PendingRuntimeRequest), CodeRpcDeliveryError> {
+    ) -> Result<(u64, u64, PendingRuntimeRequest), CodeRpcDeliveryError> {
         protocol::validate_id("recovery resume thread", thread_id)
             .map_err(CodeRpcDeliveryError::NotSent)?;
         let mut runtime = self
@@ -2838,8 +3021,60 @@ impl CodeRuntime {
         .map_err(CodeRpcDeliveryError::NotSent)?;
         validate_new_thread_lifecycle_locked(&events, thread_id)
             .map_err(CodeRpcDeliveryError::NotSent)?;
+        let activity_revision = events
+            .thread_activity_revisions
+            .get(thread_id)
+            .copied()
+            .unwrap_or_default();
         let pending = process.begin_request_with_delivery("thread/resume", params)?;
-        Ok((checkpoint.generation, pending))
+        Ok((checkpoint.generation, activity_revision, pending))
+    }
+
+    #[cfg(test)]
+    fn begin_ready_thread_request(
+        &self,
+        expected_generation: u64,
+        thread_id: &str,
+        method: &str,
+        params: Value,
+        model_requirement: Option<CodeModelCatalogRequirement<'_>>,
+    ) -> Result<(u64, u64, PendingRuntimeRequest), CodeRpcDeliveryError> {
+        protocol::validate_id("ready thread request", thread_id)
+            .map_err(CodeRpcDeliveryError::NotSent)?;
+        let mut runtime = self
+            .inner
+            .lock()
+            .map_err(|error| CodeRpcDeliveryError::NotSent(error.to_string()))?;
+        refresh_process_health(&mut runtime, &self.approvals, &self.events);
+        if runtime.phase != CodeRuntimePhase::Ready || runtime.generation != expected_generation {
+            return Err(CodeRpcDeliveryError::NotSent(
+                "Codex app-server is not ready".to_string(),
+            ));
+        }
+        let generation = runtime.generation;
+        let process = runtime.process.as_ref().ok_or_else(|| {
+            CodeRpcDeliveryError::NotSent("Codex app-server is not running".to_string())
+        })?;
+        if let Some(requirement) = model_requirement {
+            let catalog = collect_model_catalog_from_process(generation, process)
+                .map_err(CodeRpcDeliveryError::NotSent)?;
+            requirement
+                .validate(&catalog)
+                .map_err(CodeRpcDeliveryError::NotSent)?;
+        }
+        let events = self
+            .events
+            .inner
+            .lock()
+            .map_err(|error| CodeRpcDeliveryError::NotSent(error.to_string()))?;
+        ensure_event_generation(&events, generation).map_err(CodeRpcDeliveryError::NotSent)?;
+        let activity_revision = events
+            .thread_activity_revisions
+            .get(thread_id)
+            .copied()
+            .unwrap_or_default();
+        let pending = process.begin_request_with_delivery(method, params)?;
+        Ok((generation, activity_revision, pending))
     }
 
     fn begin_ready_request(
@@ -4153,6 +4388,30 @@ while IFS= read -r line; do :; done
 
     #[cfg(unix)]
     #[test]
+    fn starts_an_audited_codex_0_151_app_server() -> Result<(), String> {
+        let (_directory, executable) = fake_codex(
+            r#"#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "codex-cli 0.151.0"
+  exit 0
+fi
+IFS= read -r request
+printf '%s\n' '{"id":1,"result":{"userAgent":"codex-test","codexHome":"/tmp/codex-home","platformFamily":"unix","platformOs":"macos"}}'
+IFS= read -r initialized
+while IFS= read -r line; do :; done
+"#,
+        )?;
+        let runtime = CodeRuntime::with_executable(executable);
+
+        let ready = runtime.start(noop_emitter())?;
+        assert_eq!(ready.phase, CodeRuntimePhase::Ready);
+        assert_eq!(ready.version.as_deref(), Some("codex-cli 0.151.0"));
+        runtime.stop()?;
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn failed_stop_retains_process_and_blocks_restart_until_verified_teardown() -> Result<(), String>
     {
         let (_directory, executable) = fake_codex(
@@ -4466,7 +4725,7 @@ exit 1
             .start(noop_emitter())
             .expect_err("unsupported Codex must not start");
         assert!(error.contains(
-            "requires codex-cli 0.145.<numeric patch> or codex-cli 0.149.<numeric patch>"
+            "requires codex-cli 0.145.<numeric patch>, codex-cli 0.149.<numeric patch>, or codex-cli 0.151.<numeric patch>"
         ));
         let status = runtime.status()?;
         assert_eq!(status.phase, CodeRuntimePhase::Failed);
@@ -5909,11 +6168,71 @@ done
 
     #[cfg(unix)]
     #[test]
+    fn codex_0_151_legacy_thread_resume_preserves_full_history_without_exclusion(
+    ) -> Result<(), String> {
+        let (_directory, executable) = fake_codex(
+            r#"#!/bin/sh
+if [ "$1" = "--version" ]; then
+  echo "codex-cli 0.151.0"
+  exit 0
+fi
+IFS= read -r initialize
+printf '%s\n' '{"id":1,"result":{"userAgent":"codex-test","codexHome":"/tmp/codex-home","platformFamily":"unix","platformOs":"macos"}}'
+IFS= read -r initialized
+while IFS= read -r line; do
+  printf '%s\n' "$line" >> "$0.requests"
+  request_id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"thread/read"'*)
+      printf '%s\n' "{\"id\":$request_id,\"result\":{\"thread\":{\"id\":\"thread-legacy\",\"historyMode\":\"legacy\"}}}"
+      ;;
+    *'"method":"thread/resume"'*)
+      case "$line" in
+        *'"excludeTurns"'*) printf '%s\n' "{\"id\":$request_id,\"error\":{\"code\":-32602,\"message\":\"legacy resume must retain turns\"}}"; continue ;;
+      esac
+      printf '%s\n' "{\"id\":$request_id,\"result\":{\"thread\":{\"id\":\"thread-legacy\",\"historyMode\":\"legacy\",\"status\":{\"type\":\"idle\"},\"turns\":[{\"id\":\"legacy-turn\",\"status\":\"completed\",\"items\":[{\"type\":\"agentMessage\",\"text\":\"preserved\"}],\"error\":null}]},\"model\":\"gpt-test\",\"instructionSources\":[]}}"
+      ;;
+    *)
+      printf '%s\n' "{\"id\":$request_id,\"error\":{\"code\":-32601,\"message\":\"unexpected method\"}}"
+      ;;
+  esac
+done
+"#,
+        )?;
+        let request_log_executable = executable.clone();
+        let workspace = tempfile::tempdir().map_err(|error| error.to_string())?;
+        let runtime = CodeRuntime::with_executable(executable);
+        runtime.start(noop_emitter())?;
+        let resumed = runtime.thread_resume_at(
+            CodeThreadResumeInput {
+                scope: binding_scope(),
+                thread_id: "thread-legacy".to_string(),
+                model: None,
+            },
+            &workspace.path().to_string_lossy(),
+        )?;
+        assert_eq!(resumed.history_mode.as_deref(), Some("legacy"));
+        assert_eq!(resumed.thread.turns.len(), 1);
+        assert_eq!(resumed.thread.turns[0].id, "legacy-turn");
+        assert_eq!(resumed.thread.turns[0].items[0]["text"], "preserved");
+        runtime.stop()?;
+
+        let requests = recorded_requests(&request_log_executable)?;
+        assert_eq!(requests_for_method(&requests, "thread/read").len(), 1);
+        let resumes = requests_for_method(&requests, "thread/resume");
+        assert_eq!(resumes.len(), 1);
+        assert!(resumes[0]["params"].get("excludeTurns").is_none());
+        assert!(requests_for_method(&requests, "thread/turns/list").is_empty());
+        Ok(())
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn bridges_delta_approval_interrupt_and_reconnect_contract() -> Result<(), String> {
         let (_directory, executable) = fake_codex(
             r#"#!/bin/sh
 if [ "$1" = "--version" ]; then
-  echo "codex-cli 0.145.0"
+  echo "codex-cli 0.151.0"
   exit 0
 fi
 IFS= read -r initialize
@@ -5932,13 +6251,30 @@ while IFS= read -r line; do
       printf '%s\n' '{"method":"thread/started","params":{"thread":{"id":"thread-1"}}}'
       ;;
     *'"method":"thread/resume"'*)
-      printf '%s\n' "{\"id\":$request_id,\"result\":{\"thread\":{\"id\":\"thread-1\",\"status\":{\"type\":\"idle\"},\"turns\":[{\"id\":\"past-turn\",\"status\":\"completed\",\"items\":[{\"type\":\"agentMessage\",\"text\":\"restored\"}],\"error\":null}]},\"model\":\"gpt-test\",\"reasoningEffort\":\"high\",\"instructionSources\":[]}}"
+      case "$line" in
+        *'"excludeTurns":true'*) ;;
+        *) printf '%s\n' "{\"id\":$request_id,\"error\":{\"code\":-32602,\"message\":\"missing paginated resume flag\"}}"; continue ;;
+      esac
+      printf '%s\n' "{\"id\":$request_id,\"result\":{\"thread\":{\"id\":\"thread-1\",\"historyMode\":\"paginated\",\"status\":{\"type\":\"idle\"},\"turns\":[]},\"model\":\"gpt-test\",\"reasoningEffort\":\"high\",\"instructionSources\":[],\"itemsBackwardsCursor\":\"items-anchor\",\"turnsBackwardsCursor\":\"history-page-1\"}}"
+      ;;
+    *'"method":"thread/turns/list"'*)
+      case "$line" in
+        *'"cursor":"history-page-1"'*)
+          printf '%s\n' "{\"id\":$request_id,\"result\":{\"data\":[{\"id\":\"current-turn\",\"status\":\"completed\",\"items\":[{\"type\":\"agentMessage\",\"text\":\"current\"}],\"itemsView\":\"full\",\"error\":null},{\"id\":\"past-turn\",\"status\":\"completed\",\"items\":[{\"type\":\"agentMessage\",\"text\":\"restored\"}],\"itemsView\":\"full\",\"error\":null}],\"nextCursor\":\"history-page-2\",\"backwardsCursor\":\"ignored\"}}"
+          ;;
+        *'"cursor":"history-page-2"'*)
+          printf '%s\n' "{\"id\":$request_id,\"result\":{\"data\":[{\"id\":\"older-turn-2\",\"status\":\"completed\",\"items\":[],\"itemsView\":\"full\",\"error\":null},{\"id\":\"older-turn-1\",\"status\":\"completed\",\"items\":[],\"itemsView\":\"full\",\"error\":null}],\"nextCursor\":null,\"backwardsCursor\":\"ignored\"}}"
+          ;;
+        *)
+          printf '%s\n' "{\"id\":$request_id,\"error\":{\"code\":-32602,\"message\":\"unexpected history cursor\"}}"
+          ;;
+      esac
       ;;
     *'"method":"thread/name/set"'*)
       printf '%s\n' "{\"id\":$request_id,\"result\":{}}"
       ;;
     *'"method":"thread/read"'*)
-      printf '%s\n' "{\"id\":$request_id,\"result\":{\"thread\":{\"id\":\"thread-1\",\"cwd\":\"/native/stored-root\",\"name\":\"Renamed native contract\"}}}"
+      printf '%s\n' "{\"id\":$request_id,\"result\":{\"thread\":{\"id\":\"thread-1\",\"cwd\":\"/native/stored-root\",\"name\":\"Renamed native contract\",\"historyMode\":\"paginated\"}}}"
       ;;
     *'"method":"turn/start"'*)
       case "$line" in
@@ -6000,8 +6336,17 @@ done
             &uncanonical_workspace_root,
         )?;
         assert_eq!(resumed.thread.id, "thread-1");
-        assert_eq!(resumed.thread.turns.len(), 1);
-        assert_eq!(resumed.thread.turns[0].id, "past-turn");
+        assert_eq!(resumed.thread.turns.len(), 4);
+        assert_eq!(
+            resumed
+                .thread
+                .turns
+                .iter()
+                .map(|turn| turn.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["older-turn-1", "older-turn-2", "past-turn", "current-turn"]
+        );
+        assert_eq!(resumed.thread.turns[2].items[0]["text"], "restored");
         let read = runtime.thread_read("thread-1")?;
         assert_eq!(read.id, "thread-1");
         assert_eq!(read.cwd.as_deref(), Some("/native/stored-root"));
@@ -6105,8 +6450,25 @@ done
         for request in thread_starts.into_iter().chain(thread_resumes) {
             assert_eq!(request["params"]["cwd"], workspace_root);
         }
+        let history_requests = requests_for_method(&requests, "thread/turns/list");
+        assert_eq!(history_requests.len(), 4);
+        for (request, cursor) in history_requests
+            .iter()
+            .zip(["history-page-1", "history-page-2"].into_iter().cycle())
+        {
+            assert_eq!(
+                request["params"],
+                json!({
+                    "threadId": "thread-1",
+                    "cursor": cursor,
+                    "limit": 100,
+                    "sortDirection": "desc",
+                    "itemsView": "full"
+                })
+            );
+        }
         let thread_reads = requests_for_method(&requests, "thread/read");
-        assert_eq!(thread_reads.len(), 2);
+        assert_eq!(thread_reads.len(), 4);
         for thread_read in thread_reads {
             assert_eq!(
                 thread_read["params"],

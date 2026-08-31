@@ -60,7 +60,7 @@ while IFS= read -r line; do
   request_id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
   case "$line" in
 *'"method":"thread/read"'*)
-  printf '{"id":%s,"result":{"thread":{"id":"thread-source","cwd":"%s","source":"appServer","status":{"type":"idle"},"parentThreadId":null,"forkedFromId":null,"turns":[]}}}\n' "$request_id" "$source_root"
+  printf '{"id":%s,"result":{"thread":{"id":"thread-source","cwd":"%s","source":"vscode","status":{"type":"idle"},"parentThreadId":null,"forkedFromId":null,"turns":[]}}}\n' "$request_id" "$source_root"
   ;;
 *'"method":"thread/list"'*)
   printf '{"id":%s,"result":{"data":[],"nextCursor":null}}\n' "$request_id"
@@ -77,7 +77,7 @@ while IFS= read -r line; do
         printf '"}}\n'
         continue
       fi
-  printf '{"id":%s,"result":{"thread":{"id":"thread-child","sessionId":"thread-child","forkedFromId":"thread-source","parentThreadId":null,"ephemeral":false,"cwd":"%s","source":"appServer","threadSource":"%s","status":{"type":"idle"},"turns":[]},"model":"gpt-test","reasoningEffort":"high","instructionSources":[],"cwd":"%s"}}\n' "$request_id" "$cwd" "$marker" "$cwd"
+  printf '{"id":%s,"result":{"thread":{"id":"thread-child","sessionId":"thread-child","forkedFromId":"thread-source","parentThreadId":null,"ephemeral":false,"cwd":"%s","source":"vscode","threadSource":"%s","status":{"type":"idle"},"turns":[]},"model":"gpt-test","reasoningEffort":"high","instructionSources":[],"cwd":"%s"}}\n' "$request_id" "$cwd" "$marker" "$cwd"
   ;;
 *)
   printf '{"id":%s,"error":{"code":-32601,"message":"unexpected method"}}\n' "$request_id"
@@ -125,7 +125,7 @@ printf '%s\n' '{"id":1,"result":{"userAgent":"codex-test","codexHome":"/tmp/code
 IFS= read -r initialized
 : > "$0.requests"
 thread_json() {
-  printf '{"id":"thread-child","sessionId":"thread-child","forkedFromId":"thread-source","parentThreadId":null,"ephemeral":false,"cwd":"%s","source":"appServer","threadSource":"%s","status":{"type":"idle"},"turns":[]}' "$destination_root" "$thread_source"
+  printf '{"id":"thread-child","sessionId":"thread-child","forkedFromId":"thread-source","parentThreadId":null,"ephemeral":false,"cwd":"%s","source":"vscode","threadSource":"%s","status":{"type":"idle"},"turns":[]}' "$destination_root" "$thread_source"
 }
 while IFS= read -r line; do
   printf '%s\n' "$line" >> "$0.requests"
@@ -303,6 +303,9 @@ fn fork_response_requires_exact_id_ancestry_roots_marker_and_presence() -> Resul
         session_source: Some(json!("appServer")),
         response_cwd: Some(root.clone()),
         ephemeral_present: true,
+        history_mode: None,
+        items_backwards_cursor: None,
+        turns_backwards_cursor: None,
     };
     validate_fork_opened(
         &opened,
@@ -335,6 +338,64 @@ fn fork_response_requires_exact_id_ancestry_roots_marker_and_presence() -> Resul
         "thread-source",
         &root,
         "67f11a1d-0274-4d40-9b0c-e406e51c64fb"
+    )
+    .is_err());
+    Ok(())
+}
+
+#[test]
+fn fork_response_accepts_0_151_vscode_source_and_rejects_unrelated_sources() -> Result<(), String> {
+    let root = tempfile::tempdir().map_err(|error| error.to_string())?;
+    let root = root
+        .path()
+        .canonicalize()
+        .map_err(|error| error.to_string())?
+        .to_string_lossy()
+        .into_owned();
+    let mut opened = crate::code_workspace::CodeThreadRpcOpenResult {
+        thread: summary(&root, "thread-child", "thread-source"),
+        instruction_sources: Vec::new(),
+        model: "gpt-test".to_string(),
+        reasoning_effort: Some("high".to_string()),
+        thread_source: Some("schoolx-code/67f11a1d-0274-4d40-9b0c-e406e51c64fb".to_string()),
+        session_source: Some(json!("vscode")),
+        response_cwd: Some(root.clone()),
+        ephemeral_present: true,
+        history_mode: Some("paginated".to_string()),
+        items_backwards_cursor: None,
+        turns_backwards_cursor: None,
+    };
+    validate_fork_opened(
+        &opened,
+        "thread-source",
+        &root,
+        "67f11a1d-0274-4d40-9b0c-e406e51c64fb",
+    )?;
+
+    for unrelated in [
+        json!("cli"),
+        json!("exec"),
+        json!("unknown"),
+        json!({
+            "custom": "vscode"
+        }),
+    ] {
+        opened.session_source = Some(unrelated);
+        let error = validate_fork_opened(
+            &opened,
+            "thread-source",
+            &root,
+            "67f11a1d-0274-4d40-9b0c-e406e51c64fb",
+        )
+        .expect_err("unrelated Codex source must remain rejected");
+        assert!(error.contains("appServer or vscode"));
+    }
+    opened.session_source = None;
+    assert!(validate_fork_opened(
+        &opened,
+        "thread-source",
+        &root,
+        "67f11a1d-0274-4d40-9b0c-e406e51c64fb",
     )
     .is_err());
     Ok(())

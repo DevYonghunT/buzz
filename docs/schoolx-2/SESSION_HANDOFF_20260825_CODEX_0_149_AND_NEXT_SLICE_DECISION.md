@@ -1,13 +1,15 @@
-# SchoolX Code Codex 0.149 계약·운영 증거와 다음 slice decision gate
+# [역사 기록] SchoolX Code Codex 0.149 계약·운영 증거와 다음 slice decision gate
 
 기준일: **2026-08-25**
 
-문서 상태: **현재 Codex/제품 handoff + Phase 3 후속 구현 승인 대기**. 이 세션은
+문서 상태: **2026-08-25 당시의 Codex/제품 handoff를 보존한 역사 기록**. 현재
+지원 계약은 [`SCHOOLX_CODE_DESIGN.md`](SCHOOLX_CODE_DESIGN.md)의 Codex 0.151 절과
+checked-in 0.151 manifest/archive/wire 및 native contract test를 우선한다. 이 세션은
 제품 코드를 변경하지 않았다. Codex 0.149 계약, 제품 진입점, 수동 운영 결과,
 release 잔여 gate를 정리하고 다음 독립 slice 하나만 추천한다. 추천 기능은
 사용자 승인 전에는 구현하지 않는다.
 
-현재 상태를 읽는 순서는 다음과 같다.
+2026-08-25 당시 상태를 읽는 순서는 다음과 같다.
 
 1. Codex와 다음 제품 slice: 이 문서
 2. 전체 SchoolX Code 설계: [`SCHOOLX_CODE_DESIGN.md`](SCHOOLX_CODE_DESIGN.md)
@@ -22,7 +24,8 @@ release 잔여 gate를 정리하고 다음 독립 slice 하나만 추천한다. 
 
 2026-08-14의 0.145 handoff들은 당시 계약을 보존하는 역사적 기록이다. 이 문서가
 그 내용을 삭제하거나 당시 판정을 소급 변경하지 않는다. 다만 현재 지원과
-검증 상태를 판단할 때는 이 문서와 checked-in 0.149 fixture/test가 우선한다.
+검증 상태를 판단할 때는 당시에는 이 문서와 checked-in 0.149 fixture/test가
+우선했다. 현재 판정에는 이 문서를 사용하지 않는다.
 
 ## 1. 증거 등급과 사용 원칙
 
@@ -42,18 +45,18 @@ OpenAI 공식 문서는 `thread/read`가 저장된 thread를 resume/subscribe하
 
 ## 2. 현재 Codex CLI 계약
 
-### 2.1 지원 상태를 정확히 표현하는 방법
+### 2.1 2026-08-25 당시 지원 상태를 정확히 표현하는 방법
 
-| 항목 | 현재 판정 |
+| 항목 | 당시 판정 |
 |---|---|
-| 최신 exact audited snapshot | **`codex-cli 0.149.0`** |
+| 당시 최신 exact audited snapshot | **`codex-cli 0.149.0`** |
 | Runtime admission | `0.145.<numeric patch>` 또는 `0.149.<numeric patch>`, prerelease/build suffix 없음 |
 | `0.145.0` 의미 | 최초 exact fixture이자 역사적 compatibility baseline; runtime 호환 범위에는 계속 남음 |
 | 모든 numeric patch의 schema 동일성 | **증명하지 않음**. Exact schema 증명은 0.145.0과 0.149.0 snapshot에 한정 |
 | 0.146–0.148, 0.150+ | Startup 전에 unsupported로 거부 |
 
-따라서 “현재 검증 버전은 0.149.0”은 맞지만 “0.145는 더 이상 지원하지 않는다”는
-표현은 현재 source와 모순이다. 반대로 numeric patch family admission을 근거로 모든
+따라서 당시에는 “검증 버전은 0.149.0”이 맞지만 “0.145는 더 이상 지원하지 않는다”는
+표현은 당시 source와 모순이었다. 반대로 numeric patch family admission을 근거로 모든
 0.149 patch의 schema가 검증됐다고 표현해서도 안 된다.
 
 근거:
@@ -62,7 +65,7 @@ OpenAI 공식 문서는 `thread/read`가 저장된 thread를 resume/subscribe하
   [`codex-0.149.0-schema-manifest.json`](../../desktop/src-tauri/src/code_workspace/fixtures/codex-0.149.0-schema-manifest.json)
 - representative request/response/notification:
   [`codex-0.149.0-wire.json`](../../desktop/src-tauri/src/code_workspace/fixtures/codex-0.149.0-wire.json)
-- 두 minor family만 admit하는 startup gate:
+- 당시 두 minor family만 admit하던 startup gate:
   [`discovery.rs`](../../desktop/src-tauri/src/code_workspace/discovery.rs)
 - schema hash, 0.145→0.149 delta, native builder/parser와 notification/approval 대조:
   [`contract_tests.rs`](../../desktop/src-tauri/src/code_workspace/contract_tests.rs)

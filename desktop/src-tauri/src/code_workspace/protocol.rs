@@ -14,6 +14,7 @@ const MAX_CURSOR_BYTES: usize = 16 * 1024;
 const MAX_THREAD_NAME_SCALARS: usize = 128;
 const MAX_THREAD_NAME_BYTES: usize = 512;
 pub(crate) const CODE_RECOVERY_THREAD_PAGE_LIMIT: u32 = 100;
+pub(crate) const CODE_THREAD_HISTORY_PAGE_LIMIT: u32 = 100;
 const CODE_THREAD_SOURCE_PREFIX: &str = "schoolx-code/";
 
 static SENSITIVE_ENV_VALUES: OnceLock<Vec<String>> = OnceLock::new();
@@ -404,6 +405,22 @@ impl CodeThreadResumeInput {
     }
 }
 
+/// Enable the exact Codex 0.151 metadata-only resume request before native
+/// bounded turn pagination. Callers must gate this by the admitted runtime
+/// generation because 0.145/0.149 do not expose the field.
+pub(crate) fn enable_paginated_thread_resume(params: &mut Value) -> Result<(), String> {
+    let object = params
+        .as_object_mut()
+        .ok_or_else(|| "Codex thread resume params must be an object".to_string())?;
+    if object
+        .insert("excludeTurns".to_string(), json!(true))
+        .is_some()
+    {
+        return Err("Codex thread resume params already contained excludeTurns".to_string());
+    }
+    Ok(())
+}
+
 /// Exact persisted scope whose bound SchoolX Code threads should be listed.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -707,6 +724,8 @@ struct WireThread {
     #[serde(default)]
     thread_source: Option<String>,
     #[serde(default)]
+    history_mode: Option<String>,
+    #[serde(default)]
     turns: Vec<WireTurnSnapshot>,
 }
 
@@ -724,6 +743,8 @@ struct WireTurnSnapshot {
     status: String,
     #[serde(default)]
     items: Vec<Value>,
+    #[serde(default, rename = "itemsView")]
+    items_view: Option<String>,
     #[serde(default)]
     error: Option<Value>,
 }
@@ -739,6 +760,18 @@ struct WireThreadOpenResult {
     instruction_sources: Vec<String>,
     #[serde(default)]
     cwd: Option<String>,
+    #[serde(default)]
+    items_backwards_cursor: Option<String>,
+    #[serde(default)]
+    turns_backwards_cursor: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WireThreadTurnsListResult {
+    data: Vec<WireTurnSnapshot>,
+    #[serde(default)]
+    next_cursor: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -783,6 +816,15 @@ pub(crate) struct CodeThreadRpcOpenResult {
     pub(crate) session_source: Option<Value>,
     pub(crate) response_cwd: Option<String>,
     pub(crate) ephemeral_present: bool,
+    pub(crate) history_mode: Option<String>,
+    pub(crate) items_backwards_cursor: Option<String>,
+    pub(crate) turns_backwards_cursor: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct CodeThreadTurnsPage {
+    pub(crate) data: Vec<CodeTurnSnapshot>,
+    pub(crate) next_cursor: Option<String>,
 }
 
 /// One app-server thread returned while reconciling a native start attempt.
@@ -821,8 +863,16 @@ pub(crate) fn parse_thread_open(value: Value) -> Result<CodeThreadRpcOpenResult,
     let thread_source = result.thread.thread_source.clone();
     let session_source = result.thread.source.clone();
     let ephemeral_present = result.thread.ephemeral.is_some();
+    let history_mode = result.thread.history_mode.clone();
     if let Some(thread_source) = thread_source.as_deref() {
         validate_id("thread source", thread_source)?;
+    }
+    validate_history_mode(history_mode.as_deref())?;
+    if let Some(cursor) = result.items_backwards_cursor.as_deref() {
+        validate_cursor(cursor)?;
+    }
+    if let Some(cursor) = result.turns_backwards_cursor.as_deref() {
+        validate_cursor(cursor)?;
     }
     Ok(CodeThreadRpcOpenResult {
         thread: normalize_thread(result.thread)?,
@@ -833,17 +883,81 @@ pub(crate) fn parse_thread_open(value: Value) -> Result<CodeThreadRpcOpenResult,
         session_source,
         response_cwd: result.cwd,
         ephemeral_present,
+        history_mode,
+        items_backwards_cursor: result.items_backwards_cursor,
+        turns_backwards_cursor: result.turns_backwards_cursor,
     })
 }
 
-/// Build the audited Codex 0.145/0.149 `thread/read` request used to hydrate
+/// Build the audited Codex 0.151 backwards-history request. Earlier supported
+/// generations never return a turns cursor, so the runtime calls this only
+/// after a 0.151 resume response opts into paginated history.
+pub(crate) fn thread_turns_list_params(thread_id: &str, cursor: &str) -> Result<Value, String> {
+    validate_id("thread", thread_id)?;
+    validate_cursor(cursor)?;
+    Ok(json!({
+        "threadId": thread_id,
+        "cursor": cursor,
+        "limit": CODE_THREAD_HISTORY_PAGE_LIMIT,
+        "sortDirection": "desc",
+        "itemsView": "full"
+    }))
+}
+
+pub(crate) fn parse_thread_turns_list(value: Value) -> Result<CodeThreadTurnsPage, String> {
+    let result: WireThreadTurnsListResult = serde_json::from_value(value)
+        .map_err(|error| format!("invalid Codex thread turns response: {error}"))?;
+    if result.data.len() > CODE_THREAD_HISTORY_PAGE_LIMIT as usize {
+        return Err(format!(
+            "Codex thread turns page exceeded the {CODE_THREAD_HISTORY_PAGE_LIMIT}-turn limit"
+        ));
+    }
+    if result
+        .data
+        .iter()
+        .any(|turn| !matches!(turn.items_view.as_deref(), None | Some("full")))
+    {
+        return Err("Codex thread turns page did not include full item history".to_string());
+    }
+    let data = result
+        .data
+        .into_iter()
+        .map(normalize_turn)
+        .collect::<Result<Vec<_>, _>>()?;
+    if let Some(cursor) = result.next_cursor.as_deref() {
+        validate_cursor(cursor)?;
+    }
+    Ok(CodeThreadTurnsPage {
+        data,
+        next_cursor: result.next_cursor,
+    })
+}
+
+/// Build the audited Codex 0.145/0.149/0.151 `thread/read` request used to hydrate
 /// one thread selected from the native binding index.
 pub(crate) fn thread_read_params(thread_id: &str) -> Result<Value, String> {
     validate_id("thread", thread_id)?;
     Ok(json!({ "threadId": thread_id, "includeTurns": false }))
 }
 
-/// Build the audited Codex 0.145/0.149 exact-root list request used only for
+/// Parse only the immutable history mode needed to choose the exact 0.151
+/// resume contract without materializing any turns during the preflight read.
+pub(crate) fn parse_thread_history_mode(
+    value: Value,
+    expected_thread_id: &str,
+) -> Result<Option<String>, String> {
+    validate_id("thread", expected_thread_id)?;
+    let result: WireThreadReadResult = serde_json::from_value(value)
+        .map_err(|error| format!("invalid Codex thread history response: {error}"))?;
+    validate_id("thread", &result.thread.id)?;
+    if result.thread.id != expected_thread_id {
+        return Err("Codex returned a different thread during history preflight".to_string());
+    }
+    validate_history_mode(result.thread.history_mode.as_deref())?;
+    Ok(result.thread.history_mode)
+}
+
+/// Build the audited Codex 0.145/0.149/0.151 exact-root list request used only for
 /// native start recovery. Codex 0.149 reports SchoolX app-server sessions as
 /// `vscode`, while 0.145 and the shared schema use `appServer`.
 pub(crate) fn recovery_thread_list_params(
@@ -952,7 +1066,7 @@ pub(crate) fn parse_thread_read(value: Value) -> Result<CodeThreadSummary, Strin
     normalize_thread(result.thread)
 }
 
-/// Validate the exact empty result frozen for Codex 0.145/0.149 `thread/name/set`.
+/// Validate the exact empty result frozen for Codex 0.145/0.149/0.151 `thread/name/set`.
 pub(crate) fn parse_thread_name_set(value: Value) -> Result<(), String> {
     match value.as_object() {
         Some(result) if result.is_empty() => Ok(()),
@@ -962,16 +1076,11 @@ pub(crate) fn parse_thread_name_set(value: Value) -> Result<(), String> {
 
 fn normalize_thread(thread: WireThread) -> Result<CodeThreadSummary, String> {
     validate_id("thread", &thread.id)?;
-    let mut turns = Vec::with_capacity(thread.turns.len());
-    for turn in thread.turns {
-        validate_id("turn", &turn.id)?;
-        turns.push(CodeTurnSnapshot {
-            id: turn.id,
-            status: turn.status,
-            items: turn.items.into_iter().map(redact_protocol_value).collect(),
-            error: turn.error.map(redact_protocol_value),
-        });
-    }
+    let turns = thread
+        .turns
+        .into_iter()
+        .map(normalize_turn)
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(CodeThreadSummary {
         id: thread.id,
         session_id: thread.session_id,
@@ -987,6 +1096,24 @@ fn normalize_thread(thread: WireThread) -> Result<CodeThreadSummary, String> {
         status: thread.status.map(redact_protocol_value),
         turns,
     })
+}
+
+fn normalize_turn(turn: WireTurnSnapshot) -> Result<CodeTurnSnapshot, String> {
+    validate_id("turn", &turn.id)?;
+    Ok(CodeTurnSnapshot {
+        id: turn.id,
+        status: turn.status,
+        items: turn.items.into_iter().map(redact_protocol_value).collect(),
+        error: turn.error.map(redact_protocol_value),
+    })
+}
+
+fn validate_history_mode(history_mode: Option<&str>) -> Result<(), String> {
+    if history_mode.is_none_or(|history_mode| matches!(history_mode, "legacy" | "paginated")) {
+        Ok(())
+    } else {
+        Err("Codex thread reported an unsupported history mode".to_string())
+    }
 }
 
 pub(crate) fn parse_turn_start(value: Value) -> Result<CodeTurnSummary, String> {
@@ -1381,7 +1508,7 @@ mod tests {
             model: None,
         };
 
-        let params = input.rpc_params("/native/stored-root")?;
+        let mut params = input.rpc_params("/native/stored-root")?;
 
         assert_eq!(params["threadId"], "thread-1");
         assert_eq!(params["cwd"], "/native/stored-root");
@@ -1390,6 +1517,91 @@ mod tests {
         assert!(params.get("scope").is_none());
         assert!(params.get("workspaceRoot").is_none());
         assert!(params.get("runtimeWorkspaceRoots").is_none());
+        assert!(params.get("excludeTurns").is_none());
+        enable_paginated_thread_resume(&mut params)?;
+        assert_eq!(params["excludeTurns"], true);
+        assert!(enable_paginated_thread_resume(&mut params).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn parses_and_builds_the_0_151_paginated_turn_history_contract() -> Result<(), String> {
+        let opened = parse_thread_open(json!({
+            "thread": {
+                "id": "thread-1",
+                "historyMode": "paginated",
+                "turns": [{
+                    "id": "turn-new",
+                    "status": "completed",
+                    "items": []
+                }]
+            },
+            "model": "gpt-test",
+            "itemsBackwardsCursor": "items-anchor",
+            "turnsBackwardsCursor": "turns-anchor"
+        }))?;
+        assert_eq!(opened.history_mode.as_deref(), Some("paginated"));
+        assert_eq!(
+            opened.items_backwards_cursor.as_deref(),
+            Some("items-anchor")
+        );
+        assert_eq!(
+            opened.turns_backwards_cursor.as_deref(),
+            Some("turns-anchor")
+        );
+        assert_eq!(
+            parse_thread_history_mode(
+                json!({
+                    "thread": {"id": "thread-1", "historyMode": "paginated"}
+                }),
+                "thread-1"
+            )?
+            .as_deref(),
+            Some("paginated")
+        );
+        assert_eq!(
+            thread_turns_list_params("thread-1", "turns-anchor")?,
+            json!({
+                "threadId": "thread-1",
+                "cursor": "turns-anchor",
+                "limit": 100,
+                "sortDirection": "desc",
+                "itemsView": "full"
+            })
+        );
+
+        let page = parse_thread_turns_list(json!({
+            "data": [{
+                "id": "turn-old",
+                "status": "completed",
+                "items": [{"id": "item-old", "type": "agentMessage", "text": "old"}],
+                "itemsView": "full",
+                "error": null
+            }],
+            "nextCursor": "turns-next",
+            "backwardsCursor": "ignored"
+        }))?;
+        assert_eq!(page.data[0].id, "turn-old");
+        assert_eq!(page.data[0].items[0]["id"], "item-old");
+        assert_eq!(page.next_cursor.as_deref(), Some("turns-next"));
+
+        assert!(parse_thread_turns_list(json!({
+            "data": [{
+                "id": "turn-summary",
+                "status": "completed",
+                "items": [],
+                "itemsView": "summary"
+            }],
+            "nextCursor": null
+        }))
+        .is_err());
+
+        assert!(thread_turns_list_params("thread-1", " bad").is_err());
+        assert!(parse_thread_open(json!({
+            "thread": {"id": "thread-1", "historyMode": "future"},
+            "model": "gpt-test"
+        }))
+        .is_err());
         Ok(())
     }
 
